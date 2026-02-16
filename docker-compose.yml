@@ -1,0 +1,84 @@
+services:
+
+  # Network proxy to allow agents access only specified domains
+  #   Should be started for every agent
+  proxy:
+    profiles:
+      - claude
+      - gemini
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
+    volumes:
+      - ./proxy/tinyproxy.conf:/etc/tinyproxy/tinyproxy.conf:ro
+      - ./proxy/allowed-domains.txt:/etc/tinyproxy/allowed-domains.txt:ro
+    networks:
+      - sandbox
+      - internet
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8888"]
+      interval: 2s
+      timeout: 2s
+      retries: 5
+
+  # Claude Code CLI agent
+  claude:
+    profiles:
+      - claude
+    build:
+      context: .
+      dockerfile: agents/claude/Dockerfile
+    command: ["claude", "--dangerously-skip-permissions"]
+    volumes:
+      # mount claude user config
+      - ${HOME}/.claude:/home/claude/.claude
+      - ${HOME}/.claude.json:/home/claude/.claude.json
+      # mount project
+      - ${PROJECT_DIR:-.}:/workspace
+      # hide secret files
+      - /dev/null:/workspace/.env
+      - /dev/null:/workspace/.env.local
+      # todo lho this needs to be extendable per project
+      # hide secret folders
+      - /workspace/config/properties
+      - /workspace/bridge/config/properties
+      - /workspace/edee/config/properties
+      - /workspace/http-client
+    environment:
+      # pass claude code login token from user env
+      - CLAUDE_CODE_OAUTH_TOKEN
+      # setup where the inside app should direct network requests
+      - HTTP_PROXY=http://proxy:8888
+      - HTTPS_PROXY=http://proxy:8888
+      - http_proxy=http://proxy:8888
+      - https_proxy=http://proxy:8888
+      # do not proxy localhost network requests
+      - NO_PROXY=localhost,127.0.0.1
+      - no_proxy=localhost,127.0.0.1
+    depends_on:
+      proxy:
+        condition: service_healthy
+    networks:
+      - sandbox
+
+  # todo lho example of other agents, implement
+  # gemini:
+  #   profiles:
+  #     - gemini
+  #   build:
+  #     context: .
+  #     dockerfile: agents/gemini/Dockerfile
+  #   depends_on:
+  #     proxy:
+  #       condition: service_healthy
+  #   networks:
+  #     - sandbox
+
+networks:
+  # network for agents to not be able to access internet directly, but to force them to proxy all requests
+  sandbox:
+    internal: true
+  # network for proxy container with access to internet
+  internet:
+    driver: bridge
