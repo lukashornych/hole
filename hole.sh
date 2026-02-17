@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 HOLE_DATA_DIR="$HOME/.hole"
 VALID_AGENTS=("claude" "gemini")
-VALID_COMMANDS=("start" "destroy" "help")
+VALID_COMMANDS=("start" "help")
 
 # Show help message
 show_help() {
@@ -18,8 +18,7 @@ Agents:
   gemini    Gemini agent (experimental)
 
 Commands:
-  start     Create a new or start an existing sandbox and attach to the agent CLI
-  destroy   Completely tear down sandbox and remove containers
+  start     Create a sandbox, attach to the agent CLI, and destroy on exit
   help      Show this help message
 
 Options:
@@ -30,10 +29,8 @@ Examples:
   hole claude start .
   hole claude start /path/to/project
   hole claude start . --dump-network-access
-  hole claude destroy .
 
-After exiting the agent CLI, the agent container is automatically removed.
-The proxy container remains running. Use 'destroy' to completely tear down the sandbox.
+The sandbox is fully destroyed when you exit the agent CLI.
 EOF
 }
 
@@ -218,37 +215,17 @@ cmd_start() {
     echo "Network access log written to: $log_file"
   fi
 
-  # Stop the sandbox after user exits
-  "${COMPOSE_CMD[@]}" stop
-
-  echo ""
-  echo "Exited $agent CLI."
-  echo "Sandbox stopped. Run 'hole $agent start $project_dir' to start the existing sandbox again, or run 'hole $agent destroy $project_dir' to destroy the sandbox."
-}
-
-# Destroy command: completely tear down sandbox
-cmd_destroy() {
-  local agent=$1
-  local project_dir=$2
-
-  # Load override file path and build compose command
-  local compose_dir="$HOLE_DATA_DIR/projects/$COMPOSE_PROJECT_NAME"
-  PROJECT_COMPOSE_FILE="$compose_dir/docker-compose.yml"
-  build_compose_cmd
-
-  echo "Destroying sandbox for: $project_dir"
-  echo "Project name: $COMPOSE_PROJECT_NAME"
-  echo ""
-
+  # Destroy the sandbox after user exits
   "${COMPOSE_CMD[@]}" down --rmi local --remove-orphans
 
   # Clean up per-project compose override
+  local compose_dir="$HOLE_DATA_DIR/projects/$COMPOSE_PROJECT_NAME"
   if [[ -d "$compose_dir" ]]; then
     rm -rf "$compose_dir"
   fi
 
   echo ""
-  echo "Sandbox destroyed."
+  echo "Exited $agent CLI. Sandbox destroyed."
 }
 
 # Main entry point
@@ -289,7 +266,6 @@ main() {
   # Dispatch to command handler
   case "$command" in
     start)   cmd_start "$agent" "$project_dir" "$dump_network_access" ;;
-    destroy) cmd_destroy "$agent" "$project_dir" ;;
     help)    show_help ;;
     *)       echo "Unknown command: $command" >&2; exit 1 ;;
   esac

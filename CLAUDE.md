@@ -37,7 +37,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 - Project directory mounted read-write at /workspace
 - User's Claude config (~/.claude, ~/.claude.json) mounted to persist authentication
 - Secret files/folders hidden by mounting /dev/null over them (e.g., .env, .env.local)
-- Hardcoded secret folder exclusions (docker-compose.yml:43-47) - needs to be made extensible per project
+- Per-project exclusions configured via `.hole/settings.json`
 
 **Agent runs as non-root user:**
 - User `claude` created in container (agents/claude/Dockerfile:11)
@@ -66,10 +66,7 @@ Or from within a project directory:
 ./hole.sh claude start .
 ```
 
-**Destroy a sandbox:**
-```bash
-./hole.sh claude destroy /path/to/project
-```
+The sandbox is fully destroyed when you exit the agent CLI.
 
 **Get help:**
 ```bash
@@ -85,19 +82,17 @@ Or from within a project directory:
    - COMPOSE_PROJECT_NAME for unique container naming based on absolute path
    - Proxy dependency (waits for healthy status)
    - Allocates TTY and connects stdin for interactive CLI
-4. **Agent container removed on exit** - proxy remains running until `destroy` command
+4. **Full teardown on exit** - all containers, networks, and per-project config are removed when the agent CLI exits
 
 ### Key Behavior
 
-- **Clean sandbox creation**: Each `start` creates a fresh agent container
-- **Agent auto-cleanup**: Agent container is automatically removed on CLI exit
-- **Persistent proxy**: Proxy container continues running until explicit `destroy`
+- **Fresh sandbox each time**: Each `start` creates a new sandbox from scratch
+- **Auto-destroy on exit**: When you exit the agent CLI, the entire sandbox (containers, networks, images, per-project config) is automatically destroyed
 - **Unique naming**: Project names based on absolute path prevent collisions between projects
-- **Explicit cleanup**: Use `destroy` command to tear down proxy and remove all resources
 
 ## Key Files
 
-- `hole.sh` - Unified CLI tool for managing sandboxes (start, destroy commands)
+- `hole.sh` - CLI tool for managing sandboxes (start command)
 - `docker-compose.yml` - Service orchestration with profiles (claude, gemini)
 - `agents/claude/Dockerfile` - Claude agent image (Ubuntu 22.04 + curl, git, ripgrep, Claude CLI)
 - `proxy/Dockerfile` - Proxy image (Alpine + tinyproxy)
@@ -157,7 +152,7 @@ Per-project domain whitelists are configured via the `network.domainWhitelist` a
 - **Format**: Plain domain names (e.g., `registry.npmjs.org`). Dots are auto-escaped for tinyproxy's regex filter.
 - **Merge strategy**: Default domains from `proxy/allowed-domains.txt` are always included. Project-specific domains are appended.
 - **Storage**: The merged whitelist file is written to `~/.hole/projects/<project-name>/tinyproxy-domain-whitelist.txt` and bind-mounted into the proxy container.
-- **Cleanup**: The whitelist file is removed when the sandbox is destroyed.
+- **Cleanup**: The whitelist file is removed when the sandbox is destroyed on exit.
 
 Example `.hole/settings.json`:
 ```json

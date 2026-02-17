@@ -23,11 +23,11 @@ export PATH="$HOME/.local/bin:$PATH"
 
 Run the same install command again — the installer detects an existing installation, removes it, and reinstalls from the latest `main`.
 
-_Note: any existing sandboxes must be destroyed manually before updating._
+_Note: any running sandboxes should be exited before updating._
 
 ### Uninstall
 
-Destroy any running sandboxes first (`hole {agent} destroy {project path}`), then run:
+Exit any running sandboxes first (sandboxes are automatically destroyed on exit), then run:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/lukashornych/hole/main/uninstall.sh | bash
@@ -37,16 +37,12 @@ wget -qO- https://raw.githubusercontent.com/lukashornych/hole/main/uninstall.sh 
 
 ## Sandboxes
 
-Create a new (or start an existing) agent sandbox in the current directory:
+Create an agent sandbox in the current directory:
 ```shell
 hole {agent} start .
 ```
 
-Destroy the existing agent sandbox for the current directory:
-
-```shell
-hole {agent} destroy .
-```
+The sandbox is fully destroyed when you exit the agent CLI.
 
 ### Configuration
 
@@ -94,7 +90,7 @@ To see which domains the agent accessed during a session, pass the `--dump-netwo
 hole claude start . --dump-network-access
 ```
 
-After the agent exits, a `claude-network-access.log` file is written to the project directory containing a sorted list of distinct domains (both allowed and denied requests). The log captures all traffic since the proxy was started — use `destroy` and re-`start` for a clean log.
+After the agent exits, a `claude-network-access.log` file is written to the project directory containing a sorted list of distinct domains (both allowed and denied requests).
 
 ## Agents
 
@@ -132,14 +128,10 @@ don't have to login every time you create a new sandbox.
 
 #### Use
 
-Create a new (or start an existing) Claude sandbox in the current directory:
+Create a Claude sandbox in the current directory:
 ```shell
 hole claude start .
 ```
 
-Destroy the existing Claude sandbox for the current directory:
-
-```shell
-hole claude destroy .
-```
+The sandbox is fully destroyed when you exit the CLI.
 
