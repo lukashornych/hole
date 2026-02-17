@@ -171,12 +171,11 @@ Example `.hole/settings.json`:
 
 ### Container Naming
 
-Project name derived from sanitized absolute path: `hole-$(sanitized_absolute_path)`
+Project name derived from sanitized absolute path plus a random instance ID: `hole-$(sanitized_absolute_path)-$(agent)-$(instance_id)`
 
-Example: `/Users/lho/www/oss/hole` → `hole-users-lho-www-oss-hole`
+Example: `/Users/lho/www/oss/hole` with claude agent → `hole-users-lho-www-oss-hole-claude-a1b2c3`
 
 This ensures:
-- Multiple projects can have sandboxes simultaneously
-- Same project directory always gets same container name (deterministic based on absolute path)
+- Multiple sandboxes can run simultaneously for the same project
 - Clean separation between different sandboxes
 - No collisions between projects with same directory name in different locations

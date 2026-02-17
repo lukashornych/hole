@@ -23,7 +23,7 @@ Commands:
 
 Options:
   --dump-network-access   After the agent exits, write distinct accessed domains
-                          to {agent}-network-access.log in the project directory
+                          to {agent}-network-access-{id}.log in the project directory
 
 Examples:
   hole claude start .
@@ -87,6 +87,11 @@ sanitize_path_to_project_name() {
   local path="$1"
   # Remove leading slashes, replace / with -, lowercase, keep only valid chars
   echo "hole-$(echo "$path" | sed 's/^\/*//' | tr '/' '-' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
+}
+
+# Generate a random 6-character hex instance ID
+generate_instance_id() {
+  LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 6
 }
 
 # Generate per-project docker-compose override file from .hole/settings.json
@@ -206,7 +211,7 @@ cmd_start() {
 
   # Dump network access log if requested
   if [[ "$dump_network_access" == true ]]; then
-    local log_file="$project_dir/$agent-network-access.log"
+    local log_file="$project_dir/$agent-network-access-$INSTANCE_ID.log"
     docker logs "$COMPOSE_PROJECT_NAME-proxy-1" 2>&1 | \
       grep -oE 'CONNECT [a-zA-Z0-9._-]+:[0-9]+|filtered url "[^"]+"' | \
       sed 's/CONNECT //; s/:[0-9]*$//; s/^filtered url "//; s/"$//' | \
@@ -261,7 +266,8 @@ main() {
 
   # Generate project name and export environment
   export PROJECT_DIR="$project_dir"
-  export COMPOSE_PROJECT_NAME="$(sanitize_path_to_project_name "$project_dir")-$agent"
+  INSTANCE_ID=$(generate_instance_id)
+  export COMPOSE_PROJECT_NAME="$(sanitize_path_to_project_name "$project_dir")-$agent-$INSTANCE_ID"
 
   # Dispatch to command handler
   case "$command" in

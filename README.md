@@ -42,7 +42,7 @@ Create an agent sandbox in the current directory:
 hole {agent} start .
 ```
 
-The sandbox is fully destroyed when you exit the agent CLI.
+The sandbox is fully destroyed when you exit the agent CLI. Multiple sandboxes can run simultaneously for the same project — each gets a unique instance ID.
 
 ### Configuration
 
@@ -90,7 +90,7 @@ To see which domains the agent accessed during a session, pass the `--dump-netwo
 hole claude start . --dump-network-access
 ```
 
-After the agent exits, a `claude-network-access.log` file is written to the project directory containing a sorted list of distinct domains (both allowed and denied requests).
+After the agent exits, a `claude-network-access-{id}.log` file is written to the project directory containing a sorted list of distinct domains (both allowed and denied requests). The `{id}` is the unique instance ID assigned to that sandbox session.
 
 ## Agents
 
