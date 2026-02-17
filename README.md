@@ -23,6 +23,8 @@ export PATH="$HOME/.local/bin:$PATH"
 
 Run the same install command again — the installer detects an existing installation, removes it, and reinstalls from the latest `main`.
 
+_Note: any existing sandboxes must be destroyed manually before updating._
+
 ### Uninstall
 
 Destroy any running sandboxes first (`hole {agent} destroy {project path}`), then run:

@@ -168,7 +168,7 @@ main() {
 
   # Generate project name and export environment
   export PROJECT_DIR="$project_dir"
-  export COMPOSE_PROJECT_NAME=$(sanitize_path_to_project_name "$project_dir")
+  export COMPOSE_PROJECT_NAME="$(sanitize_path_to_project_name "$project_dir")-$agent"
 
   # Dispatch to command handler
   case "$command" in
