@@ -33,10 +33,10 @@ services:
       - ${HOME}/.claude.json:/home/claude/.claude.json
       # mount project
       - ${PROJECT_DIR:-.}:/workspace
-      # hide secret files
-      - /dev/null:/workspace/.env
-      - /dev/null:/workspace/.env.local
       # todo lho this needs to be extendable per project
+      # hide secret files
+#      - /dev/null:/workspace/.env
+#      - /dev/null:/workspace/.env.local
       # hide secret folders
       - /workspace/config/properties
       - /workspace/bridge/config/properties
