@@ -86,6 +86,16 @@ By default, agents can only reach a small set of domains required for their oper
 
 Use plain domain names — dots are auto-escaped for the proxy filter. Default domains are always included; project-specific domains are appended on top.
 
+#### Network access log
+
+To see which domains the agent accessed during a session, pass the `--dump-network-access` flag:
+
+```shell
+hole claude start . --dump-network-access
+```
+
+After the agent exits, a `claude-network-access.log` file is written to the project directory containing a sorted list of distinct domains (both allowed and denied requests). The log captures all traffic since the proxy was started — use `destroy` and re-`start` for a clean log.
+
 ## Agents
 
 ### Claude

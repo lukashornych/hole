@@ -11,7 +11,7 @@ VALID_COMMANDS=("start" "destroy" "help")
 # Show help message
 show_help() {
   cat <<EOF
-Usage: hole {agent} {command} {path}
+Usage: hole {agent} {command} {path} [options]
 
 Agents:
   claude    Claude Code agent
@@ -22,9 +22,14 @@ Commands:
   destroy   Completely tear down sandbox and remove containers
   help      Show this help message
 
+Options:
+  --dump-network-access   After the agent exits, write distinct accessed domains
+                          to {agent}-network-access.log in the project directory
+
 Examples:
   hole claude start .
   hole claude start /path/to/project
+  hole claude start . --dump-network-access
   hole claude destroy .
 
 After exiting the agent CLI, the agent container is automatically removed.
@@ -178,6 +183,7 @@ build_compose_cmd() {
 cmd_start() {
   local agent=$1
   local project_dir=$2
+  local dump_network_access=${3:-false}
 
   # Generate per-project compose override from .hole/settings.json
   generate_project_compose "$agent" "$project_dir" "$COMPOSE_PROJECT_NAME"
@@ -200,6 +206,17 @@ cmd_start() {
   echo "Attaching to $agent agent..."
   echo ""
   docker attach "$COMPOSE_PROJECT_NAME-$agent-1"
+
+  # Dump network access log if requested
+  if [[ "$dump_network_access" == true ]]; then
+    local log_file="$project_dir/$agent-network-access.log"
+    docker logs "$COMPOSE_PROJECT_NAME-proxy-1" 2>&1 | \
+      grep -oE 'CONNECT [a-zA-Z0-9._-]+:[0-9]+|filtered url "[^"]+"' | \
+      sed 's/CONNECT //; s/:[0-9]*$//; s/^filtered url "//; s/"$//' | \
+      sort -u > "$log_file" || true
+    echo ""
+    echo "Network access log written to: $log_file"
+  fi
 
   # Stop the sandbox after user exits
   "${COMPOSE_CMD[@]}" stop
@@ -236,10 +253,20 @@ cmd_destroy() {
 
 # Main entry point
 main() {
-  # Parse arguments with defaults
-  local agent="${1:-}"
-  local command="${2:-}"
-  local target_dir="${3:-.}"
+  local dump_network_access=false
+  local positional=()
+
+  for arg in "$@"; do
+    case "$arg" in
+      --dump-network-access) dump_network_access=true ;;
+      *) positional+=("$arg") ;;
+    esac
+  done
+
+  # Parse positional arguments with defaults
+  local agent="${positional[0]:-}"
+  local command="${positional[1]:-}"
+  local target_dir="${positional[2]:-.}"
 
   # Handle help shortcuts
   if [[ "$agent" == "help" ]] || [[ "$command" == "help" ]] || [[ -z "$agent" ]] || [[ -z "$command" ]]; then
@@ -261,7 +288,7 @@ main() {
 
   # Dispatch to command handler
   case "$command" in
-    start)   cmd_start "$agent" "$project_dir" ;;
+    start)   cmd_start "$agent" "$project_dir" "$dump_network_access" ;;
     destroy) cmd_destroy "$agent" "$project_dir" ;;
     help)    show_help ;;
     *)       echo "Unknown command: $command" >&2; exit 1 ;;
