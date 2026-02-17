@@ -150,6 +150,30 @@ Example `.hole/settings.json`:
 }
 ```
 
+### Project-Specific Domain Whitelist
+
+Per-project domain whitelists are configured via the `network.domainWhitelist` array in `.hole/settings.json`. This allows projects to access additional domains (e.g., npm registry, custom API endpoints) beyond the default allowed domains.
+
+- **Format**: Plain domain names (e.g., `registry.npmjs.org`). Dots are auto-escaped for tinyproxy's regex filter.
+- **Merge strategy**: Default domains from `proxy/allowed-domains.txt` are always included. Project-specific domains are appended.
+- **Storage**: The merged whitelist file is written to `~/.hole/projects/<project-name>/tinyproxy-domain-whitelist.txt` and bind-mounted into the proxy container.
+- **Cleanup**: The whitelist file is removed when the sandbox is destroyed.
+
+Example `.hole/settings.json`:
+```json
+{
+  "files": {
+    "exclude": [".env", "node_modules"]
+  },
+  "network": {
+    "domainWhitelist": [
+      "registry.npmjs.org",
+      "api.github.com"
+    ]
+  }
+}
+```
+
 ### Container Naming
 
 Project name derived from sanitized absolute path: `hole-$(sanitized_absolute_path)`

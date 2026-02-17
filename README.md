@@ -69,6 +69,23 @@ You can hide project files and folders from the agent by creating a `.hole/setti
 
 Files are mounted as `/dev/null` and directories as empty anonymous volumes inside the container, making them inaccessible to the agent. Trailing slashes are stripped automatically. Non-existent paths are skipped with a warning.
 
+#### Domain whitelist
+
+By default, agents can only reach a small set of domains required for their operation (e.g., `api.anthropic.com` for Claude). To allow access to additional domains, add a `network.domainWhitelist` array to `.hole/settings.json`:
+
+```json
+{
+  "network": {
+    "domainWhitelist": [
+      "registry.npmjs.org",
+      "api.github.com"
+    ]
+  }
+}
+```
+
+Use plain domain names — dots are auto-escaped for the proxy filter. Default domains are always included; project-specific domains are appended on top.
+
 ## Agents
 
 ### Claude

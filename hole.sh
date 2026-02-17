@@ -97,7 +97,8 @@ generate_project_compose() {
   local compose_file="$compose_dir/docker-compose.yml"
   local settings_file="$project_dir/.hole/settings.json"
 
-  local volumes=()
+  local agent_volumes=()
+  local has_custom_domains=false
 
   # Read exclusions from .hole/settings.json and auto-detect files vs directories
   if [[ -f "$settings_file" ]]; then
@@ -109,28 +110,56 @@ generate_project_compose() {
       line="${line%/}"
       local full_path="$project_dir/$line"
       if [[ -f "$full_path" ]]; then
-        volumes+=("      - /dev/null:/workspace/$line:ro")
+        agent_volumes+=("      - /dev/null:/workspace/$line:ro")
       elif [[ -d "$full_path" ]]; then
-        volumes+=("      - /workspace/$line")
+        agent_volumes+=("      - /workspace/$line")
       else
         echo "Warning: excluded path '$line' not found in project, skipping" >&2
       fi
     done <<< "$entries"
   fi
 
-  if [[ ${#volumes[@]} -gt 0 ]]; then
+  # Read domain whitelist from .hole/settings.json
+  if [[ -f "$settings_file" ]]; then
+    local domains
+    domains=$(jq -r '.network.domainWhitelist[]? // empty' "$settings_file" 2>/dev/null) || true
+    if [[ -n "$domains" ]]; then
+      mkdir -p "$compose_dir"
+      local whitelist_file="$compose_dir/tinyproxy-domain-whitelist.txt"
+      # Start with default allowed domains
+      cp "$SCRIPT_DIR/proxy/allowed-domains.txt" "$whitelist_file"
+      # Append project-specific domains (escape dots for tinyproxy regex filter)
+      echo "" >> "$whitelist_file"
+      echo "# Project-specific domains" >> "$whitelist_file"
+      while IFS= read -r domain; do
+        [[ -z "$domain" ]] && continue
+        echo "${domain//./\\.}" >> "$whitelist_file"
+      done <<< "$domains"
+      has_custom_domains=true
+    fi
+  fi
+
+  if [[ ${#agent_volumes[@]} -gt 0 || "$has_custom_domains" == true ]]; then
     mkdir -p "$compose_dir"
     {
       echo "services:"
-      echo "  $agent:"
-      echo "    volumes:"
-      for v in "${volumes[@]}"; do
-        echo "$v"
-      done
+      if [[ "$has_custom_domains" == true ]]; then
+        echo "  proxy:"
+        echo "    volumes:"
+        echo "      - $compose_dir/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
+      fi
+      if [[ ${#agent_volumes[@]} -gt 0 ]]; then
+        echo "  $agent:"
+        echo "    volumes:"
+        for v in "${agent_volumes[@]}"; do
+          echo "$v"
+        done
+      fi
     } > "$compose_file"
   else
-    # No exclusions — remove stale override if any
+    # No overrides — remove stale files if any
     rm -f "$compose_file"
+    rm -f "$compose_dir/tinyproxy-domain-whitelist.txt"
     rmdir "$compose_dir" 2>/dev/null || true
   fi
 
