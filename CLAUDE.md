@@ -129,11 +129,23 @@ docker compose -p <project-name> up -d --build proxy
 
 ### Secret File/Folder Hiding
 
-Currently hardcoded in docker-compose.yml:40-47. To extend:
-- Add volume mounts pointing to /dev/null (for files)
-- Add empty volume mounts (for directories)
+Per-project exclusions are configured via `.hole/disk/exclude.txt` in the project directory. List one path per line (supports `#` comments and blank lines). The script auto-detects whether each entry is a file or directory and generates the correct Docker volume mount:
+- **Files** → mounted as `/dev/null:/workspace/<path>:ro`
+- **Directories** → mounted as anonymous volume at `/workspace/<path>`
+- **Non-existent paths** → warning printed to stderr, entry skipped
 
-TODO: Make this extensible via configuration file per project.
+Trailing slashes are stripped automatically (e.g., `node_modules/` → `node_modules`).
+
+Example `.hole/disk/exclude.txt`:
+```
+# Secret files
+.env
+.env.local
+
+# Build artifacts
+node_modules
+dist
+```
 
 ### Container Naming
 

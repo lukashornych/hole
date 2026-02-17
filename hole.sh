@@ -87,7 +87,7 @@ sanitize_path_to_project_name() {
   echo "hole-$(echo "$path" | sed 's/^\/*//' | tr '/' '-' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
 }
 
-# Generate per-project docker-compose override file from .hole/disk/ exclusion configs
+# Generate per-project docker-compose override file from .hole/disk/exclude.txt
 generate_project_compose() {
   local agent="$1"
   local project_dir="$2"
@@ -95,27 +95,26 @@ generate_project_compose() {
 
   local compose_dir="$HOLE_DATA_DIR/projects/$project_name"
   local compose_file="$compose_dir/docker-compose.yml"
-  local excluded_files_cfg="$project_dir/.hole/disk/excluded-files.txt"
-  local excluded_folders_cfg="$project_dir/.hole/disk/excluded-folders.txt"
+  local exclude_cfg="$project_dir/.hole/disk/exclude.txt"
 
   local volumes=()
 
-  # Read excluded files (mount /dev/null over them)
-  if [[ -f "$excluded_files_cfg" ]]; then
+  # Read exclusions and auto-detect files vs directories
+  if [[ -f "$exclude_cfg" ]]; then
     while IFS= read -r line || [[ -n "$line" ]]; do
       line="$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')"
       [[ -z "$line" || "$line" == \#* ]] && continue
-      volumes+=("      - /dev/null:/workspace/$line:ro")
-    done < "$excluded_files_cfg"
-  fi
-
-  # Read excluded folders (anonymous volume to hide them)
-  if [[ -f "$excluded_folders_cfg" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      line="$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')"
-      [[ -z "$line" || "$line" == \#* ]] && continue
-      volumes+=("      - /workspace/$line")
-    done < "$excluded_folders_cfg"
+      # Strip trailing slashes for consistent mount paths
+      line="${line%/}"
+      local full_path="$project_dir/$line"
+      if [[ -f "$full_path" ]]; then
+        volumes+=("      - /dev/null:/workspace/$line:ro")
+      elif [[ -d "$full_path" ]]; then
+        volumes+=("      - /workspace/$line")
+      else
+        echo "Warning: excluded path '$line' not found in project, skipping" >&2
+      fi
+    done < "$exclude_cfg"
   fi
 
   if [[ ${#volumes[@]} -gt 0 ]]; then
