@@ -23,6 +23,16 @@ export PATH="$HOME/.local/bin:$PATH"
 
 Run the same install command again — the installer detects an existing installation, removes it, and reinstalls from the latest `main`.
 
+### Uninstall
+
+Destroy any running sandboxes first (`hole {agent} destroy {project path}`), then run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/lukashornych/hole/main/uninstall.sh | bash
+# or
+wget -qO- https://raw.githubusercontent.com/lukashornych/hole/main/uninstall.sh | bash
+```
+
 ## Agents
 
 ### Claude
