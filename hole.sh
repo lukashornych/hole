@@ -4,6 +4,7 @@ set -euo pipefail
 # Constants
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
+HOLE_DATA_DIR="$HOME/.hole"
 VALID_AGENTS=("claude" "gemini")
 VALID_COMMANDS=("start" "destroy" "help")
 
@@ -86,10 +87,72 @@ sanitize_path_to_project_name() {
   echo "hole-$(echo "$path" | sed 's/^\/*//' | tr '/' '-' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
 }
 
+# Generate per-project docker-compose override file from .hole/disk/ exclusion configs
+generate_project_compose() {
+  local agent="$1"
+  local project_dir="$2"
+  local project_name="$3"
+
+  local compose_dir="$HOLE_DATA_DIR/projects/$project_name"
+  local compose_file="$compose_dir/docker-compose.yml"
+  local excluded_files_cfg="$project_dir/.hole/disk/excluded-files.txt"
+  local excluded_folders_cfg="$project_dir/.hole/disk/excluded-folders.txt"
+
+  local volumes=()
+
+  # Read excluded files (mount /dev/null over them)
+  if [[ -f "$excluded_files_cfg" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')"
+      [[ -z "$line" || "$line" == \#* ]] && continue
+      volumes+=("      - /dev/null:/workspace/$line:ro")
+    done < "$excluded_files_cfg"
+  fi
+
+  # Read excluded folders (anonymous volume to hide them)
+  if [[ -f "$excluded_folders_cfg" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')"
+      [[ -z "$line" || "$line" == \#* ]] && continue
+      volumes+=("      - /workspace/$line")
+    done < "$excluded_folders_cfg"
+  fi
+
+  if [[ ${#volumes[@]} -gt 0 ]]; then
+    mkdir -p "$compose_dir"
+    {
+      echo "services:"
+      echo "  $agent:"
+      echo "    volumes:"
+      for v in "${volumes[@]}"; do
+        echo "$v"
+      done
+    } > "$compose_file"
+  else
+    # No exclusions — remove stale override if any
+    rm -f "$compose_file"
+    rmdir "$compose_dir" 2>/dev/null || true
+  fi
+
+  PROJECT_COMPOSE_FILE="$compose_file"
+}
+
+# Build the docker compose command array, including optional override file
+build_compose_cmd() {
+  COMPOSE_CMD=(docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE")
+  if [[ -f "$PROJECT_COMPOSE_FILE" ]]; then
+    COMPOSE_CMD+=(-f "$PROJECT_COMPOSE_FILE")
+  fi
+}
+
 # Start command: create/start sandbox and attach to agent CLI
 cmd_start() {
   local agent=$1
   local project_dir=$2
+
+  # Generate per-project compose override from .hole/disk/ config
+  generate_project_compose "$agent" "$project_dir" "$COMPOSE_PROJECT_NAME"
+  build_compose_cmd
 
   echo "Launching sandbox for: $project_dir"
   echo "Project name: $COMPOSE_PROJECT_NAME"
@@ -97,33 +160,20 @@ cmd_start() {
 
   # Start proxy in detached mode with health check wait
   echo "Starting proxy..."
-  docker compose \
-    -p "$COMPOSE_PROJECT_NAME" \
-    -f "$COMPOSE_FILE" \
-    up \
-    -d \
-    proxy
+  "${COMPOSE_CMD[@]}" up -d proxy
 
   # Start agent service
   echo "Starting $agent agent..."
   echo ""
-  docker compose \
-    -p "$COMPOSE_PROJECT_NAME" \
-    -f "$COMPOSE_FILE" \
-    up \
-    -d \
-    "$agent"
+  "${COMPOSE_CMD[@]}" up -d "$agent"
 
   # Attach terminal to the running agent
   echo "Attaching to $agent agent..."
   echo ""
   docker attach "$COMPOSE_PROJECT_NAME-$agent-1"
 
-  # Stop the sandbox after user exists
-  docker compose \
-    -p "$COMPOSE_PROJECT_NAME" \
-    -f "$COMPOSE_FILE" \
-    stop
+  # Stop the sandbox after user exits
+  "${COMPOSE_CMD[@]}" stop
 
   echo ""
   echo "Exited $agent CLI."
@@ -135,11 +185,21 @@ cmd_destroy() {
   local agent=$1
   local project_dir=$2
 
+  # Load override file path and build compose command
+  local compose_dir="$HOLE_DATA_DIR/projects/$COMPOSE_PROJECT_NAME"
+  PROJECT_COMPOSE_FILE="$compose_dir/docker-compose.yml"
+  build_compose_cmd
+
   echo "Destroying sandbox for: $project_dir"
   echo "Project name: $COMPOSE_PROJECT_NAME"
   echo ""
 
-  docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" down --rmi local --remove-orphans
+  "${COMPOSE_CMD[@]}" down --rmi local --remove-orphans
+
+  # Clean up per-project compose override
+  if [[ -d "$compose_dir" ]]; then
+    rm -rf "$compose_dir"
+  fi
 
   echo ""
   echo "Sandbox destroyed."

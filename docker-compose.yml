@@ -33,15 +33,6 @@ services:
       - ${HOME}/.claude.json:/home/claude/.claude.json
       # mount project
       - ${PROJECT_DIR:-.}:/workspace
-      # todo lho this needs to be extendable per project
-      # hide secret files
-#      - /dev/null:/workspace/.env
-#      - /dev/null:/workspace/.env.local
-      # hide secret folders
-      - /workspace/config/properties
-      - /workspace/bridge/config/properties
-      - /workspace/edee/config/properties
-      - /workspace/http-client
     environment:
       # pass claude code login token from user env
       - CLAUDE_CODE_OAUTH_TOKEN
