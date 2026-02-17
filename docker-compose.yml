@@ -3,9 +3,6 @@ services:
   # Network proxy to allow agents access only specified domains
   #   Should be started for every agent
   proxy:
-    profiles:
-      - claude
-      - gemini
     build:
       context: .
       dockerfile: proxy/Dockerfile
@@ -24,8 +21,6 @@ services:
 
   # Claude Code CLI agent
   claude:
-    profiles:
-      - claude
     build:
       context: .
       dockerfile: agents/claude/Dockerfile
@@ -64,8 +59,6 @@ services:
 
   # todo lho example of other agents, implement
   # gemini:
-  #   profiles:
-  #     - gemini
   #   build:
   #     context: .
   #     dockerfile: agents/gemini/Dockerfile

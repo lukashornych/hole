@@ -59,32 +59,45 @@ Before using the Claude sandbox, set up authentication:
 
 **Start a sandbox:**
 ```bash
-./sandbox.sh claude /path/to/project
+./hole.sh claude start /path/to/project
 ```
 Or from within a project directory:
 ```bash
-./sandbox.sh claude .
+./hole.sh claude start .
 ```
 
 **Destroy a sandbox:**
 ```bash
-./sandbox-destroy.sh /path/to/project
+./hole.sh claude destroy /path/to/project
+```
+
+**Get help:**
+```bash
+./hole.sh help
 ```
 
 ### How It Works
 
-1. `sandbox.sh` derives unique project name from directory basename (e.g., "sandbox-myproject")
-2. Starts proxy container in background with health check
-3. Runs Claude container interactively with:
+1. `hole.sh` derives unique project name from sanitized absolute path (e.g., "hole-users-lho-www-oss-myproject")
+2. Starts proxy container in detached mode with health check
+3. Runs agent container interactively using `docker compose run`:
    - PROJECT_DIR env var set to target directory
-   - COMPOSE_PROJECT_NAME for unique container naming
+   - COMPOSE_PROJECT_NAME for unique container naming based on absolute path
    - Proxy dependency (waits for healthy status)
-4. Cleanup trap on EXIT tears down all containers via `docker compose down`
+   - Allocates TTY and connects stdin for interactive CLI
+4. **Agent container removed on exit** - proxy remains running until `destroy` command
+
+### Key Behavior
+
+- **Clean sandbox creation**: Each `start` creates a fresh agent container
+- **Agent auto-cleanup**: Agent container is automatically removed on CLI exit
+- **Persistent proxy**: Proxy container continues running until explicit `destroy`
+- **Unique naming**: Project names based on absolute path prevent collisions between projects
+- **Explicit cleanup**: Use `destroy` command to tear down proxy and remove all resources
 
 ## Key Files
 
-- `sandbox.sh` - Main launcher script (starts proxy + agent)
-- `sandbox-destroy.sh` - Cleanup script (tears down containers + removes images)
+- `hole.sh` - Unified CLI tool for managing sandboxes (start, destroy commands)
 - `docker-compose.yml` - Service orchestration with profiles (claude, gemini)
 - `agents/claude/Dockerfile` - Claude agent image (Ubuntu 22.04 + curl, git, ripgrep, Claude CLI)
 - `proxy/Dockerfile` - Proxy image (Alpine + tinyproxy)
@@ -112,7 +125,7 @@ docker compose -p <project-name> up -d --build proxy
 2. Add service definition in `docker-compose.yml` under a new profile
 3. Configure proxy dependency and network: sandbox only
 4. Add allowed domains to `proxy/allowed-domains.txt`
-5. Update `sandbox.sh` to validate agent parameter
+5. Update `hole.sh` VALID_AGENTS array to include the new agent
 
 ### Secret File/Folder Hiding
 
@@ -124,9 +137,12 @@ TODO: Make this extensible via configuration file per project.
 
 ### Container Naming
 
-Project name derived as: `sandbox-$(basename "$TARGET_DIR")`
+Project name derived from sanitized absolute path: `hole-$(sanitized_absolute_path)`
+
+Example: `/Users/lho/www/oss/hole` → `hole-users-lho-www-oss-hole`
 
 This ensures:
 - Multiple projects can have sandboxes simultaneously
-- Same project directory always gets same container name
+- Same project directory always gets same container name (deterministic based on absolute path)
 - Clean separation between different sandboxes
+- No collisions between projects with same directory name in different locations
