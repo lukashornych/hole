@@ -3,6 +3,26 @@
 CLI tool to create and manage sandboxes for AI agents. It supports limiting file access
 and network access.
 
+## Installation
+
+**Requirements:** `curl` or `wget`, `tar`, and `docker`.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/lukashornych/hole/main/install.sh | bash
+# or
+wget -qO- https://raw.githubusercontent.com/lukashornych/hole/main/install.sh | bash
+```
+
+If `~/.local/bin` is not in your `PATH`, add it to your shell profile (`.bashrc` / `.zshrc`):
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+### Update
+
+Run the same install command again — the installer detects an existing installation, removes it, and reinstalls from the latest `main`.
+
 ## Agents
 
 ### Claude
