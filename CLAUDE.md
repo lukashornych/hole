@@ -129,22 +129,25 @@ docker compose -p <project-name> up -d --build proxy
 
 ### Secret File/Folder Hiding
 
-Per-project exclusions are configured via `.hole/disk/exclude.txt` in the project directory. List one path per line (supports `#` comments and blank lines). The script auto-detects whether each entry is a file or directory and generates the correct Docker volume mount:
+Per-project exclusions are configured via `.hole/settings.json` in the project directory. The `files.exclude` array lists paths to hide from the agent. The script auto-detects whether each entry is a file or directory and generates the correct Docker volume mount:
 - **Files** → mounted as `/dev/null:/workspace/<path>:ro`
 - **Directories** → mounted as anonymous volume at `/workspace/<path>`
 - **Non-existent paths** → warning printed to stderr, entry skipped
 
 Trailing slashes are stripped automatically (e.g., `node_modules/` → `node_modules`).
 
-Example `.hole/disk/exclude.txt`:
-```
-# Secret files
-.env
-.env.local
-
-# Build artifacts
-node_modules
-dist
+Example `.hole/settings.json`:
+```json
+{
+  "files": {
+    "exclude": [
+      ".env",
+      ".env.local",
+      "node_modules",
+      "dist"
+    ]
+  }
+}
 ```
 
 ### Container Naming

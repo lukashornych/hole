@@ -87,7 +87,7 @@ sanitize_path_to_project_name() {
   echo "hole-$(echo "$path" | sed 's/^\/*//' | tr '/' '-' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
 }
 
-# Generate per-project docker-compose override file from .hole/disk/exclude.txt
+# Generate per-project docker-compose override file from .hole/settings.json
 generate_project_compose() {
   local agent="$1"
   local project_dir="$2"
@@ -95,15 +95,16 @@ generate_project_compose() {
 
   local compose_dir="$HOLE_DATA_DIR/projects/$project_name"
   local compose_file="$compose_dir/docker-compose.yml"
-  local exclude_cfg="$project_dir/.hole/disk/exclude.txt"
+  local settings_file="$project_dir/.hole/settings.json"
 
   local volumes=()
 
-  # Read exclusions and auto-detect files vs directories
-  if [[ -f "$exclude_cfg" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      line="$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')"
-      [[ -z "$line" || "$line" == \#* ]] && continue
+  # Read exclusions from .hole/settings.json and auto-detect files vs directories
+  if [[ -f "$settings_file" ]]; then
+    local entries
+    entries=$(jq -r '.files.exclude[]? // empty' "$settings_file" 2>/dev/null) || true
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
       # Strip trailing slashes for consistent mount paths
       line="${line%/}"
       local full_path="$project_dir/$line"
@@ -114,7 +115,7 @@ generate_project_compose() {
       else
         echo "Warning: excluded path '$line' not found in project, skipping" >&2
       fi
-    done < "$exclude_cfg"
+    done <<< "$entries"
   fi
 
   if [[ ${#volumes[@]} -gt 0 ]]; then
@@ -149,7 +150,7 @@ cmd_start() {
   local agent=$1
   local project_dir=$2
 
-  # Generate per-project compose override from .hole/disk/ config
+  # Generate per-project compose override from .hole/settings.json
   generate_project_compose "$agent" "$project_dir" "$COMPOSE_PROJECT_NAME"
   build_compose_cmd
 
