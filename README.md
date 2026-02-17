@@ -35,6 +35,40 @@ curl -fsSL https://raw.githubusercontent.com/lukashornych/hole/main/uninstall.sh
 wget -qO- https://raw.githubusercontent.com/lukashornych/hole/main/uninstall.sh | bash
 ```
 
+## Sandboxes
+
+Create a new (or start an existing) agent sandbox in the current directory:
+```shell
+hole {agent} start .
+```
+
+Destroy the existing agent sandbox for the current directory:
+
+```shell
+hole {agent} destroy .
+```
+
+### Configuration
+
+#### File exclusions
+
+You can hide project files and folders from the agent by creating a `.hole/settings.json` in your project root:
+
+```json
+{
+  "files": {
+    "exclude": [
+      ".env",
+      ".env.local",
+      "node_modules",
+      "dist"
+    ]
+  }
+}
+```
+
+Files are mounted as `/dev/null` and directories as empty anonymous volumes inside the container, making them inaccessible to the agent. Trailing slashes are stripped automatically. Non-existent paths are skipped with a warning.
+
 ## Agents
 
 ### Claude
@@ -81,3 +115,4 @@ Destroy the existing Claude sandbox for the current directory:
 ```shell
 hole claude destroy .
 ```
+
