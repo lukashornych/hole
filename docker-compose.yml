@@ -25,6 +25,8 @@ services:
       context: .
       dockerfile: agents/claude/Dockerfile
     command: ["claude", "--dangerously-skip-permissions"]
+    stdin_open: true # Equivalent to docker run -i (keeps stdin open)
+    tty: true        # Equivalent to docker run -t (allocates a pseudo-TTY)
     volumes:
       # mount claude user config
       - ${HOME}/.claude:/home/claude/.claude

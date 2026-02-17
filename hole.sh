@@ -17,7 +17,7 @@ Agents:
   gemini    Gemini agent (experimental)
 
 Commands:
-  start     Create or start a sandbox and attach to agent CLI. Note: right now, the agent container is created every time from scratch.
+  start     Create a new or start an existing sandbox and attach to the agent CLI
   destroy   Completely tear down sandbox and remove containers
   help      Show this help message
 
@@ -102,24 +102,32 @@ cmd_start() {
     -f "$COMPOSE_FILE" \
     up \
     -d \
-    --build \
     proxy
 
-  # Start agent service interactively using 'run -it'
-  # -i: keep stdin open, -t: allocate TTY (required for interactive CLI)
+  # Start agent service
   echo "Starting $agent agent..."
   echo ""
   docker compose \
     -p "$COMPOSE_PROJECT_NAME" \
     -f "$COMPOSE_FILE" \
-    run \
-    --rm \
+    up \
+    -d \
     "$agent"
 
-  # After user exits, container is automatically removed (--rm flag)
+  # Attach terminal to the running agent
+  echo "Attaching to $agent agent..."
+  echo ""
+  docker attach "$COMPOSE_PROJECT_NAME-$agent-1"
+
+  # Stop the sandbox after user exists
+  docker compose \
+    -p "$COMPOSE_PROJECT_NAME" \
+    -f "$COMPOSE_FILE" \
+    stop
+
   echo ""
   echo "Exited $agent CLI."
-  echo "Sandbox cleaned up. Run 'hole $agent start $project_dir' to create a new sandbox."
+  echo "Sandbox stopped. Run 'hole $agent start $project_dir' to start the existing sandbox again, or run 'hole $agent destroy $project_dir' to destroy the sandbox."
 }
 
 # Destroy command: completely tear down sandbox
