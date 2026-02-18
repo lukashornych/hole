@@ -78,6 +78,7 @@ extract_and_install() {
     cp "$src_dir/hole.sh"                       "$INSTALL_DIR/hole.sh"
     cp "$src_dir/docker-compose.yml"            "$INSTALL_DIR/docker-compose.yml"
     cp "$src_dir/agents/claude/Dockerfile"      "$INSTALL_DIR/agents/claude/Dockerfile"
+    cp "$src_dir/agents/claude/entrypoint.sh"   "$INSTALL_DIR/agents/claude/entrypoint.sh"
     cp "$src_dir/proxy/Dockerfile"              "$INSTALL_DIR/proxy/Dockerfile"
     cp "$src_dir/proxy/tinyproxy.conf"          "$INSTALL_DIR/proxy/tinyproxy.conf"
     cp "$src_dir/proxy/allowed-domains.txt"     "$INSTALL_DIR/proxy/allowed-domains.txt"
