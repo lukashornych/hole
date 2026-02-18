@@ -28,9 +28,9 @@ services:
     stdin_open: true # Equivalent to docker run -i (keeps stdin open)
     tty: true        # Equivalent to docker run -t (allocates a pseudo-TTY)
     volumes:
-      # mount claude user config
-      - ${HOME}/.claude:/home/claude/.claude
-      - ${HOME}/.claude.json:/home/claude/.claude.json
+      # mount host config to read-only staging (copied to home by entrypoint)
+      - ${HOME}/.claude:/home/claude/.host-config/.claude:ro
+      - ${HOME}/.claude.json:/home/claude/.host-config/.claude.json:ro
       # mount project
       - ${PROJECT_DIR:-.}:/workspace
     environment:

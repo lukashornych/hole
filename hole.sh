@@ -91,7 +91,7 @@ sanitize_path_to_project_name() {
 
 # Generate a random 6-character hex instance ID
 generate_instance_id() {
-  LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 6
+  head -c 50 /dev/urandom | LC_ALL=C tr -dc 'a-f0-9' | head -c 6
 }
 
 # Generate per-project docker-compose override file from .hole/settings.json
@@ -267,7 +267,10 @@ main() {
   # Generate project name and export environment
   export PROJECT_DIR="$project_dir"
   INSTANCE_ID=$(generate_instance_id)
+  echo "check 2"
   export COMPOSE_PROJECT_NAME="$(sanitize_path_to_project_name "$project_dir")-$agent-$INSTANCE_ID"
+
+  echo "check"
 
   # Dispatch to command handler
   case "$command" in
