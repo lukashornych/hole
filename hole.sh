@@ -4,7 +4,7 @@ set -euo pipefail
 # Constants
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
-HOLE_DATA_DIR="$HOME/.hole"
+HOLE_TMP_DIR="${TMPDIR:-/tmp}/hole"
 VALID_AGENTS=("claude" "gemini")
 VALID_COMMANDS=("start" "help")
 
@@ -100,7 +100,7 @@ generate_project_compose() {
   local project_dir="$2"
   local project_name="$3"
 
-  local compose_dir="$HOLE_DATA_DIR/projects/$project_name"
+  local compose_dir="$HOLE_TMP_DIR/projects/$project_name"
   local compose_file="$compose_dir/docker-compose.yml"
   local settings_file="$project_dir/.hole/settings.json"
 
@@ -224,7 +224,7 @@ cmd_start() {
   "${COMPOSE_CMD[@]}" down --rmi local --remove-orphans
 
   # Clean up per-project compose override
-  local compose_dir="$HOLE_DATA_DIR/projects/$COMPOSE_PROJECT_NAME"
+  local compose_dir="$HOLE_TMP_DIR/projects/$COMPOSE_PROJECT_NAME"
   if [[ -d "$compose_dir" ]]; then
     rm -rf "$compose_dir"
   fi

@@ -151,7 +151,7 @@ Per-project domain whitelists are configured via the `network.domainWhitelist` a
 
 - **Format**: Plain domain names (e.g., `registry.npmjs.org`). Dots are auto-escaped for tinyproxy's regex filter.
 - **Merge strategy**: Default domains from `proxy/allowed-domains.txt` are always included. Project-specific domains are appended.
-- **Storage**: The merged whitelist file is written to `~/.hole/projects/<project-name>/tinyproxy-domain-whitelist.txt` and bind-mounted into the proxy container.
+- **Storage**: The merged whitelist file is written to `${TMPDIR:-/tmp}/hole/projects/<project-name>/tinyproxy-domain-whitelist.txt` and bind-mounted into the proxy container.
 - **Cleanup**: The whitelist file is removed when the sandbox is destroyed on exit.
 
 Example `.hole/settings.json`:
