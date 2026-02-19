@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 HOLE_TMP_DIR="${TMPDIR:-/tmp}/hole"
+GLOBAL_SETTINGS_FILE="$HOME/.hole/settings.json"
 VALID_AGENTS=("claude" "gemini")
 VALID_COMMANDS=("start" "help")
 
@@ -60,9 +61,10 @@ validate_command() {
   exit 1
 }
 
-# Validate .hole/settings.json against JSON Schema using jv
+# Validate settings.json against JSON Schema using jv
 validate_settings() {
   local settings_file="$1"
+  local label="${2:-$settings_file}"
 
   # Settings file is optional
   if [[ ! -f "$settings_file" ]]; then
@@ -72,10 +74,43 @@ validate_settings() {
   local schema_file="$SCRIPT_DIR/schema/settings.schema.json"
   local output
   if ! output=$(jv "$schema_file" "$settings_file" 2>&1); then
-    echo "Error: .hole/settings.json is not valid:" >&2
+    echo "Error: $label is not valid:" >&2
     echo "$output" >&2
     exit 1
   fi
+}
+
+# Deep-merge two settings files (global + project) and output merged JSON to stdout
+# Arrays are concatenated and deduplicated (global items first), objects are recursively merged,
+# scalars from project override global.
+merge_settings() {
+  local global_file="$1"
+  local project_file="$2"
+  local global_json="{}"
+  local project_json="{}"
+  [[ -f "$global_file" ]] && global_json=$(cat "$global_file")
+  [[ -f "$project_file" ]] && project_json=$(cat "$project_file")
+  jq -n --argjson global "$global_json" --argjson project "$project_json" '
+    def dedup: reduce .[] as $item ([]; if (map(. == $item) | any) then . else . + [$item] end);
+    def deep_merge(a; b):
+      if (a | type) == "object" and (b | type) == "object" then
+        (a | keys_unsorted) as $ak | (b | keys_unsorted) as $bk |
+        ([$ak[], $bk[]] | unique) | reduce .[] as $k ({};
+          if ($ak | index($k)) and ($bk | index($k)) then
+            . + { ($k): deep_merge(a[$k]; b[$k]) }
+          elif ($bk | index($k)) then
+            . + { ($k): b[$k] }
+          else
+            . + { ($k): a[$k] }
+          end
+        )
+      elif (a | type) == "array" and (b | type) == "array" then
+        (a + b) | dedup
+      else
+        b
+      end;
+    deep_merge($global; $project)
+  '
 }
 
 # Resolve project directory to absolute path
@@ -112,56 +147,52 @@ generate_instance_id() {
   head -c 50 /dev/urandom | LC_ALL=C tr -dc 'a-f0-9' | head -c 6
 }
 
-# Generate per-project docker-compose override file from .hole/settings.json
+# Generate per-project docker-compose override file from merged settings
 generate_project_compose() {
   local agent="$1"
   local project_dir="$2"
   local project_name="$3"
+  local merged_settings="$4"
 
   local compose_dir="$HOLE_TMP_DIR/projects/$project_name"
   local compose_file="$compose_dir/docker-compose.yml"
-  local settings_file="$project_dir/.hole/settings.json"
 
   local agent_volumes=()
   local has_custom_domains=false
 
-  # Read exclusions from .hole/settings.json and auto-detect files vs directories
-  if [[ -f "$settings_file" ]]; then
-    local entries
-    entries=$(jq -r '.files.exclude[]? // empty' "$settings_file" 2>/dev/null) || true
-    while IFS= read -r line; do
-      [[ -z "$line" ]] && continue
-      # Strip trailing slashes for consistent mount paths
-      line="${line%/}"
-      local full_path="$project_dir/$line"
-      if [[ -f "$full_path" ]]; then
-        agent_volumes+=("      - /dev/null:/workspace/$line:ro")
-      elif [[ -d "$full_path" ]]; then
-        agent_volumes+=("      - /workspace/$line")
-      else
-        echo "Warning: excluded path '$line' not found in project, skipping" >&2
-      fi
-    done <<< "$entries"
-  fi
-
-  # Read domain whitelist from .hole/settings.json
-  if [[ -f "$settings_file" ]]; then
-    local domains
-    domains=$(jq -r '.network.domainWhitelist[]? // empty' "$settings_file" 2>/dev/null) || true
-    if [[ -n "$domains" ]]; then
-      mkdir -p "$compose_dir"
-      local whitelist_file="$compose_dir/tinyproxy-domain-whitelist.txt"
-      # Start with default allowed domains
-      cp "$SCRIPT_DIR/proxy/allowed-domains.txt" "$whitelist_file"
-      # Append project-specific domains (escape dots for tinyproxy regex filter)
-      echo "" >> "$whitelist_file"
-      echo "# Project-specific domains" >> "$whitelist_file"
-      while IFS= read -r domain; do
-        [[ -z "$domain" ]] && continue
-        echo "${domain//./\\.}" >> "$whitelist_file"
-      done <<< "$domains"
-      has_custom_domains=true
+  # Read exclusions from merged settings and auto-detect files vs directories
+  local entries
+  entries=$(echo "$merged_settings" | jq -r '.files.exclude[]? // empty' 2>/dev/null) || true
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    # Strip trailing slashes for consistent mount paths
+    line="${line%/}"
+    local full_path="$project_dir/$line"
+    if [[ -f "$full_path" ]]; then
+      agent_volumes+=("      - /dev/null:/workspace/$line:ro")
+    elif [[ -d "$full_path" ]]; then
+      agent_volumes+=("      - /workspace/$line")
+    else
+      echo "Warning: excluded path '$line' not found in project, skipping" >&2
     fi
+  done <<< "$entries"
+
+  # Read domain whitelist from merged settings
+  local domains
+  domains=$(echo "$merged_settings" | jq -r '.network.domainWhitelist[]? // empty' 2>/dev/null) || true
+  if [[ -n "$domains" ]]; then
+    mkdir -p "$compose_dir"
+    local whitelist_file="$compose_dir/tinyproxy-domain-whitelist.txt"
+    # Start with default allowed domains
+    cp "$SCRIPT_DIR/proxy/allowed-domains.txt" "$whitelist_file"
+    # Append project-specific domains (escape dots for tinyproxy regex filter)
+    echo "" >> "$whitelist_file"
+    echo "# Project-specific domains" >> "$whitelist_file"
+    while IFS= read -r domain; do
+      [[ -z "$domain" ]] && continue
+      echo "${domain//./\\.}" >> "$whitelist_file"
+    done <<< "$domains"
+    has_custom_domains=true
   fi
 
   if [[ ${#agent_volumes[@]} -gt 0 || "$has_custom_domains" == true ]]; then
@@ -205,11 +236,16 @@ cmd_start() {
   local project_dir=$2
   local dump_network_access=${3:-false}
 
-  # Validate .hole/settings.json if present
-  validate_settings "$project_dir/.hole/settings.json"
+  # Validate settings files if present
+  validate_settings "$GLOBAL_SETTINGS_FILE" "global settings (~/.hole/settings.json)"
+  validate_settings "$project_dir/.hole/settings.json" "project settings (.hole/settings.json)"
 
-  # Generate per-project compose override from .hole/settings.json
-  generate_project_compose "$agent" "$project_dir" "$COMPOSE_PROJECT_NAME"
+  # Merge global and project settings
+  local merged_settings
+  merged_settings=$(merge_settings "$GLOBAL_SETTINGS_FILE" "$project_dir/.hole/settings.json")
+
+  # Generate per-project compose override from merged settings
+  generate_project_compose "$agent" "$project_dir" "$COMPOSE_PROJECT_NAME" "$merged_settings"
   build_compose_cmd
 
   echo "Launching sandbox for: $project_dir"

@@ -82,6 +82,25 @@ By default, agents can only reach a small set of domains required for their oper
 
 Use plain domain names — dots are auto-escaped for the proxy filter. Default domains are always included; project-specific domains are appended on top.
 
+#### Global settings
+
+You can define global defaults in `~/.hole/settings.json` so they apply to every project without repeating them:
+
+```json
+{
+  "files": {
+    "exclude": [".env", ".env.local"]
+  },
+  "network": {
+    "domainWhitelist": [
+      "registry.npmjs.org"
+    ]
+  }
+}
+```
+
+Global and project settings are deep-merged: arrays are concatenated and deduplicated (global items first), while project scalar values take precedence. For example, if the global file excludes `[".env", "node_modules"]` and the project excludes `["node_modules", "dist"]`, the merged result is `[".env", "node_modules", "dist"]`.
+
 #### Network access log
 
 To see which domains the agent accessed during a session, pass the `--dump-network-access` flag:
@@ -100,6 +119,10 @@ After the agent exits, a `claude-network-access-{id}.log` file is written to the
 
 Before you start using Claude sandbox, is good idea to setup long-lived authentication token so you
 don't have to login every time you create a new sandbox.
+
+todo lho either install on host or login each time you start sandbox
+
+todo lho only needed for max
 
 1. install [Claude Code](https://claude.com/product/claude-code) locally
 2. run `claude setup-token`
