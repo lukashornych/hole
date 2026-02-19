@@ -35,7 +35,8 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 
 **File access control:**
 - Project directory mounted read-write at /workspace
-- User's Claude config (~/.claude, ~/.claude.json) mounted read-only to a staging dir (`/home/claude/.host-config/`), then copied to the home dir at container startup by `entrypoint.sh`. This gives each container its own private writable copy, avoiding bind-mount corruption from atomic writes and cross-container race conditions. Authentication is handled by `CLAUDE_CODE_OAUTH_TOKEN` env var, so config writes don't need to persist back to the host.
+- `~/.claude` directory: mounted directly at `/home/claude/.claude` in read-write mode. Changes (plans, project settings, etc.) persist back to the host.
+- `~/.claude.json` file: mounted read-only to staging dir (`/home/claude/.host-config/`), then copied to the home dir at container startup by `entrypoint.sh`. Avoids atomic-write corruption. Authentication is handled by `CLAUDE_CODE_OAUTH_TOKEN` env var, so config writes don't need to persist back to the host.
 - Secret files/folders hidden by mounting /dev/null over them (e.g., .env, .env.local)
 - Per-project exclusions configured via `.hole/settings.json`
 
