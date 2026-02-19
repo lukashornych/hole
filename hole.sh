@@ -60,6 +60,24 @@ validate_command() {
   exit 1
 }
 
+# Validate .hole/settings.json against JSON Schema using jv
+validate_settings() {
+  local settings_file="$1"
+
+  # Settings file is optional
+  if [[ ! -f "$settings_file" ]]; then
+    return 0
+  fi
+
+  local schema_file="$SCRIPT_DIR/schema/settings.schema.json"
+  local output
+  if ! output=$(jv "$schema_file" "$settings_file" 2>&1); then
+    echo "Error: .hole/settings.json is not valid:" >&2
+    echo "$output" >&2
+    exit 1
+  fi
+}
+
 # Resolve project directory to absolute path
 resolve_project_dir() {
   local target_dir="${1:-.}"
@@ -187,6 +205,9 @@ cmd_start() {
   local project_dir=$2
   local dump_network_access=${3:-false}
 
+  # Validate .hole/settings.json if present
+  validate_settings "$project_dir/.hole/settings.json"
+
   # Generate per-project compose override from .hole/settings.json
   generate_project_compose "$agent" "$project_dir" "$COMPOSE_PROJECT_NAME"
   build_compose_cmd
@@ -267,10 +288,7 @@ main() {
   # Generate project name and export environment
   export PROJECT_DIR="$project_dir"
   INSTANCE_ID=$(generate_instance_id)
-  echo "check 2"
   export COMPOSE_PROJECT_NAME="$(sanitize_path_to_project_name "$project_dir")-$agent-$INSTANCE_ID"
-
-  echo "check"
 
   # Dispatch to command handler
   case "$command" in

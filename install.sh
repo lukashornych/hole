@@ -36,6 +36,14 @@ check_runtime_deps() {
         warn "docker is not installed or not in PATH."
         warn "hole requires Docker to run sandboxes. Install it from https://docs.docker.com/get-docker/"
     fi
+    if ! command -v jq >/dev/null 2>&1; then
+        warn "jq is not installed or not in PATH."
+        warn "hole requires jq to parse project settings. Install it from https://jqlang.github.io/jq/download/"
+    fi
+    if ! command -v jv >/dev/null 2>&1; then
+        warn "jv is not installed or not in PATH."
+        warn "hole requires jv to validate project settings. Install it from https://github.com/santhosh-tekuri/jsonschema"
+    fi
 }
 
 check_existing() {
@@ -82,6 +90,9 @@ extract_and_install() {
     cp "$src_dir/proxy/Dockerfile"              "$INSTALL_DIR/proxy/Dockerfile"
     cp "$src_dir/proxy/tinyproxy.conf"          "$INSTALL_DIR/proxy/tinyproxy.conf"
     cp "$src_dir/proxy/allowed-domains.txt"     "$INSTALL_DIR/proxy/allowed-domains.txt"
+
+    mkdir -p "$INSTALL_DIR/schema"
+    cp "$src_dir/schema/settings.schema.json" "$INSTALL_DIR/schema/settings.schema.json"
 
     chmod +x "$INSTALL_DIR/hole.sh"
 
