@@ -7,7 +7,7 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 HOLE_TMP_DIR="${TMPDIR:-/tmp}/hole"
 GLOBAL_SETTINGS_FILE="$HOME/.hole/settings.json"
 VALID_AGENTS=("claude" "gemini")
-VALID_COMMANDS=("start" "help")
+VALID_COMMANDS=("start" "help" "version")
 
 # Show help message
 show_help() {
@@ -16,11 +16,13 @@ Usage: hole {agent} {command} {path} [options]
 
 Agents:
   claude    Claude Code agent
-  gemini    Gemini agent (experimental)
 
 Commands:
   start     Create a sandbox, attach to the agent CLI, and destroy on exit
   help      Show this help message
+
+Global commands:
+  version   Print the installed hole version
 
 Options:
   --dump-network-access   After the agent exits, write distinct accessed domains
@@ -331,6 +333,16 @@ cmd_start() {
   echo "Exited $agent CLI. Sandbox destroyed."
 }
 
+# Print installed version
+cmd_version() {
+  local version_file="$SCRIPT_DIR/version"
+  if [[ -f "$version_file" ]]; then
+    echo "hole $(cat "$version_file")"
+  else
+    echo "hole development (no version file)"
+  fi
+}
+
 # Main entry point
 main() {
   local dump_network_access=false
@@ -348,7 +360,11 @@ main() {
   local command="${positional[1]:-}"
   local target_dir="${positional[2]:-.}"
 
-  # Handle help shortcuts
+  # Handle top-level commands (no agent required)
+  if [[ "$agent" == "version" ]]; then
+    cmd_version
+    exit 0
+  fi
   if [[ "$agent" == "help" ]] || [[ "$command" == "help" ]] || [[ -z "$agent" ]] || [[ -z "$command" ]]; then
     show_help
     exit 0
