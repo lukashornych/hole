@@ -159,6 +159,7 @@ generate_project_compose() {
 
   local agent_volumes=()
   local has_custom_domains=false
+  local whitelist_file="$compose_dir/tinyproxy-domain-whitelist.txt"
 
   # Read exclusions from merged settings and auto-detect files vs directories
   local entries
@@ -182,7 +183,6 @@ generate_project_compose() {
   domains=$(echo "$merged_settings" | jq -r '.network.domainWhitelist[]? // empty' 2>/dev/null) || true
   if [[ -n "$domains" ]]; then
     mkdir -p "$compose_dir"
-    local whitelist_file="$compose_dir/tinyproxy-domain-whitelist.txt"
     # Start with default allowed domains
     cp "$SCRIPT_DIR/proxy/allowed-domains.txt" "$whitelist_file"
     # Append project-specific domains (escape dots for tinyproxy regex filter)
@@ -192,6 +192,24 @@ generate_project_compose() {
       [[ -z "$domain" ]] && continue
       echo "${domain//./\\.}" >> "$whitelist_file"
     done <<< "$domains"
+    has_custom_domains=true
+  fi
+
+  # Read dependencies from merged settings
+  local deps
+  deps=$(echo "$merged_settings" | jq -r '.dependencies[]? // empty' 2>/dev/null) || true
+  if [[ -n "$deps" ]]; then
+    mkdir -p "$compose_dir"
+    local deps_file="$compose_dir/dependencies.txt"
+    echo "$deps" > "$deps_file"
+    agent_volumes+=("      - $deps_file:/tmp/hole-dependencies.txt:ro")
+    # Auto-add Ubuntu apt repository domains to proxy whitelist
+    if [[ "$has_custom_domains" != true ]]; then
+      cp "$SCRIPT_DIR/proxy/allowed-domains.txt" "$whitelist_file"
+      echo "" >> "$whitelist_file"
+    fi
+    echo "# Ubuntu apt repositories (auto-added for dependencies)" >> "$whitelist_file"
+    echo "ubuntu\.com" >> "$whitelist_file"
     has_custom_domains=true
   fi
 
@@ -215,7 +233,8 @@ generate_project_compose() {
   else
     # No overrides — remove stale files if any
     rm -f "$compose_file"
-    rm -f "$compose_dir/tinyproxy-domain-whitelist.txt"
+    rm -f "$whitelist_file"
+    rm -f "$compose_dir/dependencies.txt"
     rmdir "$compose_dir" 2>/dev/null || true
   fi
 

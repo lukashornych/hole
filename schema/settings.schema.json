@@ -28,6 +28,10 @@
           "items": { "type": "string", "minLength": 1 }
         }
       }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
     }
   }
 }

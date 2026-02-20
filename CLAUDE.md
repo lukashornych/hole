@@ -38,7 +38,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 - `~/.claude` directory: mounted directly at `/home/claude/.claude` in read-write mode. Changes (plans, project settings, etc.) persist back to the host.
 - `~/.claude.json` file: mounted read-only to staging dir (`/home/claude/.host-config/`), then copied to the home dir at container startup by `entrypoint.sh`. Avoids atomic-write corruption. Authentication is handled by `CLAUDE_CODE_OAUTH_TOKEN` env var, so config writes don't need to persist back to the host.
 - Secret files/folders hidden by mounting /dev/null over them (e.g., .env, .env.local)
-- Per-project exclusions configured via `.hole/settings.json`
+- Exclusions configured via `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project), merged at runtime
 
 **Agent runs as non-root user:**
 - User `claude` created in container (agents/claude/Dockerfile:11)
@@ -123,6 +123,29 @@ docker compose -p <project-name> up -d --build proxy
 4. Add allowed domains to `proxy/allowed-domains.txt`
 5. Update `hole.sh` VALID_AGENTS array to include the new agent
 
+### Global Settings
+
+Global defaults can be defined in `~/.hole/settings.json`. This file uses the same schema as per-project `.hole/settings.json`. When both exist, they are deep-merged before use:
+
+- **Objects**: recursively merged; project values win for scalar conflicts
+- **Arrays**: concatenated (global first, then project) and deduplicated preserving insertion order
+
+Example `~/.hole/settings.json`:
+```json
+{
+  "files": {
+    "exclude": [".env", ".env.local"]
+  },
+  "network": {
+    "domainWhitelist": [
+      "registry.npmjs.org"
+    ]
+  }
+}
+```
+
+If a project also has `.hole/settings.json` with `"files": { "exclude": [".env", "dist"] }`, the merged result will be `[".env", ".env.local", "dist"]`.
+
 ### Secret File/Folder Hiding
 
 Per-project exclusions are configured via `.hole/settings.json` in the project directory. The `files.exclude` array lists paths to hide from the agent. The script auto-detects whether each entry is a file or directory and generates the correct Docker volume mount:
@@ -169,6 +192,38 @@ Example `.hole/settings.json`:
   }
 }
 ```
+
+### Dependencies (apt packages)
+
+Additional apt packages can be installed at container startup via the `dependencies` array in `settings.json`. This works in both global (`~/.hole/settings.json`) and per-project (`.hole/settings.json`) settings.
+
+- **Format**: apt package names (`python3`) or with version pinning (`python3=3.10.6-1~22.04`)
+- **Merge behavior**: Arrays from global and project settings are concatenated and deduplicated (same as other array properties)
+- **Network**: When dependencies are specified, Ubuntu apt repository domains (`archive.ubuntu.com`, `security.ubuntu.com`) are automatically added to the proxy whitelist
+- **Installation**: Packages are installed via `sudo apt-get install` in `entrypoint.sh` at container startup, before the agent CLI starts
+
+Example `.hole/settings.json`:
+```json
+{
+  "dependencies": [
+    "python3",
+    "build-essential",
+    "htop"
+  ]
+}
+```
+
+Example `~/.hole/settings.json` (global):
+```json
+{
+  "dependencies": [
+    "python3",
+    "nodejs"
+  ]
+}
+```
+
+If both exist, the merged result includes all unique packages from both files.
 
 ### Container Naming
 
