@@ -26,8 +26,9 @@ jobs:
 
       - name: Resolve version
         id: version
-        uses: lukashornych/semantic-calendar-version@v1.1.3
+        uses: codacy/git-version@2.7.1
         with:
+          release-branch: 'main'
           prefix: 'v'
           minor-identifier: '/feat(?:\\([^)]+\\))?:/'
 
