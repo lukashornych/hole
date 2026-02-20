@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="https://github.com/lukashornych/hole/archive/refs/heads/main.tar.gz"
+GITHUB_REPO="lukashornych/hole"
+GITHUB_API="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
 INSTALL_DIR="$HOME/.local/share/hole"
 BIN_DIR="$HOME/.local/bin"
 BIN_PATH="$BIN_DIR/hole"
 
 TMPDIR_WORK=""
+DOWNLOAD_URL=""
 
 info()    { echo "[hole] $*"; }
 success() { echo "[hole] OK: $*"; }
@@ -60,12 +62,31 @@ setup_cleanup() {
     trap 'rm -rf "$TMPDIR_WORK"' EXIT
 }
 
+resolve_download_url() {
+    info "Resolving latest release..."
+    local response
+    if command -v curl >/dev/null 2>&1; then
+        response=$(curl -fsSL "$GITHUB_API")
+    else
+        response=$(wget -qO- "$GITHUB_API")
+    fi
+
+    local tag
+    tag=$(echo "$response" | grep '"tag_name"' | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+    if [ -z "$tag" ]; then
+        error "Failed to resolve latest release. No releases found at $GITHUB_API"
+    fi
+
+    DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/$tag/hole.tar.gz"
+    success "Latest release: $tag"
+}
+
 download() {
     info "Downloading hole from GitHub..."
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$REPO_URL" -o "$TMPDIR_WORK/hole.tar.gz"
+        curl -fsSL "$DOWNLOAD_URL" -o "$TMPDIR_WORK/hole.tar.gz"
     else
-        wget -q "$REPO_URL" -O "$TMPDIR_WORK/hole.tar.gz"
+        wget -q "$DOWNLOAD_URL" -O "$TMPDIR_WORK/hole.tar.gz"
     fi
     success "Download complete."
 }
@@ -74,27 +95,13 @@ extract_and_install() {
     info "Extracting archive..."
     tar -xzf "$TMPDIR_WORK/hole.tar.gz" -C "$TMPDIR_WORK"
 
-    local src_dir
-    src_dir="$(find "$TMPDIR_WORK" -maxdepth 1 -type d -name 'hole-*' | head -1)"
-    if [ -z "$src_dir" ]; then
+    local src_dir="$TMPDIR_WORK/hole"
+    if [ ! -d "$src_dir" ]; then
         error "Failed to locate extracted hole directory."
     fi
 
-    mkdir -p "$INSTALL_DIR/agents/claude"
-    mkdir -p "$INSTALL_DIR/proxy"
-
-    cp "$src_dir/hole.sh"                       "$INSTALL_DIR/hole.sh"
-    cp "$src_dir/docker-compose.yml"            "$INSTALL_DIR/docker-compose.yml"
-    cp "$src_dir/agents/claude/Dockerfile"      "$INSTALL_DIR/agents/claude/Dockerfile"
-    cp "$src_dir/agents/claude/entrypoint.sh"   "$INSTALL_DIR/agents/claude/entrypoint.sh"
-    cp "$src_dir/proxy/Dockerfile"              "$INSTALL_DIR/proxy/Dockerfile"
-    cp "$src_dir/proxy/tinyproxy.conf"          "$INSTALL_DIR/proxy/tinyproxy.conf"
-    cp "$src_dir/proxy/allowed-domains.txt"     "$INSTALL_DIR/proxy/allowed-domains.txt"
-
-    mkdir -p "$INSTALL_DIR/schema"
-    cp "$src_dir/schema/settings.schema.json" "$INSTALL_DIR/schema/settings.schema.json"
-
-    chmod +x "$INSTALL_DIR/hole.sh"
+    mkdir -p $INSTALL_DIR
+    cp -r "$src_dir"/* "$INSTALL_DIR"
 
     success "Files installed."
 }
@@ -139,6 +146,7 @@ main() {
     check_runtime_deps
     check_existing
     setup_cleanup
+    resolve_download_url
     download
     extract_and_install
     create_wrapper
