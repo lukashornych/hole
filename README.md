@@ -82,6 +82,22 @@ By default, agents can only reach a small set of domains required for their oper
 
 Use plain domain names — dots are auto-escaped for the proxy filter. Default domains are always included; project-specific domains are appended on top.
 
+#### Dependencies
+
+Additional apt packages can be installed at container startup via the `dependencies` array in `.hole/settings.json`:
+
+```json
+{
+  "dependencies": [
+    "python3",
+    "build-essential",
+    "htop"
+  ]
+}
+```
+
+Packages are installed via `apt-get install` before the agent CLI starts. When dependencies are specified, Ubuntu apt repository domains are automatically added to the proxy whitelist. Global and project dependencies are merged using the same concatenation and deduplication strategy as other array settings.
+
 #### Global settings
 
 You can define global defaults in `~/.hole/settings.json` so they apply to every project without repeating them:
