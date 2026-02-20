@@ -134,7 +134,10 @@ Example `~/.hole/settings.json`:
 ```json
 {
   "files": {
-    "exclude": [".env", ".env.local"]
+    "exclude": [".env", ".env.local"],
+    "include": {
+      "~/.npmrc": "/home/claude/.npmrc"
+    }
   },
   "network": {
     "domainWhitelist": [
@@ -144,7 +147,7 @@ Example `~/.hole/settings.json`:
 }
 ```
 
-If a project also has `.hole/settings.json` with `"files": { "exclude": [".env", "dist"] }`, the merged result will be `[".env", ".env.local", "dist"]`.
+If a project also has `.hole/settings.json` with `"files": { "exclude": [".env", "dist"] }`, the merged result will be `[".env", ".env.local", "dist"]`. For `files.include`, unique keys from both are combined; if both define the same key, the project value wins.
 
 ### Secret File/Folder Hiding
 
@@ -168,6 +171,33 @@ Example `.hole/settings.json`:
   }
 }
 ```
+
+### File Inclusion
+
+Additional host files or directories can be mounted into the sandbox via `files.include` in `settings.json` (both global and per-project). This is an object where keys are host paths and values are absolute container paths:
+
+```json
+{
+  "files": {
+    "include": {
+      "./shared-config": "/workspace/shared-config",
+      "/home/user/data": "/data",
+      "~/.npmrc": "/home/claude/.npmrc"
+    }
+  }
+}
+```
+
+- **Host path resolution:**
+  - `~/...` → expanded to `$HOME/...`
+  - Relative paths → resolved against the project directory
+  - Absolute paths → used as-is
+- **Container paths** must be absolute (enforced by schema `^/` pattern)
+- **Non-existent host paths** → warning printed to stderr, entry skipped
+- **Trailing slashes** are stripped from both host and container paths
+- **Merge behavior**: Since `include` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
+
+Each entry becomes a bind mount in the agent container: `{resolved_host_path}:{container_path}`.
 
 ### Project-Specific Domain Whitelist
 

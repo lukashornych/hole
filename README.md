@@ -65,6 +65,24 @@ You can hide project files and folders from the agent by creating a `.hole/setti
 
 Files are mounted as `/dev/null` and directories as empty anonymous volumes inside the container, making them inaccessible to the agent. Trailing slashes are stripped automatically. Non-existent paths are skipped with a warning.
 
+#### File inclusions
+
+You can mount additional host files or directories into the sandbox via `files.include` in `.hole/settings.json`. Keys are host paths, values are absolute container paths:
+
+```json
+{
+  "files": {
+    "include": {
+      "./shared-config": "/workspace/shared-config",
+      "/home/user/data": "/data",
+      "~/.npmrc": "/home/claude/.npmrc"
+    }
+  }
+}
+```
+
+Host paths are resolved as follows: `~/` is expanded to `$HOME`, relative paths are resolved against the project directory, and absolute paths are used as-is. Non-existent host paths are skipped with a warning. Container paths must be absolute (start with `/`).
+
 #### Domain whitelist
 
 By default, agents can only reach a small set of domains required for their operation (e.g., `api.anthropic.com` for Claude). To allow access to additional domains, add a `network.domainWhitelist` array to `.hole/settings.json`:
@@ -105,7 +123,10 @@ You can define global defaults in `~/.hole/settings.json` so they apply to every
 ```json
 {
   "files": {
-    "exclude": [".env", ".env.local"]
+    "exclude": [".env", ".env.local"],
+    "include": {
+      "~/.npmrc": "/home/claude/.npmrc"
+    }
   },
   "network": {
     "domainWhitelist": [

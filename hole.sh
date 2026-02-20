@@ -178,6 +178,28 @@ generate_project_compose() {
     fi
   done <<< "$entries"
 
+  # Read file inclusions from merged settings (host_path -> container_path)
+  local include_pairs
+  include_pairs=$(echo "$merged_settings" | jq -r '.files.include // {} | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null) || true
+  while IFS=$'\t' read -r host_path container_path; do
+    [[ -z "$host_path" ]] && continue
+    # Strip trailing slashes
+    host_path="${host_path%/}"
+    container_path="${container_path%/}"
+    # Resolve host path
+    if [[ "$host_path" == "~/"* ]]; then
+      host_path="$HOME/${host_path#\~/}"
+    elif [[ "$host_path" != /* ]]; then
+      host_path="$project_dir/$host_path"
+    fi
+    # Validate host path exists
+    if [[ ! -e "$host_path" ]]; then
+      echo "Warning: included path '$host_path' not found, skipping" >&2
+      continue
+    fi
+    agent_volumes+=("      - $host_path:$container_path")
+  done <<< "$include_pairs"
+
   # Read domain whitelist from merged settings
   local domains
   domains=$(echo "$merged_settings" | jq -r '.network.domainWhitelist[]? // empty' 2>/dev/null) || true

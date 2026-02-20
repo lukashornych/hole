@@ -16,6 +16,17 @@
         "exclude": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 }
+        },
+        "include": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^/"
+          },
+          "propertyNames": {
+            "minLength": 1
+          }
         }
       }
     },
