@@ -75,7 +75,7 @@ You can mount additional host files or directories into the sandbox via `files.i
     "include": {
       "./shared-config": "/workspace/shared-config",
       "/home/user/data": "/data",
-      "~/.npmrc": "/home/claude/.npmrc"
+      "~/.npmrc": "/home/agent/.npmrc"
     }
   }
 }
@@ -125,7 +125,7 @@ You can define global defaults in `~/.hole/settings.json` so they apply to every
   "files": {
     "exclude": [".env", ".env.local"],
     "include": {
-      "~/.npmrc": "/home/claude/.npmrc"
+      "~/.npmrc": "/home/agent/.npmrc"
     }
   },
   "network": {

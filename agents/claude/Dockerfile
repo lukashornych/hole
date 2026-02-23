@@ -10,22 +10,22 @@ RUN apt-get update && apt-get install -y \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -s /bin/bash claude
-RUN echo "claude ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/claude
+RUN useradd -m -s /bin/bash agent
+RUN echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent
 
 WORKDIR /workspace
 
 # Staging dir for .claude.json (mounted read-only, copied to home by entrypoint)
-RUN mkdir -p /home/claude/.host-config \
-    && chown -R claude:claude /home/claude/.host-config
+RUN mkdir -p /home/agent/.host-config \
+    && chown -R agent:agent /home/agent/.host-config
 
 COPY agents/claude/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-USER claude
+USER agent
 
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-ENV PATH="/home/claude/.local/bin:$PATH"
+ENV PATH="/home/agent/.local/bin:$PATH"
 
 ENTRYPOINT ["entrypoint.sh"]
