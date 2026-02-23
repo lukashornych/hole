@@ -60,11 +60,11 @@ Before using the Claude sandbox, set up authentication:
 
 **Start a sandbox:**
 ```bash
-./hole.sh claude start /path/to/project
+./hole.sh start claude /path/to/project
 ```
 Or from within a project directory:
 ```bash
-./hole.sh claude start .
+./hole.sh start claude .
 ```
 
 The sandbox is fully destroyed when you exit the agent CLI.

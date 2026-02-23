@@ -12,26 +12,24 @@ VALID_COMMANDS=("start" "help" "version")
 # Show help message
 show_help() {
   cat <<EOF
-Usage: hole {agent} {command} {path} [options]
-
-Agents:
-  claude    Claude Code agent
+Usage: hole {command} {agent} {path} [options]
 
 Commands:
   start     Create a sandbox, attach to the agent CLI, and destroy on exit
   help      Show this help message
-
-Global commands:
   version   Print the installed hole version
+
+Agents:
+  claude    Claude Code agent
 
 Options:
   --dump-network-access   After the agent exits, write distinct accessed domains
                           to {agent}-network-access-{id}.log in the project directory
 
 Examples:
-  hole claude start .
-  hole claude start /path/to/project
-  hole claude start . --dump-network-access
+  hole start claude .
+  hole start claude /path/to/project
+  hole start claude . --dump-network-access
 
 The sandbox is fully destroyed when you exit the agent CLI.
 EOF
@@ -356,16 +354,16 @@ main() {
   done
 
   # Parse positional arguments with defaults
-  local agent="${positional[0]:-}"
-  local command="${positional[1]:-}"
+  local command="${positional[0]:-}"
+  local agent="${positional[1]:-}"
   local target_dir="${positional[2]:-.}"
 
   # Handle top-level commands (no agent required)
-  if [[ "$agent" == "version" ]]; then
+  if [[ "$command" == "version" ]]; then
     cmd_version
     exit 0
   fi
-  if [[ "$agent" == "help" ]] || [[ "$command" == "help" ]] || [[ -z "$agent" ]] || [[ -z "$command" ]]; then
+  if [[ "$command" == "help" ]] || [[ -z "$command" ]]; then
     show_help
     exit 0
   fi

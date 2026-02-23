@@ -134,7 +134,7 @@ print_success() {
     echo "  Command:  $BIN_PATH"
     echo ""
     echo "  Get started:"
-    echo "    hole claude start /path/to/project"
+    echo "    hole start claude /path/to/project"
     echo "    hole help"
     echo ""
 }
