@@ -39,7 +39,7 @@ wget -qO- https://raw.githubusercontent.com/lukashornych/hole/main/uninstall.sh 
 
 Create an agent sandbox in the current directory:
 ```shell
-hole {agent} start .
+hole start {agent} .
 ```
 
 The sandbox is fully destroyed when you exit the agent CLI. Multiple sandboxes can run simultaneously for the same project — each gets a unique instance ID.
@@ -75,7 +75,7 @@ You can mount additional host files or directories into the sandbox via `files.i
     "include": {
       "./shared-config": "/workspace/shared-config",
       "/home/user/data": "/data",
-      "~/.npmrc": "/home/claude/.npmrc"
+      "~/.npmrc": "/home/agent/.npmrc"
     }
   }
 }
@@ -125,7 +125,7 @@ You can define global defaults in `~/.hole/settings.json` so they apply to every
   "files": {
     "exclude": [".env", ".env.local"],
     "include": {
-      "~/.npmrc": "/home/claude/.npmrc"
+      "~/.npmrc": "/home/agent/.npmrc"
     }
   },
   "network": {
@@ -143,7 +143,7 @@ Global and project settings are deep-merged: arrays are concatenated and dedupli
 To see which domains the agent accessed during a session, pass the `--dump-network-access` flag:
 
 ```shell
-hole claude start . --dump-network-access
+hole start claude . --dump-network-access
 ```
 
 After the agent exits, a `claude-network-access-{id}.log` file is written to the project directory containing a sorted list of distinct domains (both allowed and denied requests). The `{id}` is the unique instance ID assigned to that sandbox session.
@@ -190,7 +190,7 @@ todo lho only needed for max
 
 Create a Claude sandbox in the current directory:
 ```shell
-hole claude start .
+hole start claude .
 ```
 
 The sandbox is fully destroyed when you exit the CLI.

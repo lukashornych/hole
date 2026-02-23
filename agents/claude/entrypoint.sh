@@ -4,10 +4,10 @@ set -euo pipefail
 # Copy .claude.json from read-only staging mount into the writable home dir.
 # This avoids bind-mount corruption from atomic writes. The .claude directory
 # is mounted directly (read-write) via docker-compose.
-STAGING_DIR="/home/claude/.host-config"
+STAGING_DIR="/home/agent/.host-config"
 
 if [[ -f "$STAGING_DIR/.claude.json" ]]; then
-    cp "$STAGING_DIR/.claude.json" /home/claude/.claude.json
+    cp "$STAGING_DIR/.claude.json" /home/agent/.claude.json
 fi
 
 # Install additional dependencies if a deps file was mounted

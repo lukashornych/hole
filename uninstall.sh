@@ -19,8 +19,7 @@ print_success() {
 main() {
     info "Starting hole uninstallation..."
 
-    warn "If you have running sandboxes, destroy them first:"
-    warn "  hole <agent> destroy /path/to/project"
+    warn "If you have running sandboxes, exit them first (they auto-destroy on exit)."
     warn "Proceeding will remove hole files but leave Docker containers/images intact."
 
     if [ ! -d "$INSTALL_DIR" ] && [ ! -f "$BIN_PATH" ]; then
