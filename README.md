@@ -116,6 +116,24 @@ Additional apt packages can be installed at container startup via the `dependenc
 
 Packages are installed via `apt-get install` before the agent CLI starts. When dependencies are specified, Ubuntu apt repository domains are automatically added to the proxy whitelist. Global and project dependencies are merged using the same concatenation and deduplication strategy as other array settings.
 
+#### Container settings
+
+Container properties can be configured via the `container` object in `.hole/settings.json`:
+
+```json
+{
+  "container": {
+    "memoryLimit": "8g",
+    "memorySwapLimit": "12g"
+  }
+}
+```
+
+Supported values are:
+
+- `memoryLimit` — maps to Docker's `mem_limit` (e.g., `"8g"`, `"512m"`, `"2048m"`)
+- `memorySwapLimit` — maps to Docker's `memswap_limit` (e.g., `"8g"`, `"512m"`, `"2048m"`)
+
 #### Global settings
 
 You can define global defaults in `~/.hole/settings.json` so they apply to every project without repeating them:
@@ -137,6 +155,16 @@ You can define global defaults in `~/.hole/settings.json` so they apply to every
 ```
 
 Global and project settings are deep-merged: arrays are concatenated and deduplicated (global items first), while project scalar values take precedence. For example, if the global file excludes `[".env", "node_modules"]` and the project excludes `["node_modules", "dist"]`, the merged result is `[".env", "node_modules", "dist"]`.
+
+#### Debug mode
+
+To inspect the sandbox environment (mounted volumes, network connectivity, installed packages), use the `--debug` flag to open a bash shell instead of the agent CLI:
+
+```shell
+hole start claude . --debug
+```
+
+The sandbox is set up normally (proxy, volumes, network) but drops you into an interactive shell. When you exit, the sandbox is destroyed as usual.
 
 #### Network access log
 

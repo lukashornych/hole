@@ -255,6 +255,25 @@ Example `~/.hole/settings.json` (global):
 
 If both exist, the merged result includes all unique packages from both files.
 
+### Container Settings
+
+Container options can be configured via `container` in `settings.json` (both global and per-project).
+
+Supported options are
+
+- `container.memoryLimit` → maps to Docker `mem_limit` (e.g., `"8g"`, `"512m"`, `"2048m"`)
+- `container.memorySwapLimit` → maps to Docker `memswap_limit` (e.g., `"8g"`, `"512m"`, `"2048m"`)
+
+Example `.hole/settings.json`:
+```json
+{
+  "container": {
+    "memoryLimit": "8g",
+    "memorySwapLimit": "12g"
+  }
+}
+```
+
 ### Container Naming
 
 Project name derived from sanitized absolute path plus a random instance ID: `hole-$(sanitized_absolute_path)-$(agent)-$(instance_id)`

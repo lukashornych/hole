@@ -43,6 +43,20 @@
     "dependencies": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
+    },
+    "container": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "memoryLimit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "memorySwapLimit": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   }
 }
