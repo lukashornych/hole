@@ -291,6 +291,16 @@ build_compose_cmd() {
   fi
 }
 
+# Ensure the persistent agent home volume exists
+ensure_agent_volume() {
+  local agent="$1"
+  local volume_name="hole-agent-home-$agent"
+  if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
+    echo "Creating persistent volume: $volume_name"
+    docker volume create "$volume_name"
+  fi
+}
+
 # Start command: create/start sandbox and attach to agent CLI
 cmd_start() {
   local agent=$1
@@ -317,6 +327,9 @@ cmd_start() {
   echo "Launching sandbox for: $project_dir"
   echo "Project name: $COMPOSE_PROJECT_NAME"
   echo ""
+
+  # Ensure persistent agent home volume exists
+  ensure_agent_volume "$agent"
 
   # Start proxy in detached mode with health check wait
   echo "Starting proxy..."

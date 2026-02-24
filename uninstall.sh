@@ -20,7 +20,7 @@ main() {
     info "Starting hole uninstallation..."
 
     warn "If you have running sandboxes, exit them first (they auto-destroy on exit)."
-    warn "Proceeding will remove hole files but leave Docker containers/images intact."
+    warn "Proceeding will remove hole files and agent home volumes."
 
     if [ ! -d "$INSTALL_DIR" ] && [ ! -f "$BIN_PATH" ]; then
         info "No hole installation found. Nothing to do."
@@ -38,6 +38,16 @@ main() {
         rm -f "$BIN_PATH"
         success "Removed $BIN_PATH"
     fi
+
+    local agents=("claude" "gemini")
+    for agent in "${agents[@]}"; do
+        local volume_name="hole-agent-home-$agent"
+        if docker volume inspect "$volume_name" >/dev/null 2>&1; then
+            info "Removing Docker volume: $volume_name..."
+            docker volume rm "$volume_name"
+            success "Removed $volume_name"
+        fi
+    done
 
     print_success
 }

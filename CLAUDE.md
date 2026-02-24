@@ -23,7 +23,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 
 **Two main services:**
 - `proxy`: Tinyproxy-based HTTP/HTTPS proxy that filters requests to allowed domains only (proxy/allowed-domains.txt)
-- `claude`: Claude Code CLI agent running in Ubuntu 22.04 container with workspace access
+- `claude`: Claude Code CLI agent running in Ubuntu 24.04 container with workspace access
 
 ### Security Model
 
@@ -35,8 +35,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 
 **File access control:**
 - Project directory mounted read-write at /workspace
-- `~/.claude` directory: mounted directly at `/home/agent/.claude` in read-write mode. Changes (plans, project settings, etc.) persist back to the host.
-- `~/.claude.json` file: mounted read-only to staging dir (`/home/agent/.host-config/`), then copied to the home dir at container startup by `entrypoint.sh`. Avoids atomic-write corruption. Authentication is handled by `CLAUDE_CODE_OAUTH_TOKEN` env var, so config writes don't need to persist back to the host.
+- Agent home directory (`/home/agent`) backed by a persistent Docker named volume (`hole-agent-home-claude`). Credentials, settings, and CLI state survive sandbox teardown.
 - Secret files/folders hidden by mounting /dev/null over them (e.g., .env, .env.local)
 - Exclusions configured via `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project), merged at runtime
 
@@ -48,13 +47,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 
 ### Setup (first time)
 
-Before using the Claude sandbox, set up authentication:
-1. Install Claude Code locally
-2. Run `claude setup-token` and login
-3. Store the OAuth token in your shell profile (.bashrc/.zshrc):
-   ```bash
-   export CLAUDE_CODE_OAUTH_TOKEN="sk-ant-..."
-   ```
+No host-side setup is required. On first `hole start claude`, the persistent agent home volume is created automatically. Log in inside the sandbox using the `/login` command in Claude Code. Credentials persist across sandbox sessions in the `hole-agent-home-claude` Docker volume.
 
 ### Running the Sandbox
 
@@ -95,7 +88,7 @@ The sandbox is fully destroyed when you exit the agent CLI.
 
 - `hole.sh` - CLI tool for managing sandboxes (start command)
 - `docker-compose.yml` - Service orchestration with profiles (claude, gemini)
-- `agents/claude/Dockerfile` - Claude agent image (Ubuntu 22.04 + curl, git, ripgrep, Claude CLI)
+- `agents/claude/Dockerfile` - Claude agent image (Ubuntu 24.04 + curl, git, ripgrep, Claude CLI)
 - `proxy/Dockerfile` - Proxy image (Alpine + tinyproxy)
 - `proxy/tinyproxy.conf` - Proxy configuration (port 8888, filter enabled)
 - `proxy/allowed-domains.txt` - Domain whitelist (regex patterns)
@@ -122,6 +115,7 @@ docker compose -p <project-name> up -d --build proxy
 3. Configure proxy dependency and network: sandbox only
 4. Add allowed domains to `proxy/allowed-domains.txt`
 5. Update `hole.sh` VALID_AGENTS array to include the new agent
+6. Update `uninstall.sh` agents array to include the new agent (for volume cleanup)
 
 ### Global Settings
 
@@ -284,3 +278,13 @@ This ensures:
 - Multiple sandboxes can run simultaneously for the same project
 - Clean separation between different sandboxes
 - No collisions between projects with same directory name in different locations
+
+### Agent Home Volume
+
+Each agent type has a persistent Docker named volume for its home directory (`hole-agent-home-<agent>`). Lifecycle:
+
+- **Created** by `hole.sh ensure_agent_volume()` on first `start` for that agent
+- **Auto-populated** by Docker from the image's `/home/agent` contents on first use (CLI binary, `.bashrc`, etc.)
+- **Survives** sandbox teardown (`docker compose down --rmi local` does not remove named volumes)
+- **Declared `external: true`** in `docker-compose.yml` to prevent accidental removal by `docker compose down -v`
+- **Removed** by `uninstall.sh` during full uninstallation

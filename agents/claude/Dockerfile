@@ -15,10 +15,6 @@ RUN echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent
 
 WORKDIR /workspace
 
-# Staging dir for .claude.json (mounted read-only, copied to home by entrypoint)
-RUN mkdir -p /home/agent/.host-config \
-    && chown -R agent:agent /home/agent/.host-config
-
 COPY agents/claude/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 

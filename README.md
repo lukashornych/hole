@@ -180,39 +180,11 @@ After the agent exits, a `claude-network-access-{id}.log` file is written to the
 
 ### Claude
 
-#### Setup
+Each agent type gets its own persistent Docker volume for its home directory (e.g., `hole-agent-home-claude` for Claude). This volume stores credentials, settings, and CLI state across sandbox sessions.
 
-Before you start using Claude sandbox, is good idea to setup long-lived authentication token so you
-don't have to login every time you create a new sandbox.
+#### First run
 
-todo lho either install on host or login each time you start sandbox
-
-todo lho only needed for max
-
-1. install [Claude Code](https://claude.com/product/claude-code) locally
-2. run `claude setup-token`
-3. login to Claude
-4. after successful login, you should be redirected back to terminal with the following message:
-
-  ```
-  ✓ Long-lived authentication token created successfully!
-                                                                                                                                                           
-  Your OAuth token (valid for 1 year):                                                                                                                     
-                                     
-  sk-ant-..........
-  
-  Store this token securely. You won't be able to see it again.
-  
-  Use this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>
-  ```
-
-5. store the OAuth token as your environment variable (`.bashrc` on Linux, `.zshrc` on macOS)
-
-  ```
-  export CLAUDE_CODE_OAUTH_TOKEN="sk-ant-........"
-  ```
-
-6. start Claude Code locally and setup and login again
+On first `hole start claude .`, the volume is created automatically. Once inside the sandbox, log in directly using the `/login` command in Claude Code. Your credentials persist — you only need to log in once.
 
 #### Use
 
@@ -221,5 +193,7 @@ Create a Claude sandbox in the current directory:
 hole start claude .
 ```
 
-The sandbox is fully destroyed when you exit the CLI.
+The sandbox containers are destroyed when you exit the CLI, but the agent home volume persists so your login and settings carry over to the next session.
+
+The volume is auto-created on first `hole start` and removed on uninstall.
 
