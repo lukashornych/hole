@@ -116,6 +116,24 @@ Additional apt packages can be installed at container startup via the `dependenc
 
 Packages are installed via `apt-get install` before the agent CLI starts. When dependencies are specified, Ubuntu apt repository domains are automatically added to the proxy whitelist. Global and project dependencies are merged using the same concatenation and deduplication strategy as other array settings.
 
+#### Container settings
+
+Container properties can be configured via the `container` object in `.hole/settings.json`:
+
+```json
+{
+  "container": {
+    "memoryLimit": "8g",
+    "memorySwapLimit": "12g"
+  }
+}
+```
+
+Supported values are:
+
+- `memoryLimit` — maps to Docker's `mem_limit` (e.g., `"8g"`, `"512m"`, `"2048m"`)
+- `memorySwapLimit` — maps to Docker's `memswap_limit` (e.g., `"8g"`, `"512m"`, `"2048m"`)
+
 #### Global settings
 
 You can define global defaults in `~/.hole/settings.json` so they apply to every project without repeating them:

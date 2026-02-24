@@ -235,7 +235,13 @@ generate_project_compose() {
     has_custom_domains=true
   fi
 
-  if [[ ${#agent_volumes[@]} -gt 0 || "$has_custom_domains" == true ]]; then
+  # Read container memory settings from merged settings
+  local agent_mem_limit
+  agent_mem_limit=$(echo "$merged_settings" | jq -r '.container.memoryLimit // empty' 2>/dev/null) || true
+  local agent_memswap_limit
+  agent_memswap_limit=$(echo "$merged_settings" | jq -r '.container.memorySwapLimit // empty' 2>/dev/null) || true
+
+  if [[ ${#agent_volumes[@]} -gt 0 || "$has_custom_domains" == true || -n "$agent_mem_limit" || -n "$agent_memswap_limit" ]]; then
     mkdir -p "$compose_dir"
     {
       echo "services:"
@@ -244,12 +250,20 @@ generate_project_compose() {
         echo "    volumes:"
         echo "      - $compose_dir/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
       fi
-      if [[ ${#agent_volumes[@]} -gt 0 ]]; then
+      if [[ ${#agent_volumes[@]} -gt 0 || -n "$agent_mem_limit" || -n "$agent_memswap_limit" ]]; then
         echo "  $agent:"
-        echo "    volumes:"
-        for v in "${agent_volumes[@]}"; do
-          echo "$v"
-        done
+        if [[ -n "$agent_mem_limit" ]]; then
+          echo "    mem_limit: $agent_mem_limit"
+        fi
+        if [[ -n "$agent_memswap_limit" ]]; then
+          echo "    memswap_limit: $agent_memswap_limit"
+        fi
+        if [[ ${#agent_volumes[@]} -gt 0 ]]; then
+          echo "    volumes:"
+          for v in "${agent_volumes[@]}"; do
+            echo "$v"
+          done
+        fi
       fi
     } > "$compose_file"
   else
