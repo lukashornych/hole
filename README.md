@@ -156,6 +156,16 @@ You can define global defaults in `~/.hole/settings.json` so they apply to every
 
 Global and project settings are deep-merged: arrays are concatenated and deduplicated (global items first), while project scalar values take precedence. For example, if the global file excludes `[".env", "node_modules"]` and the project excludes `["node_modules", "dist"]`, the merged result is `[".env", "node_modules", "dist"]`.
 
+#### Debug mode
+
+To inspect the sandbox environment (mounted volumes, network connectivity, installed packages), use the `--debug` flag to open a bash shell instead of the agent CLI:
+
+```shell
+hole start claude . --debug
+```
+
+The sandbox is set up normally (proxy, volumes, network) but drops you into an interactive shell. When you exit, the sandbox is destroyed as usual.
+
 #### Network access log
 
 To see which domains the agent accessed during a session, pass the `--dump-network-access` flag:

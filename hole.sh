@@ -23,6 +23,8 @@ Agents:
   claude    Claude Code agent
 
 Options:
+  --debug                 Open a bash shell instead of the agent CLI for
+                          inspecting the sandbox environment
   --dump-network-access   After the agent exits, write distinct accessed domains
                           to {agent}-network-access-{id}.log in the project directory
 
@@ -153,6 +155,7 @@ generate_project_compose() {
   local project_dir="$2"
   local project_name="$3"
   local merged_settings="$4"
+  local debug_mode="${5:-false}"
 
   local compose_dir="$HOLE_TMP_DIR/projects/$project_name"
   local compose_file="$compose_dir/docker-compose.yml"
@@ -241,7 +244,7 @@ generate_project_compose() {
   local agent_memswap_limit
   agent_memswap_limit=$(echo "$merged_settings" | jq -r '.container.memorySwapLimit // empty' 2>/dev/null) || true
 
-  if [[ ${#agent_volumes[@]} -gt 0 || "$has_custom_domains" == true || -n "$agent_mem_limit" || -n "$agent_memswap_limit" ]]; then
+  if [[ ${#agent_volumes[@]} -gt 0 || "$has_custom_domains" == true || -n "$agent_mem_limit" || -n "$agent_memswap_limit" || "$debug_mode" == true ]]; then
     mkdir -p "$compose_dir"
     {
       echo "services:"
@@ -250,13 +253,16 @@ generate_project_compose() {
         echo "    volumes:"
         echo "      - $compose_dir/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
       fi
-      if [[ ${#agent_volumes[@]} -gt 0 || -n "$agent_mem_limit" || -n "$agent_memswap_limit" ]]; then
+      if [[ ${#agent_volumes[@]} -gt 0 || -n "$agent_mem_limit" || -n "$agent_memswap_limit" || "$debug_mode" == true ]]; then
         echo "  $agent:"
         if [[ -n "$agent_mem_limit" ]]; then
           echo "    mem_limit: $agent_mem_limit"
         fi
         if [[ -n "$agent_memswap_limit" ]]; then
           echo "    memswap_limit: $agent_memswap_limit"
+        fi
+        if [[ "$debug_mode" == true ]]; then
+          echo "    command: [\"bash\"]"
         fi
         if [[ ${#agent_volumes[@]} -gt 0 ]]; then
           echo "    volumes:"
@@ -290,6 +296,7 @@ cmd_start() {
   local agent=$1
   local project_dir=$2
   local dump_network_access=${3:-false}
+  local debug_mode=${4:-false}
 
   # Validate settings files if present
   validate_settings "$GLOBAL_SETTINGS_FILE" "global settings (~/.hole/settings.json)"
@@ -300,9 +307,13 @@ cmd_start() {
   merged_settings=$(merge_settings "$GLOBAL_SETTINGS_FILE" "$project_dir/.hole/settings.json")
 
   # Generate per-project compose override from merged settings
-  generate_project_compose "$agent" "$project_dir" "$COMPOSE_PROJECT_NAME" "$merged_settings"
+  generate_project_compose "$agent" "$project_dir" "$COMPOSE_PROJECT_NAME" "$merged_settings" "$debug_mode"
   build_compose_cmd
 
+  if [[ "$debug_mode" == true ]]; then
+    echo "Debug mode: opening bash shell instead of agent CLI"
+    echo ""
+  fi
   echo "Launching sandbox for: $project_dir"
   echo "Project name: $COMPOSE_PROJECT_NAME"
   echo ""
@@ -358,10 +369,12 @@ cmd_version() {
 # Main entry point
 main() {
   local dump_network_access=false
+  local debug_mode=false
   local positional=()
 
   for arg in "$@"; do
     case "$arg" in
+      --debug) debug_mode=true ;;
       --dump-network-access) dump_network_access=true ;;
       *) positional+=("$arg") ;;
     esac
@@ -397,7 +410,7 @@ main() {
 
   # Dispatch to command handler
   case "$command" in
-    start)   cmd_start "$agent" "$project_dir" "$dump_network_access" ;;
+    start)   cmd_start "$agent" "$project_dir" "$dump_network_access" "$debug_mode" ;;
     help)    show_help ;;
     *)       echo "Unknown command: $command" >&2; exit 1 ;;
   esac
