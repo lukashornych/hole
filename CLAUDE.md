@@ -279,6 +279,14 @@ This ensures:
 - Clean separation between different sandboxes
 - No collisions between projects with same directory name in different locations
 
+### Version Check & Update
+
+`hole.sh` includes a version check mechanism and an `update` command:
+
+- **Silent version check**: Runs during `start` and `version` commands with a 1-second timeout. Compares the installed version (`version` file) against the latest GitHub release. Prints a one-line notice if a newer version exists. Skipped in dev mode (no version file). Network failures are silently ignored.
+- **`hole update` command**: Fetches the latest version from the GitHub API. If newer, downloads and runs `install.sh` from the main branch. Errors on dev installations (no version file).
+- **GitHub constants**: `GITHUB_REPO`, `GITHUB_API`, `GITHUB_INSTALL_SCRIPT` defined at the top of `hole.sh`.
+
 ### Agent Home Volume
 
 Each agent type has a persistent Docker named volume for its home directory (`hole-agent-home-<agent>`). Lifecycle:

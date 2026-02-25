@@ -42,6 +42,7 @@ hole start claude . --dump-network-access  # write accessed domains to a log fil
 ```sh
 hole help      # show usage information
 hole version   # print installed version
+hole update    # update to the latest release
 ```
 
 ## Installation
@@ -64,7 +65,9 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ### Update
 
-Run the same install command again — the installer detects an existing installation, removes it, and reinstalls from the latest release.
+```sh
+hole update
+```
 
 Exit any running sandboxes before updating.
 
