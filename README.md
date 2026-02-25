@@ -1,11 +1,54 @@
-# Hole - AI agent sandboxes
+# Hole
 
-CLI tool to create and manage sandboxes for AI agents. It supports limiting file access
-and network access.
+## What is Hole?
+
+Hole is a CLI tool for running AI agents in isolated Docker sandboxes.
+
+Running AI agents directly on your host machine is risky — they have access to your filesystem, network, and credentials. Built-in agent sandboxes (e.g. Claude Code's) can potentially be bypassed by the agent itself, since the agent controls the process.
+
+Hole provides true isolation through:
+
+- **Network control** — all traffic routes through a proxy with a domain whitelist; the agent cannot reach the internet directly
+- **File access control** — project files are mounted into the container, with configurable exclusions (e.g. `.env`, `node_modules`) hidden from the agent
+- **Containerized execution** — the agent runs as a non-root user inside a Docker container that is destroyed on exit
+
+## Usage
+
+Start a sandbox for a supported agent (`claude`) in a project directory:
+
+```sh
+hole start claude .
+# or
+hole start claude /path/to/project
+```
+
+The sandbox is created from scratch each time and fully destroyed when you exit the agent CLI. Multiple sandboxes can run simultaneously for the same project.
+
+Credentials persist across sessions in a Docker volume. On first run, the volume is created automatically — log in inside the sandbox using `/login` in Claude Code. You only need to log in once.
+
+### Flags
+
+```sh
+hole start claude . --debug               # open a bash shell instead of the agent CLI
+hole start claude . --dump-network-access  # write accessed domains to a log file on exit
+```
+
+`--debug` sets up the sandbox normally but drops you into an interactive shell for inspecting volumes, network connectivity, and installed packages.
+
+`--dump-network-access` writes a `claude-network-access-{id}.log` file to the project directory after the agent exits, containing a sorted list of distinct domains (both allowed and denied).
+
+### Other commands
+
+```sh
+hole help      # show usage information
+hole version   # print installed version
+```
 
 ## Installation
 
-**Requirements:** `curl` or `wget`, `tar`, and `docker`.
+**Supported platforms:** Linux, macOS, WSL
+
+**Requirements:** `curl` or `wget`, `tar`, `docker`, `jq`, `jv`
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/lukashornych/hole/main/install.sh | bash
@@ -21,13 +64,13 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ### Update
 
-Run the same install command again — the installer detects an existing installation, removes it, and reinstalls from the latest `main`.
+Run the same install command again — the installer detects an existing installation, removes it, and reinstalls from the latest release.
 
-_Note: any running sandboxes should be exited before updating._
+Exit any running sandboxes before updating.
 
 ### Uninstall
 
-Exit any running sandboxes first (sandboxes are automatically destroyed on exit), then run:
+Exit any running sandboxes first, then run:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/lukashornych/hole/main/uninstall.sh | bash
@@ -35,90 +78,71 @@ curl -fsSL https://raw.githubusercontent.com/lukashornych/hole/main/uninstall.sh
 wget -qO- https://raw.githubusercontent.com/lukashornych/hole/main/uninstall.sh | bash
 ```
 
-## Sandboxes
+## Configuration
 
-Create an agent sandbox in the current directory:
-```shell
-hole start {agent} .
-```
+Settings are defined in `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project). When both exist, they are deep-merged: objects are recursively merged (project values win for scalar conflicts), arrays are concatenated and deduplicated (global items first).
 
-The sandbox is fully destroyed when you exit the agent CLI. Multiple sandboxes can run simultaneously for the same project — each gets a unique instance ID.
+### File exclusions
 
-### Configuration
-
-#### File exclusions
-
-You can hide project files and folders from the agent by creating a `.hole/settings.json` in your project root:
+Hide files and directories from the agent:
 
 ```json
 {
   "files": {
-    "exclude": [
-      ".env",
-      ".env.local",
-      "node_modules",
-      "dist"
-    ]
+    "exclude": [".env", ".env.local", "node_modules", "dist"]
   }
 }
 ```
 
-Files are mounted as `/dev/null` and directories as empty anonymous volumes inside the container, making them inaccessible to the agent. Trailing slashes are stripped automatically. Non-existent paths are skipped with a warning.
+Files are mounted as `/dev/null` and directories as empty anonymous volumes inside the container. Non-existent paths are skipped with a warning.
 
-#### File inclusions
+### File inclusions
 
-You can mount additional host files or directories into the sandbox via `files.include` in `.hole/settings.json`. Keys are host paths, values are absolute container paths:
+Mount additional host files or directories into the sandbox. Keys are host paths, values are absolute container paths:
 
 ```json
 {
   "files": {
     "include": {
+      "~/.npmrc": "/home/agent/.npmrc",
       "./shared-config": "/workspace/shared-config",
-      "/home/user/data": "/data",
-      "~/.npmrc": "/home/agent/.npmrc"
+      "/home/user/data": "/data"
     }
   }
 }
 ```
 
-Host paths are resolved as follows: `~/` is expanded to `$HOME`, relative paths are resolved against the project directory, and absolute paths are used as-is. Non-existent host paths are skipped with a warning. Container paths must be absolute (start with `/`).
+Host paths starting with `~/` expand to `$HOME`, relative paths resolve against the project directory, and absolute paths are used as-is. Non-existent paths are skipped with a warning.
 
-#### Domain whitelist
+### Domain whitelist
 
-By default, agents can only reach a small set of domains required for their operation (e.g., `api.anthropic.com` for Claude). To allow access to additional domains, add a `network.domainWhitelist` array to `.hole/settings.json`:
+By default, agents can only reach domains required for their operation (e.g. `api.anthropic.com` for Claude). Allow additional domains:
 
 ```json
 {
   "network": {
-    "domainWhitelist": [
-      "registry.npmjs.org",
-      "api.github.com"
-    ]
+    "domainWhitelist": ["registry.npmjs.org", "api.github.com"]
   }
 }
 ```
 
-Use plain domain names — dots are auto-escaped for the proxy filter. Default domains are always included; project-specific domains are appended on top.
+Use plain domain names — dots are auto-escaped for the proxy filter.
 
-#### Dependencies
+### Dependencies
 
-Additional apt packages can be installed at container startup via the `dependencies` array in `.hole/settings.json`:
+Install additional apt packages at container startup:
 
 ```json
 {
-  "dependencies": [
-    "python3",
-    "build-essential",
-    "htop"
-  ]
+  "dependencies": ["python3", "build-essential", "htop"]
 }
 ```
 
-Packages are installed via `apt-get install` before the agent CLI starts. When dependencies are specified, Ubuntu apt repository domains are automatically added to the proxy whitelist. Global and project dependencies are merged using the same concatenation and deduplication strategy as other array settings.
+Packages are installed before the agent CLI starts. Ubuntu apt repository domains are automatically added to the proxy whitelist when dependencies are specified.
 
-#### Container settings
+### Container settings
 
-Container properties can be configured via the `container` object in `.hole/settings.json`:
+Configure container resource limits:
 
 ```json
 {
@@ -129,71 +153,5 @@ Container properties can be configured via the `container` object in `.hole/sett
 }
 ```
 
-Supported values are:
-
-- `memoryLimit` — maps to Docker's `mem_limit` (e.g., `"8g"`, `"512m"`, `"2048m"`)
-- `memorySwapLimit` — maps to Docker's `memswap_limit` (e.g., `"8g"`, `"512m"`, `"2048m"`)
-
-#### Global settings
-
-You can define global defaults in `~/.hole/settings.json` so they apply to every project without repeating them:
-
-```json
-{
-  "files": {
-    "exclude": [".env", ".env.local"],
-    "include": {
-      "~/.npmrc": "/home/agent/.npmrc"
-    }
-  },
-  "network": {
-    "domainWhitelist": [
-      "registry.npmjs.org"
-    ]
-  }
-}
-```
-
-Global and project settings are deep-merged: arrays are concatenated and deduplicated (global items first), while project scalar values take precedence. For example, if the global file excludes `[".env", "node_modules"]` and the project excludes `["node_modules", "dist"]`, the merged result is `[".env", "node_modules", "dist"]`.
-
-#### Debug mode
-
-To inspect the sandbox environment (mounted volumes, network connectivity, installed packages), use the `--debug` flag to open a bash shell instead of the agent CLI:
-
-```shell
-hole start claude . --debug
-```
-
-The sandbox is set up normally (proxy, volumes, network) but drops you into an interactive shell. When you exit, the sandbox is destroyed as usual.
-
-#### Network access log
-
-To see which domains the agent accessed during a session, pass the `--dump-network-access` flag:
-
-```shell
-hole start claude . --dump-network-access
-```
-
-After the agent exits, a `claude-network-access-{id}.log` file is written to the project directory containing a sorted list of distinct domains (both allowed and denied requests). The `{id}` is the unique instance ID assigned to that sandbox session.
-
-## Agents
-
-### Claude
-
-Each agent type gets its own persistent Docker volume for its home directory (e.g., `hole-agent-home-claude` for Claude). This volume stores credentials, settings, and CLI state across sandbox sessions.
-
-#### First run
-
-On first `hole start claude .`, the volume is created automatically. Once inside the sandbox, log in directly using the `/login` command in Claude Code. Your credentials persist — you only need to log in once.
-
-#### Use
-
-Create a Claude sandbox in the current directory:
-```shell
-hole start claude .
-```
-
-The sandbox containers are destroyed when you exit the CLI, but the agent home volume persists so your login and settings carry over to the next session.
-
-The volume is auto-created on first `hole start` and removed on uninstall.
-
+- `memoryLimit` — Docker `mem_limit` (e.g. `"8g"`, `"512m"`)
+- `memorySwapLimit` — Docker `memswap_limit` (e.g. `"8g"`, `"512m"`)
