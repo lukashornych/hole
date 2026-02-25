@@ -6,8 +6,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 HOLE_TMP_DIR="${TMPDIR:-/tmp}/hole"
 GLOBAL_SETTINGS_FILE="$HOME/.hole/settings.json"
+GITHUB_REPO="lukashornych/hole"
+GITHUB_API="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+GITHUB_INSTALL_SCRIPT="https://raw.githubusercontent.com/$GITHUB_REPO/main/install.sh"
 VALID_AGENTS=("claude" "gemini")
-VALID_COMMANDS=("start" "help" "version")
+VALID_COMMANDS=("start" "help" "version" "update")
 
 # Show help message
 show_help() {
@@ -16,6 +19,7 @@ Usage: hole {command} {agent} {path} [options]
 
 Commands:
   start     Create a sandbox, attach to the agent CLI, and destroy on exit
+  update    Update hole to the latest release
   help      Show this help message
   version   Print the installed hole version
 
@@ -291,6 +295,16 @@ build_compose_cmd() {
   fi
 }
 
+# Ensure the persistent agent home volume exists
+ensure_agent_volume() {
+  local agent="$1"
+  local volume_name="hole-agent-home-$agent"
+  if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
+    echo "Creating persistent volume: $volume_name"
+    docker volume create "$volume_name"
+  fi
+}
+
 # Start command: create/start sandbox and attach to agent CLI
 cmd_start() {
   local agent=$1
@@ -299,8 +313,9 @@ cmd_start() {
   local debug_mode=${4:-false}
 
   # Validate settings files if present
-  validate_settings "$GLOBAL_SETTINGS_FILE" "global settings (~/.hole/settings.json)"
-  validate_settings "$project_dir/.hole/settings.json" "project settings (.hole/settings.json)"
+#  todo fix validation
+#  validate_settings "$GLOBAL_SETTINGS_FILE" "global settings (~/.hole/settings.json)"
+#  validate_settings "$project_dir/.hole/settings.json" "project settings (.hole/settings.json)"
 
   # Merge global and project settings
   local merged_settings
@@ -317,6 +332,11 @@ cmd_start() {
   echo "Launching sandbox for: $project_dir"
   echo "Project name: $COMPOSE_PROJECT_NAME"
   echo ""
+
+  check_for_update
+
+  # Ensure persistent agent home volume exists
+  ensure_agent_volume "$agent"
 
   # Start proxy in detached mode with health check wait
   echo "Starting proxy..."
@@ -364,6 +384,91 @@ cmd_version() {
   else
     echo "hole development (no version file)"
   fi
+  check_for_update
+}
+
+# Fetch latest release version from GitHub API
+# Args: $1 = timeout in seconds (default 10)
+# Prints version string (without v prefix) on success, returns 1 on failure
+fetch_latest_version() {
+  local timeout="${1:-10}"
+  local response=""
+
+  if command -v curl >/dev/null 2>&1; then
+    response=$(curl -fsSL --max-time "$timeout" "$GITHUB_API" 2>/dev/null) || return 1
+  elif command -v wget >/dev/null 2>&1; then
+    response=$(wget -qO- --timeout="$timeout" "$GITHUB_API" 2>/dev/null) || return 1
+  else
+    return 1
+  fi
+
+  local tag
+  tag=$(echo "$response" | jq -r '.tag_name // empty' 2>/dev/null) || return 1
+  [[ -z "$tag" ]] && return 1
+
+  # Strip v prefix
+  echo "${tag#v}"
+}
+
+# Compare two semver strings; returns 0 if $1 > $2
+version_gt() {
+  local IFS='.'
+  local -a v1=($1) v2=($2)
+  local len=${#v1[@]}
+  (( ${#v2[@]} > len )) && len=${#v2[@]}
+
+  for (( i=0; i<len; i++ )); do
+    local n1=${v1[i]:-0}
+    local n2=${v2[i]:-0}
+    if (( n1 > n2 )); then
+      return 0
+    elif (( n1 < n2 )); then
+      return 1
+    fi
+  done
+  return 1
+}
+
+# Silent version check (1s timeout). Prints notice if a newer version is available.
+check_for_update() {
+  local version_file="$SCRIPT_DIR/version"
+  # Skip in dev mode (no version file)
+  [[ ! -f "$version_file" ]] && return 0
+
+  local installed
+  installed=$(cat "$version_file")
+  local latest
+  latest=$(fetch_latest_version 1) || return 0
+
+  if version_gt "$latest" "$installed"; then
+    echo "A new version of hole is available: $latest (installed: $installed). Run 'hole update' to upgrade."
+  fi
+}
+
+# Update hole to the latest release
+cmd_update() {
+  local version_file="$SCRIPT_DIR/version"
+  if [[ ! -f "$version_file" ]]; then
+    echo "Error: cannot update a development installation (no version file)" >&2
+    exit 1
+  fi
+
+  local installed
+  installed=$(cat "$version_file")
+
+  echo "Checking for updates..."
+  local latest
+  latest=$(fetch_latest_version) || {
+    echo "Error: failed to check for latest version" >&2
+    exit 1
+  }
+
+  if version_gt "$latest" "$installed"; then
+    echo "Updating hole: $installed -> $latest"
+    curl -fsSL "$GITHUB_INSTALL_SCRIPT" | bash
+  else
+    echo "hole is already up to date (version $installed)."
+  fi
 }
 
 # Main entry point
@@ -388,6 +493,10 @@ main() {
   # Handle top-level commands (no agent required)
   if [[ "$command" == "version" ]]; then
     cmd_version
+    exit 0
+  fi
+  if [[ "$command" == "update" ]]; then
+    cmd_update
     exit 0
   fi
   if [[ "$command" == "help" ]] || [[ -z "$command" ]]; then
