@@ -9,8 +9,11 @@ GLOBAL_SETTINGS_FILE="$HOME/.hole/settings.json"
 GITHUB_REPO="lukashornych/hole"
 GITHUB_API="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
 GITHUB_INSTALL_SCRIPT="https://raw.githubusercontent.com/$GITHUB_REPO/main/install.sh"
-VALID_AGENTS=("claude" "gemini")
+VALID_AGENTS=("claude")
 VALID_COMMANDS=("start" "help" "version" "update")
+
+# Import the logging library
+source "${SCRIPT_DIR}/logger.sh"
 
 # Show help message
 show_help() {
@@ -49,8 +52,8 @@ validate_agent() {
       return 0
     fi
   done
-  echo "Error: invalid agent '$agent'" >&2
-  echo "Valid agents: ${VALID_AGENTS[*]}" >&2
+  log_error "invalid agent '$agent'" >&2
+  log_info "Valid agents: ${VALID_AGENTS[*]}" >&2
   exit 1
 }
 
@@ -62,8 +65,8 @@ validate_command() {
       return 0
     fi
   done
-  echo "Error: invalid command '$command'" >&2
-  echo "Valid commands: ${VALID_COMMANDS[*]}" >&2
+  log_error "invalid command '$command'" >&2
+  log_info "Valid commands: ${VALID_COMMANDS[*]}" >&2
   exit 1
 }
 
@@ -80,7 +83,7 @@ validate_settings() {
   local schema_file="$SCRIPT_DIR/schema/settings.schema.json"
   local output
   if ! output=$(jv "$schema_file" "$settings_file" 2>&1); then
-    echo "Error: $label is not valid:" >&2
+    log_error "$label is not valid:" >&2
     echo "$output" >&2
     exit 1
   fi
@@ -126,13 +129,13 @@ resolve_project_dir() {
   if [[ "$target_dir" != /* ]]; then
     # Relative path
     target_dir="$(cd "$target_dir" 2>/dev/null && pwd)" || {
-      echo "Error: directory '$1' does not exist" >&2
+      log_error "directory '$1' does not exist" >&2
       exit 1
     }
   else
     # Absolute path
     if [[ ! -d "$target_dir" ]]; then
-      echo "Error: directory '$target_dir' does not exist" >&2
+      log_error "directory '$target_dir' does not exist" >&2
       exit 1
     fi
     target_dir="$(cd "$target_dir" && pwd)"
@@ -181,7 +184,7 @@ generate_project_compose() {
     elif [[ -d "$full_path" ]]; then
       agent_volumes+=("      - /workspace/$line")
     else
-      echo "Warning: excluded path '$line' not found in project, skipping" >&2
+      log_warn "excluded path '$line' not found in project, skipping" >&2
     fi
   done <<< "$entries"
 
@@ -201,7 +204,7 @@ generate_project_compose() {
     fi
     # Validate host path exists
     if [[ ! -e "$host_path" ]]; then
-      echo "Warning: included path '$host_path' not found, skipping" >&2
+      log_warn "included path '$host_path' not found, skipping" >&2
       continue
     fi
     agent_volumes+=("      - $host_path:$container_path")
@@ -215,7 +218,7 @@ generate_project_compose() {
     # Start with default allowed domains
     cp "$SCRIPT_DIR/proxy/allowed-domains.txt" "$whitelist_file"
     # Append project-specific domains (escape dots for tinyproxy regex filter)
-    echo "" >> "$whitelist_file"
+    log_line >> "$whitelist_file"
     echo "# Project-specific domains" >> "$whitelist_file"
     while IFS= read -r domain; do
       [[ -z "$domain" ]] && continue
@@ -235,7 +238,7 @@ generate_project_compose() {
     # Auto-add Ubuntu apt repository domains to proxy whitelist
     if [[ "$has_custom_domains" != true ]]; then
       cp "$SCRIPT_DIR/proxy/allowed-domains.txt" "$whitelist_file"
-      echo "" >> "$whitelist_file"
+      log_line >> "$whitelist_file"
     fi
     echo "# Ubuntu apt repositories (auto-added for dependencies)" >> "$whitelist_file"
     echo "ubuntu\.com" >> "$whitelist_file"
@@ -300,7 +303,7 @@ ensure_agent_volume() {
   local agent="$1"
   local volume_name="hole-agent-home-$agent"
   if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
-    echo "Creating persistent volume: $volume_name"
+    log_info "Creating persistent volume: $volume_name"
     docker volume create "$volume_name"
   fi
 }
@@ -326,12 +329,12 @@ cmd_start() {
   build_compose_cmd
 
   if [[ "$debug_mode" == true ]]; then
-    echo "Debug mode: opening bash shell instead of agent CLI"
-    echo ""
+    log_warn "Debug mode: opening bash shell instead of agent CLI"
+    log_line
   fi
-  echo "Launching sandbox for: $project_dir"
-  echo "Project name: $COMPOSE_PROJECT_NAME"
-  echo ""
+  log_info "Launching sandbox for: $project_dir"
+  log_info "Project name: $COMPOSE_PROJECT_NAME"
+  log_line
 
   check_for_update
 
@@ -339,17 +342,17 @@ cmd_start() {
   ensure_agent_volume "$agent"
 
   # Start proxy in detached mode with health check wait
-  echo "Starting proxy..."
+  log_info "Starting proxy..."
   "${COMPOSE_CMD[@]}" up -d proxy
 
   # Start agent service
-  echo "Starting $agent agent..."
-  echo ""
+  log_info "Starting $agent agent..."
+  log_line
   "${COMPOSE_CMD[@]}" up -d "$agent"
 
   # Attach terminal to the running agent
-  echo "Attaching to $agent agent..."
-  echo ""
+  log_info "Attaching to $agent agent..."
+  log_line
   docker attach "$COMPOSE_PROJECT_NAME-$agent-1"
 
   # Dump network access log if requested
@@ -359,8 +362,8 @@ cmd_start() {
       grep -oE 'CONNECT [a-zA-Z0-9._-]+:[0-9]+|filtered url "[^"]+"' | \
       sed 's/CONNECT //; s/:[0-9]*$//; s/^filtered url "//; s/"$//' | \
       sort -u > "$log_file" || true
-    echo ""
-    echo "Network access log written to: $log_file"
+    log_line
+    log_info "Network access log written to: $log_file"
   fi
 
   # Destroy the sandbox after user exits
@@ -372,8 +375,8 @@ cmd_start() {
     rm -rf "$compose_dir"
   fi
 
-  echo ""
-  echo "Exited $agent CLI. Sandbox destroyed."
+  log_line
+  log_info "Exited $agent CLI. Sandbox destroyed."
 }
 
 # Print installed version
@@ -441,7 +444,7 @@ check_for_update() {
   latest=$(fetch_latest_version 1) || return 0
 
   if version_gt "$latest" "$installed"; then
-    echo "A new version of hole is available: $latest (installed: $installed). Run 'hole update' to upgrade."
+    log_info "A new version of hole is available: $latest (installed: $installed). Run 'hole update' to upgrade."
   fi
 }
 
@@ -449,25 +452,25 @@ check_for_update() {
 cmd_update() {
   local version_file="$SCRIPT_DIR/version"
   if [[ ! -f "$version_file" ]]; then
-    echo "Error: cannot update a development installation (no version file)" >&2
+    log_error "cannot update a development installation (no version file)" >&2
     exit 1
   fi
 
   local installed
   installed=$(cat "$version_file")
 
-  echo "Checking for updates..."
+  log_info "Checking for updates..."
   local latest
   latest=$(fetch_latest_version) || {
-    echo "Error: failed to check for latest version" >&2
+    log_error "failed to check for latest version" >&2
     exit 1
   }
 
   if version_gt "$latest" "$installed"; then
-    echo "Updating hole: $installed -> $latest"
+    log_info "Updating hole: $installed -> $latest"
     curl -fsSL "$GITHUB_INSTALL_SCRIPT" | bash
   else
-    echo "hole is already up to date (version $installed)."
+    log_info "hole is already up to date (version $installed)."
   fi
 }
 
@@ -521,7 +524,7 @@ main() {
   case "$command" in
     start)   cmd_start "$agent" "$project_dir" "$dump_network_access" "$debug_mode" ;;
     help)    show_help ;;
-    *)       echo "Unknown command: $command" >&2; exit 1 ;;
+    *)       log_error "Unknown command: $command" >&2; exit 1 ;;
   esac
 }
 

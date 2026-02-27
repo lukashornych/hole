@@ -22,7 +22,7 @@ Currently supports Claude Code agent (with placeholder for Gemini agent).
 - use [[ ]] for Conditionals
 - use Arithmetic Expansion (( )) for math
 - use `getopts` for command-line argument parsing
-- log using sourced logger.sh library (log_info, log_error, log_warn), do not use echo for logging
+- log using sourced logger.sh library (log_info, log_error, log_warn, log_line), do not use echo for logging
 
 ## Architecture
 
