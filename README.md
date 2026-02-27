@@ -43,10 +43,16 @@ hole start claude . --rebuild             # force rebuild of cached Docker image
 ### Other commands
 
 ```sh
-hole help      # show usage information
-hole version   # print installed version
-hole update    # update to the latest release
+hole destroy .                # remove cached Docker images for this project
+hole destroy /path/to/project # remove cached Docker images for a specific project
+hole help                     # show usage information
+hole version                  # print installed version
+hole update                   # update to the latest release
 ```
+
+`hole destroy` removes all project-related Docker resources including cached agent and proxy images for all agent types.
+It also cleans up any lingering containers, networks, and temp files that may remain after a crash. 
+The shared agent home volume (credentials) is preserved — it is only removed by `uninstall.sh`.
 
 ## Installation
 

@@ -10,7 +10,7 @@ GITHUB_REPO="lukashornych/hole"
 GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
 GITHUB_INSTALL_SCRIPT="https://raw.githubusercontent.com/${GITHUB_REPO}/main/install.sh"
 VALID_AGENTS=("claude")
-VALID_COMMANDS=("start" "help" "version" "update")
+VALID_COMMANDS=("start" "destroy" "help" "version" "update")
 
 # Import the logging library
 source "${SCRIPT_DIR}/logger.sh"
@@ -22,6 +22,7 @@ Usage: hole {command} {agent} {path} [options]
 
 Commands:
   start     Create a sandbox, attach to the agent CLI, and destroy on exit
+  destroy   Remove all cached or orphaned Docker resources for a project
   update    Update hole to the latest release
   help      Show this help message
   version   Print the installed hole version
@@ -40,8 +41,10 @@ Examples:
   hole start claude .
   hole start claude /path/to/project
   hole start claude . --dump-network-access
+  hole destroy .
+  hole destroy /path/to/project
 
-The sandbox is fully destroyed when you exit the agent CLI.
+The sandbox is destroyed when you exit the agent CLI.
 EOF
 }
 
@@ -438,6 +441,80 @@ cmd_start() {
   log_info "Exited ${agent} CLI. Sandbox destroyed."
 }
 
+# Destroy command: remove all cached Docker resources for a project
+cmd_destroy() {
+  local project_dir="${1}"
+  local project_name="${2}"
+
+  log_info "Destroying cached resources for project: ${project_dir}"
+  log_info "Project name: ${project_name}"
+  log_line
+
+  # Stop running containers for this project
+  local running_containers
+  running_containers=$(docker ps -q --filter "name=hole-${project_name}-") || true
+  if [[ -n "${running_containers}" ]]; then
+    log_info "Stopping running containers..."
+    docker stop ${running_containers} || log_warn "Failed to stop some containers"
+  else
+    log_info "No running containers found"
+  fi
+
+  # Remove all containers (running or stopped) for this project
+  local all_containers
+  all_containers=$(docker ps -aq --filter "name=hole-${project_name}-") || true
+  if [[ -n "${all_containers}" ]]; then
+    log_info "Removing containers..."
+    docker rm -f ${all_containers} || log_warn "Failed to remove some containers"
+  else
+    log_info "No containers found"
+  fi
+
+  # Remove networks for this project
+  local networks
+  networks=$(docker network ls -q --filter "name=hole-${project_name}-") || true
+  if [[ -n "${networks}" ]]; then
+    log_info "Removing networks..."
+    docker network rm ${networks} || log_warn "Failed to remove some networks"
+  else
+    log_info "No networks found"
+  fi
+
+  # Remove cached agent images for all agent types
+  for agent in "${VALID_AGENTS[@]}"; do
+    local agent_image="hole-sandboxes/agent-${agent}-${project_name}:latest"
+    if docker image inspect "${agent_image}" >/dev/null 2>&1; then
+      log_info "Removing agent image: ${agent_image}"
+      docker rmi "${agent_image}" || log_warn "Failed to remove image ${agent_image}"
+    else
+      log_info "No cached image found for agent '${agent}'"
+    fi
+  done
+
+  # Remove cached proxy image
+  local proxy_image="hole-sandboxes/proxy-${project_name}:latest"
+  if docker image inspect "${proxy_image}" >/dev/null 2>&1; then
+    log_info "Removing proxy image: ${proxy_image}"
+    docker rmi "${proxy_image}" || log_warn "Failed to remove image ${proxy_image}"
+  else
+    log_info "No cached proxy image found"
+  fi
+
+  # Remove temp files for this project
+  local tmp_pattern="${HOLE_TMP_DIR}/projects/hole-${project_name}-*"
+  local tmp_dirs
+  tmp_dirs=$(compgen -G "${tmp_pattern}" 2>/dev/null) || true
+  if [[ -n "${tmp_dirs}" ]]; then
+    log_info "Removing temp files..."
+    rm -rf ${tmp_pattern} || log_warn "Failed to remove some temp files"
+  else
+    log_info "No temp files found"
+  fi
+
+  log_line
+  log_info "Cached resources destroyed. Shared agent home volumes were preserved."
+}
+
 # Print installed version
 cmd_version() {
   local version_file="${SCRIPT_DIR}/version"
@@ -555,6 +632,9 @@ main() {
   local agent="${positional[1]:-}"
   local target_dir="${positional[2]:-.}"
 
+  # Validate inputs
+  validate_command "${command}"
+
   # Handle top-level commands (no agent required)
   if [[ "${command}" == "version" ]]; then
     cmd_version
@@ -569,10 +649,6 @@ main() {
     exit 0
   fi
 
-  # Validate inputs
-  validate_agent "${agent}"
-  validate_command "${command}"
-
   # Resolve path
   local project_dir
   project_dir=$(resolve_absolute_project_dir "${target_dir}")
@@ -585,11 +661,22 @@ main() {
   local instance_name
   instance_name="hole-${project_name}-${instance_id}"
 
-  # Dispatch to command handler
-  case "${command}" in
-    start)   cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" "${rebuild}" ;;
-    *)       log_error "Unknown command: ${command}"; exit 1 ;;
-  esac
+  # Handle start command (no agent argument required)
+  if [[ "${command}" == "start" ]]; then
+    validate_agent "${agent}"
+
+    cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" "${rebuild}"
+    exit 0
+  fi
+
+  # Handle destroy command (no agent argument required)
+  if [[ "${command}" == "destroy" ]]; then
+    cmd_destroy "${project_dir}" "${project_name}"
+    exit 0
+  fi
+
+  log_error "Unknown command: ${command}"
+  exit 1
 }
 
 main "$@"
