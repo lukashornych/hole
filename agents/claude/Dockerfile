@@ -25,3 +25,4 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/agent/.local/bin:$PATH"
 
 ENTRYPOINT ["entrypoint.sh"]
+CMD ["claude", "--dangerously-skip-permissions"]

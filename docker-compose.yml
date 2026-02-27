@@ -26,7 +26,6 @@ services:
       context: .
       dockerfile: agents/claude/Dockerfile
     image: hole-sandboxes/agent-claude-${PROJECT_NAME}:latest
-    command: ["claude", "--dangerously-skip-permissions"]
     stdin_open: true # Equivalent to docker run -i (keeps stdin open)
     tty: true        # Equivalent to docker run -t (allocates a pseudo-TTY)
     volumes:
