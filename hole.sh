@@ -606,7 +606,33 @@ cmd_update() {
 
   if version_gt "${latest}" "${installed}"; then
     log_info "Updating hole: ${installed} -> ${latest}"
-    curl -fsSL "${GITHUB_INSTALL_SCRIPT}" | bash
+
+    local uninstall_script="${SCRIPT_DIR}/uninstall.sh"
+    if [[ ! -f "${uninstall_script}" ]]; then
+      log_error "uninstall script not found at ${uninstall_script}"
+      exit 1
+    fi
+
+    # Copy uninstall.sh to a temp file so it can delete INSTALL_DIR safely
+    local tmp_uninstall
+    tmp_uninstall="$(mktemp "${TMPDIR:-/tmp}/hole-uninstall.XXXXXX")"
+    cp "${uninstall_script}" "${tmp_uninstall}"
+    chmod +x "${tmp_uninstall}"
+
+    # Create a wrapper script that runs uninstall then reinstall
+    local tmp_wrapper
+    tmp_wrapper="$(mktemp "${TMPDIR:-/tmp}/hole-update.XXXXXX")"
+    cat > "${tmp_wrapper}" <<WRAPPER
+#!/usr/bin/env bash
+set -euo pipefail
+trap 'rm -f "${tmp_uninstall}" "${tmp_wrapper}"' EXIT
+bash "${tmp_uninstall}"
+curl -fsSL "${GITHUB_INSTALL_SCRIPT}" | bash
+WRAPPER
+    chmod +x "${tmp_wrapper}"
+
+    # exec replaces hole.sh process so INSTALL_DIR can be safely deleted
+    exec bash "${tmp_wrapper}"
   else
     log_info "hole is already up to date (version ${installed})."
   fi
