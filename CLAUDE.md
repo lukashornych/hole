@@ -11,6 +11,19 @@ Hole is a CLI tool for creating and managing sandboxes for AI agents. It provide
 
 Currently supports Claude Code agent (with placeholder for Gemini agent).
 
+## Code guidelines
+
+- use local variables in functions
+- use shell strict mode
+- always Double-Quote Variables
+- prefer ${VAR} Syntax
+- use Lowercase for Local Variables
+- use $() for Command Substitution
+- use [[ ]] for Conditionals
+- use Arithmetic Expansion (( )) for math
+- use `getopts` for command-line argument parsing
+- log using sourced logger.sh library (log_info, log_error, log_warn), do not use echo for logging
+
 ## Architecture
 
 The project uses Docker Compose to orchestrate a multi-container sandbox environment:
@@ -23,7 +36,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 
 **Two main services:**
 - `proxy`: Tinyproxy-based HTTP/HTTPS proxy that filters requests to allowed domains only (proxy/allowed-domains.txt)
-- `claude`: Claude Code CLI agent running in Ubuntu 24.04 container with workspace access
+- `{agent}`: agent container e.g.: Claude Code CLI, running in Ubuntu 24.04 container with workspace access
 
 ### Security Model
 
@@ -42,47 +55,6 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 **Agent runs as non-root user:**
 - User `agent` created in container (agents/claude/Dockerfile:13)
 - Agent CLI installed in user space (~/.local/bin)
-
-## Usage
-
-### Setup (first time)
-
-No host-side setup is required. On first `hole start claude`, the persistent agent home volume is created automatically. Log in inside the sandbox using the `/login` command in Claude Code. Credentials persist across sandbox sessions in the `hole-agent-home-claude` Docker volume.
-
-### Running the Sandbox
-
-**Start a sandbox:**
-```bash
-./hole.sh start claude /path/to/project
-```
-Or from within a project directory:
-```bash
-./hole.sh start claude .
-```
-
-The sandbox is fully destroyed when you exit the agent CLI.
-
-**Get help:**
-```bash
-./hole.sh help
-```
-
-### How It Works
-
-1. `hole.sh` derives unique project name from sanitized absolute path (e.g., "hole-users-lho-www-oss-myproject")
-2. Starts proxy container in detached mode with health check
-3. Runs agent container interactively using `docker compose run`:
-   - PROJECT_DIR env var set to target directory
-   - COMPOSE_PROJECT_NAME for unique container naming based on absolute path
-   - Proxy dependency (waits for healthy status)
-   - Allocates TTY and connects stdin for interactive CLI
-4. **Full teardown on exit** - all containers, networks, and per-project config are removed when the agent CLI exits
-
-### Key Behavior
-
-- **Fresh sandbox each time**: Each `start` creates a new sandbox from scratch
-- **Auto-destroy on exit**: When you exit the agent CLI, the entire sandbox (containers, networks, images, per-project config) is automatically destroyed
-- **Unique naming**: Project names based on absolute path prevent collisions between projects
 
 ## Key Files
 
