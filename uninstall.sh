@@ -17,6 +17,61 @@ print_success() {
     echo ""
 }
 
+remove_docker_resources() {
+    local answer
+    echo ""
+    read -r -p "Do you also want to remove all hole Docker resources (images, networks, volumes)? (y/N) " answer
+    if [[ ! "${answer}" =~ ^[yY]$ ]]; then
+        log_info "Skipping Docker resource cleanup."
+        return 0
+    fi
+
+    # Stop and remove all containers with name prefix "hole-"
+    local containers
+    containers=$(docker ps -aq --filter "name=hole-") || true
+    if [[ -n "${containers}" ]]; then
+        log_info "Stopping and removing containers..."
+        docker stop ${containers} 2>/dev/null || true
+        docker rm -f ${containers} || log_warn "Failed to remove some containers"
+        log_success "Removed containers"
+    else
+        log_info "No containers found"
+    fi
+
+    # Remove all images matching "hole/*"
+    local images
+    images=$(docker images --filter "reference=hole/*" -q) || true
+    if [[ -n "${images}" ]]; then
+        log_info "Removing images..."
+        docker rmi ${images} || log_warn "Failed to remove some images"
+        log_success "Removed images"
+    else
+        log_info "No images found"
+    fi
+
+    # Remove all networks matching "hole-"
+    local networks
+    networks=$(docker network ls --filter "name=hole-" -q) || true
+    if [[ -n "${networks}" ]]; then
+        log_info "Removing networks..."
+        docker network rm ${networks} || log_warn "Failed to remove some networks"
+        log_success "Removed networks"
+    else
+        log_info "No networks found"
+    fi
+
+    # Remove all volumes matching "hole-"
+    local volumes
+    volumes=$(docker volume ls --filter "name=hole-" -q) || true
+    if [[ -n "${volumes}" ]]; then
+        log_info "Removing volumes..."
+        docker volume rm ${volumes} || log_warn "Failed to remove some volumes"
+        log_success "Removed volumes"
+    else
+        log_info "No volumes found"
+    fi
+}
+
 main() {
     log_info "Starting hole uninstallation..."
 
@@ -40,15 +95,7 @@ main() {
         log_success "Removed $BIN_PATH"
     fi
 
-    local agents=("claude" "gemini")
-    for agent in "${agents[@]}"; do
-        local volume_name="hole-agent-home-$agent"
-        if docker volume inspect "$volume_name" >/dev/null 2>&1; then
-            log_info "Removing Docker volume: $volume_name..."
-            docker volume rm "$volume_name"
-            log_success "Removed $volume_name"
-        fi
-    done
+    remove_docker_resources
 
     print_success
 }
