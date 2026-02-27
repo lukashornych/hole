@@ -100,4 +100,7 @@ main() {
     print_success
 }
 
+# Self-cleanup when run from a temp copy (hole uninstall)
+[[ "${0}" == "${TMPDIR:-/tmp}/hole-uninstall."* ]] && rm -f "${0}" 2>/dev/null || true
+
 main

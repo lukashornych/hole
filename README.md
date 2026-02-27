@@ -48,6 +48,7 @@ hole destroy /path/to/project # remove cached Docker images for a specific proje
 hole help                     # show usage information
 hole version                  # print installed version
 hole update                   # update to the latest release
+hole uninstall                # uninstall hole and optionally remove Docker resources
 ```
 
 `hole destroy` removes all project-related Docker resources including cached agent and proxy images for all agent types.
@@ -85,9 +86,7 @@ Exit any running sandboxes before updating.
 Exit any running sandboxes first, then run:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/lukashornych/hole/main/uninstall.sh | bash
-# or
-wget -qO- https://raw.githubusercontent.com/lukashornych/hole/main/uninstall.sh | bash
+hole uninstall
 ```
 
 ## Configuration

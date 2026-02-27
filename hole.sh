@@ -10,7 +10,7 @@ GITHUB_REPO="lukashornych/hole"
 GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
 GITHUB_INSTALL_SCRIPT="https://raw.githubusercontent.com/${GITHUB_REPO}/main/install.sh"
 VALID_AGENTS=("claude")
-VALID_COMMANDS=("start" "destroy" "help" "version" "update")
+VALID_COMMANDS=("start" "destroy" "help" "version" "update" "uninstall")
 
 # Import the logging library
 source "${SCRIPT_DIR}/logger.sh"
@@ -24,6 +24,7 @@ Commands:
   start     Create a sandbox, attach to the agent CLI, and destroy on exit
   destroy   Remove all cached or orphaned Docker resources for a project
   update    Update hole to the latest release
+  uninstall Uninstall hole and optionally remove Docker resources
   help      Show this help message
   version   Print the installed hole version
 
@@ -611,6 +612,24 @@ cmd_update() {
   fi
 }
 
+# Uninstall hole by exec-ing into a temp copy of uninstall.sh
+cmd_uninstall() {
+  local uninstall_script="${SCRIPT_DIR}/uninstall.sh"
+  if [[ ! -f "${uninstall_script}" ]]; then
+    log_error "uninstall script not found at ${uninstall_script}"
+    exit 1
+  fi
+
+  # Copy to temp file and exec into it. exec replaces this process,
+  # so hole.sh is no longer running when the copy deletes INSTALL_DIR.
+  local tmp_file
+  tmp_file="$(mktemp "${TMPDIR:-/tmp}/hole-uninstall.XXXXXX")"
+  cp "${uninstall_script}" "${tmp_file}"
+  chmod +x "${tmp_file}"
+  trap 'rm -f "${tmp_file}"' EXIT
+  exec bash "${tmp_file}"
+}
+
 # Main entry point
 main() {
   local dump_network_access=false
@@ -642,6 +661,10 @@ main() {
   fi
   if [[ "${command}" == "update" ]]; then
     cmd_update
+    exit 0
+  fi
+  if [[ "${command}" == "uninstall" ]]; then
+    cmd_uninstall
     exit 0
   fi
   if [[ "${command}" == "help" ]] || [[ -z "${command}" ]]; then
