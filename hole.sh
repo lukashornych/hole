@@ -334,9 +334,10 @@ create_compose_cmd() {
   local agent="${2}"
   local project_compose_file="${3}"
 
+  local proxy_compose_file="${SCRIPT_DIR}/proxy/docker-compose.yml"
   local agent_compose_file="${SCRIPT_DIR}/agents/${agent}/docker-compose.yml"
 
-  COMPOSE_CMD=(docker compose -p "${instance_name}" -f "${COMPOSE_FILE}" -f "${agent_compose_file}")
+  COMPOSE_CMD=(docker compose -p "${instance_name}" -f "${COMPOSE_FILE}" -f "${proxy_compose_file}" -f "${agent_compose_file}")
   if [[ -f "${project_compose_file}" ]]; then
     COMPOSE_CMD+=(-f "${project_compose_file}")
   fi

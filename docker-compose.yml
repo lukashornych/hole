@@ -1,27 +1,8 @@
-services:
+# Base docker-compose file with infrastructure settings
 
-  # Network proxy to allow agents access only specified domains
-  #   Should be started for every agent
-  proxy:
-    build:
-      context: .
-      dockerfile: proxy/Dockerfile
-    image: hole-sandboxes/proxy-${PROJECT_NAME}:latest
-    volumes:
-      - ./proxy/tinyproxy.conf:/etc/tinyproxy/tinyproxy.conf:ro
-      - ./proxy/allowed-domains.txt:/etc/tinyproxy/allowed-domains.txt:ro
-    networks:
-      - sandbox
-      - internet
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 8888"]
-      interval: 2s
-      timeout: 2s
-      retries: 5
+## Services are injected from docker-compose file of started components (proxy, agents, ...).
 
-  # ... agent containers are placed into agent-specific docker-compose.yml files
-
+## Networks available for all services
 networks:
   # network for agents to not be able to access internet directly, but to force them to proxy all requests
   sandbox:
