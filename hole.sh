@@ -335,9 +335,8 @@ cmd_start() {
   local debug_mode="${7:-false}"
 
   # Validate settings files if present
-#  todo fix validation
-#  validate_settings "${GLOBAL_SETTINGS_FILE}" "global settings (~/.hole/settings.json)"
-#  validate_settings "${project_dir}/.hole/settings.json" "project settings (.hole/settings.json)"
+  validate_settings "${GLOBAL_SETTINGS_FILE}" "global settings (~/.hole/settings.json)"
+  validate_settings "${project_dir}/.hole/settings.json" "project settings (.hole/settings.json)"
 
   # Merge global and project settings
   local merged_settings
