@@ -60,7 +60,8 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 ## Key Files
 
 - `hole.sh` - CLI tool for managing sandboxes (start command)
-- `docker-compose.yml` - Service orchestration with profiles (claude, gemini)
+- `docker-compose.yml` - Shared infrastructure (proxy service + networks)
+- `agents/claude/docker-compose.yml` - Claude agent service definition
 - `agents/claude/Dockerfile` - Claude agent image (Ubuntu 24.04 + curl, git, ripgrep, Claude CLI)
 - `proxy/Dockerfile` - Proxy image (Alpine + tinyproxy)
 - `proxy/tinyproxy.conf` - Proxy configuration (port 8888, filter enabled)

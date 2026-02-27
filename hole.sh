@@ -304,12 +304,15 @@ generate_instance_compose() {
   echo "${compose_file}"
 }
 
-# Build the docker compose command array, including optional override file
+# Build the docker compose command array, including agent and optional override file
 create_compose_cmd() {
   local instance_name="${1}"
-  local project_compose_file="${2}"
+  local agent="${2}"
+  local project_compose_file="${3}"
 
-  COMPOSE_CMD=(docker compose -p "${instance_name}" -f "${COMPOSE_FILE}")
+  local agent_compose_file="${SCRIPT_DIR}/agents/${agent}/docker-compose.yml"
+
+  COMPOSE_CMD=(docker compose -p "${instance_name}" -f "${COMPOSE_FILE}" -f "${agent_compose_file}")
   if [[ -f "${project_compose_file}" ]]; then
     COMPOSE_CMD+=(-f "${project_compose_file}")
   fi
@@ -352,7 +355,7 @@ cmd_start() {
   # Generate per-project compose override from merged settings
   local project_compose_file
   project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}")
-  create_compose_cmd "${instance_name}" "${project_compose_file}"
+  create_compose_cmd "${instance_name}" "${agent}" "${project_compose_file}"
 
   if [[ "${debug_mode}" == true ]]; then
     log_warn "Debug mode: opening bash shell instead of agent CLI"
@@ -368,8 +371,9 @@ cmd_start() {
   # Ensure persistent agent home volume exists
   ensure_agent_volume "${agent}"
 
-  # Expose project name for docker-compose.yml to cache images
+  # Expose project name and directory for docker-compose.yml
   export PROJECT_NAME="${project_name}"
+  export PROJECT_DIR="${project_dir}"
 
   # Start proxy in detached mode with health check wait
   log_info "Starting proxy..."
