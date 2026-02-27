@@ -155,7 +155,7 @@ sanitize_path_to_project_name() {
 
 # Generate a random 6-character hex instance ID
 generate_instance_id() {
-  head -c 50 /dev/urandom | LC_ALL=C tr -dc 'a-f0-9' | head -c 6
+  LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6; echo
 }
 
 # Generate per-project docker-compose override file from merged settings
@@ -519,9 +519,9 @@ main() {
   project_dir=$(resolve_project_dir "${target_dir}")
 
   # Generate project name and export environment
-  export PROJECT_DIR="${project_dir}"
-  INSTANCE_ID=$(generate_instance_id)
-  export COMPOSE_PROJECT_NAME="$(sanitize_path_to_project_name "${project_dir}")-${agent}-${INSTANCE_ID}"
+  local instance_id
+  instance_id=$(generate_instance_id)
+  export COMPOSE_PROJECT_NAME="$(sanitize_path_to_project_name "${project_dir}")-${agent}-${instance_id}"
 
   # Dispatch to command handler
   case "${command}" in

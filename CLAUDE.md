@@ -14,6 +14,7 @@ Currently supports Claude Code agent (with placeholder for Gemini agent).
 ## Code guidelines
 
 - use local variables in functions
+- do NOT use global variables to pass data between functions
 - use shell strict mode
 - always Double-Quote Variables
 - prefer ${VAR} Syntax
