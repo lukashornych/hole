@@ -34,7 +34,6 @@ Options:
                               inspecting the sandbox environment
   -n, --dump-network-access   After the agent exits, write distinct accessed domains
                               to {agent}-network-access-{id}.log in the project directory
-  -r, --rebuild               Force rebuild of Docker images before starting
 
 Examples:
   hole start claude .
@@ -241,22 +240,12 @@ generate_instance_compose() {
     has_custom_domains=true
   fi
 
-  # Read dependencies from merged settings
+  # Read dependencies from merged settings (installed at build time via EXTRA_PACKAGES arg)
   local deps
   deps=$(echo "${merged_settings}" | jq -r '.dependencies[]? // empty' 2>/dev/null) || true
+  local extra_packages=""
   if [[ -n "${deps}" ]]; then
-    mkdir -p "${compose_dir}"
-    local deps_file="${compose_dir}/dependencies.txt"
-    echo "${deps}" > "${deps_file}"
-    agent_volumes+=("      - ${deps_file}:/tmp/hole-dependencies.txt:ro")
-    # Auto-add Ubuntu apt repository domains to proxy whitelist
-    if [[ "${has_custom_domains}" != true ]]; then
-      cp "${SCRIPT_DIR}/proxy/allowed-domains.txt" "${whitelist_file}"
-      printf '\n' >> "${whitelist_file}"
-    fi
-    echo "# Ubuntu apt repositories (auto-added for dependencies)" >> "${whitelist_file}"
-    echo "ubuntu\.com" >> "${whitelist_file}"
-    has_custom_domains=true
+    extra_packages=$(echo "${deps}" | tr '\n' ' ' | sed 's/ *$//')
   fi
 
   # Read container memory settings from merged settings
@@ -265,7 +254,7 @@ generate_instance_compose() {
   local agent_memswap_limit
   agent_memswap_limit=$(echo "${merged_settings}" | jq -r '.container.memorySwapLimit // empty' 2>/dev/null) || true
 
-  if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || "${debug_mode}" == true ]]; then
+  if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${debug_mode}" == true ]]; then
     mkdir -p "${compose_dir}"
     {
       echo "services:"
@@ -274,8 +263,13 @@ generate_instance_compose() {
         echo "    volumes:"
         echo "      - ${compose_dir}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
       fi
-      if [[ ${#agent_volumes[@]} -gt 0 || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || "${debug_mode}" == true ]]; then
+      if [[ ${#agent_volumes[@]} -gt 0 || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${debug_mode}" == true ]]; then
         echo "  ${agent}:"
+        if [[ -n "${extra_packages}" ]]; then
+          echo "    build:"
+          echo "      args:"
+          echo "        EXTRA_PACKAGES: \"${extra_packages}\""
+        fi
         if [[ -n "${agent_mem_limit}" ]]; then
           echo "    mem_limit: ${agent_mem_limit}"
         fi
@@ -297,7 +291,6 @@ generate_instance_compose() {
     # No overrides — remove stale files if any
     rm -f "${compose_file}"
     rm -f "${whitelist_file}"
-    rm -f "${compose_dir}/dependencies.txt"
     rmdir "${compose_dir}" 2>/dev/null || true
   fi
 
@@ -337,12 +330,6 @@ cmd_start() {
   local instance_name=${5}
   local dump_network_access="${6:-false}"
   local debug_mode="${7:-false}"
-  local rebuild="${8:-false}"
-
-  local build_flag=()
-  if [[ "${rebuild}" == true ]]; then
-    build_flag=(--build)
-  fi
 
   # Validate settings files if present
   validate_settings "${GLOBAL_SETTINGS_FILE}" "global settings (~/.hole/settings.json)"
@@ -377,12 +364,12 @@ cmd_start() {
 
   # Start proxy in detached mode with health check wait
   log_info "Starting proxy..."
-  "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} proxy
+  "${COMPOSE_CMD[@]}" up -d --build proxy
 
   # Start agent service
   log_info "Starting ${agent} agent..."
   log_line
-  "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} "${agent}"
+  "${COMPOSE_CMD[@]}" up -d --build "${agent}"
 
   # Attach terminal to the running agent
   log_info "Attaching to ${agent} agent..."
@@ -513,14 +500,12 @@ cmd_update() {
 main() {
   local dump_network_access=false
   local debug_mode=false
-  local rebuild=false
   local positional=()
 
   for arg in "$@"; do
     case "$arg" in
       --debug) debug_mode=true ;;
       --dump-network-access) dump_network_access=true ;;
-      --rebuild) rebuild=true ;;
       *) positional+=("${arg}") ;;
     esac
   done
@@ -562,7 +547,7 @@ main() {
 
   # Dispatch to command handler
   case "${command}" in
-    start)   cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" "${rebuild}" ;;
+    start)   cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" ;;
     *)       log_error "Unknown command: ${command}"; exit 1 ;;
   esac
 }

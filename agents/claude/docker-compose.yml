@@ -3,7 +3,7 @@ services:
   claude:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: agents/claude/Dockerfile
     image: hole-sandboxes/agent-claude-${PROJECT_NAME}:latest
     stdin_open: true
     tty: true

@@ -179,12 +179,13 @@ Example `.hole/settings.json`:
 
 ### Dependencies (apt packages)
 
-Additional apt packages can be installed at container startup via the `dependencies` array in `settings.json`. This works in both global (`~/.hole/settings.json`) and per-project (`.hole/settings.json`) settings.
+Additional apt packages can be installed via the `dependencies` array in `settings.json`. This works in both global (`~/.hole/settings.json`) and per-project (`.hole/settings.json`) settings.
 
 - **Format**: apt package names (`python3`) or with version pinning (`python3=3.10.6-1~22.04`)
 - **Merge behavior**: Arrays from global and project settings are concatenated and deduplicated (same as other array properties)
-- **Network**: When dependencies are specified, Ubuntu apt repository domains (`archive.ubuntu.com`, `security.ubuntu.com`) are automatically added to the proxy whitelist
-- **Installation**: Packages are installed via `sudo apt-get install` in `entrypoint.sh` at container startup, before the agent CLI starts
+- **Installation**: Packages are passed as the `EXTRA_PACKAGES` Docker build arg and installed during image build via a conditional `RUN` layer in the Dockerfile. They are baked into the per-project cached image (`hole-sandboxes/agent-claude-${PROJECT_NAME}:latest`), so subsequent sandbox starts are instant.
+- **Rebuilding**: Dockerfile is automatically rebuild every start
+- **Network**: Since apt runs during `docker build` (with host networking), Ubuntu apt repository domains are **not** added to the sandbox proxy whitelist.
 
 Example `.hole/settings.json`:
 ```json
