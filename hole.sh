@@ -361,6 +361,9 @@ cmd_start() {
   # Ensure persistent agent home volume exists
   ensure_agent_volume "${agent}"
 
+  # Expose project name for docker-compose.yml to cache images
+  export PROJECT_NAME="${project_name}"
+
   # Start proxy in detached mode with health check wait
   log_info "Starting proxy..."
   "${COMPOSE_CMD[@]}" up -d proxy
@@ -387,7 +390,7 @@ cmd_start() {
   fi
 
   # Destroy the sandbox after user exits
-  "${COMPOSE_CMD[@]}" down --rmi local --remove-orphans
+  "${COMPOSE_CMD[@]}" down --remove-orphans
 
   # Clean up per-project compose override
   local compose_dir="${HOLE_TMP_DIR}/projects/${instance_name}"
