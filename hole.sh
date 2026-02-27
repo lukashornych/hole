@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # Constants
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
+SCRIPT_DIR="$(cd "$(dirname "${0}")" && pwd)"
+COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 HOLE_TMP_DIR="${TMPDIR:-/tmp}/hole"
-GLOBAL_SETTINGS_FILE="$HOME/.hole/settings.json"
+GLOBAL_SETTINGS_FILE="${HOME}/.hole/settings.json"
 GITHUB_REPO="lukashornych/hole"
-GITHUB_API="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
-GITHUB_INSTALL_SCRIPT="https://raw.githubusercontent.com/$GITHUB_REPO/main/install.sh"
+GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
+GITHUB_INSTALL_SCRIPT="https://raw.githubusercontent.com/${GITHUB_REPO}/main/install.sh"
 VALID_AGENTS=("claude")
 VALID_COMMANDS=("start" "help" "version" "update")
 
@@ -30,10 +30,10 @@ Agents:
   claude    Claude Code agent
 
 Options:
-  --debug                 Open a bash shell instead of the agent CLI for
-                          inspecting the sandbox environment
-  --dump-network-access   After the agent exits, write distinct accessed domains
-                          to {agent}-network-access-{id}.log in the project directory
+  -d, --debug                 Open a bash shell instead of the agent CLI for
+                              inspecting the sandbox environment
+  -n, --dump-network-access   After the agent exits, write distinct accessed domains
+                              to {agent}-network-access-{id}.log in the project directory
 
 Examples:
   hole start claude .
@@ -46,45 +46,47 @@ EOF
 
 # Validate agent is in supported list
 validate_agent() {
-  local agent="$1"
+  local agent="${1}"
   for valid in "${VALID_AGENTS[@]}"; do
-    if [[ "$agent" == "$valid" ]]; then
+    if [[ "${agent}" == "${valid}" ]]; then
       return 0
     fi
   done
-  log_error "invalid agent '$agent'" >&2
-  log_info "Valid agents: ${VALID_AGENTS[*]}" >&2
+  log_error "invalid agent '${agent}'"
+  log_info "Valid agents: ${VALID_AGENTS[*]}"
   exit 1
 }
 
 # Validate command is in supported list
 validate_command() {
-  local command="$1"
+  local command="${1}"
   for valid in "${VALID_COMMANDS[@]}"; do
-    if [[ "$command" == "$valid" ]]; then
+    if [[ "${command}" == "${valid}" ]]; then
       return 0
     fi
   done
-  log_error "invalid command '$command'" >&2
-  log_info "Valid commands: ${VALID_COMMANDS[*]}" >&2
+  log_error "invalid command '${command}'"
+  log_info "Valid commands: ${VALID_COMMANDS[*]}"
   exit 1
 }
 
 # Validate settings.json against JSON Schema using jv
 validate_settings() {
-  local settings_file="$1"
-  local label="${2:-$settings_file}"
+  local settings_file="${1}"
+  local label="${2:-${settings_file}}"
 
   # Settings file is optional
-  if [[ ! -f "$settings_file" ]]; then
+  if [[ ! -f "${settings_file}" ]]; then
     return 0
   fi
 
-  local schema_file="$SCRIPT_DIR/schema/settings.schema.json"
+  local schema_file="${SCRIPT_DIR}/schema/settings.schema.json"
   local output
-  if ! output=$(jv "$schema_file" "$settings_file" 2>&1); then
-    log_error "$label is not valid:" >&2
-    echo "$output" >&2
+  if ! output=$(jv "${schema_file}" "${settings_file}" 2>&1); then
+    log_error "${label} is not valid:"
+    while IFS= read -r err_line; do
+      log_error "${err_line}"
+    done <<< "${output}"
     exit 1
   fi
 }
@@ -93,13 +95,13 @@ validate_settings() {
 # Arrays are concatenated and deduplicated (global items first), objects are recursively merged,
 # scalars from project override global.
 merge_settings() {
-  local global_file="$1"
-  local project_file="$2"
+  local global_file="${1}"
+  local project_file="${2}"
   local global_json="{}"
   local project_json="{}"
-  [[ -f "$global_file" ]] && global_json=$(cat "$global_file")
-  [[ -f "$project_file" ]] && project_json=$(cat "$project_file")
-  jq -n --argjson global "$global_json" --argjson project "$project_json" '
+  [[ -f "${global_file}" ]] && global_json=$(cat "${global_file}")
+  [[ -f "${project_file}" ]] && project_json=$(cat "${project_file}")
+  jq -n --argjson global "${global_json}" --argjson project "${project_json}" '
     def dedup: reduce .[] as $item ([]; if (map(. == $item) | any) then . else . + [$item] end);
     def deep_merge(a; b):
       if (a | type) == "object" and (b | type) == "object" then
@@ -126,29 +128,29 @@ merge_settings() {
 resolve_project_dir() {
   local target_dir="${1:-.}"
 
-  if [[ "$target_dir" != /* ]]; then
+  if [[ "${target_dir}" != /* ]]; then
     # Relative path
-    target_dir="$(cd "$target_dir" 2>/dev/null && pwd)" || {
-      log_error "directory '$1' does not exist" >&2
+    target_dir="$(cd "${target_dir}" 2>/dev/null && pwd)" || {
+      log_error "directory '${1}' does not exist"
       exit 1
     }
   else
     # Absolute path
-    if [[ ! -d "$target_dir" ]]; then
-      log_error "directory '$target_dir' does not exist" >&2
+    if [[ ! -d "${target_dir}" ]]; then
+      log_error "directory '${target_dir}' does not exist"
       exit 1
     fi
-    target_dir="$(cd "$target_dir" && pwd)"
+    target_dir="$(cd "${target_dir}" && pwd)"
   fi
 
-  echo "$target_dir"
+  echo "${target_dir}"
 }
 
 # Convert absolute path to valid Docker project name
 sanitize_path_to_project_name() {
-  local path="$1"
+  local path="${1}"
   # Remove leading slashes, replace / with -, lowercase, keep only valid chars
-  echo "hole-$(echo "$path" | sed 's/^\/*//' | tr '/' '-' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
+  echo "hole-$(echo "${path}" | sed 's/^\/*//' | tr '/' '-' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
 }
 
 # Generate a random 6-character hex instance ID
@@ -158,232 +160,232 @@ generate_instance_id() {
 
 # Generate per-project docker-compose override file from merged settings
 generate_project_compose() {
-  local agent="$1"
-  local project_dir="$2"
-  local project_name="$3"
-  local merged_settings="$4"
+  local agent="${1}"
+  local project_dir="${2}"
+  local project_name="${3}"
+  local merged_settings="${4}"
   local debug_mode="${5:-false}"
 
-  local compose_dir="$HOLE_TMP_DIR/projects/$project_name"
-  local compose_file="$compose_dir/docker-compose.yml"
+  local compose_dir="${HOLE_TMP_DIR}/projects/${project_name}"
+  local compose_file="${compose_dir}/docker-compose.yml"
 
   local agent_volumes=()
   local has_custom_domains=false
-  local whitelist_file="$compose_dir/tinyproxy-domain-whitelist.txt"
+  local whitelist_file="${compose_dir}/tinyproxy-domain-whitelist.txt"
 
   # Read exclusions from merged settings and auto-detect files vs directories
   local entries
-  entries=$(echo "$merged_settings" | jq -r '.files.exclude[]? // empty' 2>/dev/null) || true
+  entries=$(echo "${merged_settings}" | jq -r '.files.exclude[]? // empty' 2>/dev/null) || true
   while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
+    [[ -z "${line}" ]] && continue
     # Strip trailing slashes for consistent mount paths
     line="${line%/}"
-    local full_path="$project_dir/$line"
-    if [[ -f "$full_path" ]]; then
-      agent_volumes+=("      - /dev/null:/workspace/$line:ro")
-    elif [[ -d "$full_path" ]]; then
-      agent_volumes+=("      - /workspace/$line")
+    local full_path="${project_dir}/${line}"
+    if [[ -f "${full_path}" ]]; then
+      agent_volumes+=("      - /dev/null:/workspace/${line}:ro")
+    elif [[ -d "${full_path}" ]]; then
+      agent_volumes+=("      - /workspace/${line}")
     else
-      log_warn "excluded path '$line' not found in project, skipping" >&2
+      log_warn "excluded path '${line}' not found in project, skipping"
     fi
-  done <<< "$entries"
+  done <<< "${entries}"
 
   # Read file inclusions from merged settings (host_path -> container_path)
   local include_pairs
-  include_pairs=$(echo "$merged_settings" | jq -r '.files.include // {} | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null) || true
+  include_pairs=$(echo "${merged_settings}" | jq -r '.files.include // {} | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null) || true
   while IFS=$'\t' read -r host_path container_path; do
-    [[ -z "$host_path" ]] && continue
+    [[ -z "${host_path}" ]] && continue
     # Strip trailing slashes
     host_path="${host_path%/}"
     container_path="${container_path%/}"
     # Resolve host path
-    if [[ "$host_path" == "~/"* ]]; then
-      host_path="$HOME/${host_path#\~/}"
-    elif [[ "$host_path" != /* ]]; then
-      host_path="$project_dir/$host_path"
+    if [[ "${host_path}" == "~/"* ]]; then
+      host_path="${HOME}/${host_path#\~/}"
+    elif [[ "${host_path}" != /* ]]; then
+      host_path="${project_dir}/${host_path}"
     fi
     # Validate host path exists
-    if [[ ! -e "$host_path" ]]; then
-      log_warn "included path '$host_path' not found, skipping" >&2
+    if [[ ! -e "${host_path}" ]]; then
+      log_warn "included path '${host_path}' not found, skipping"
       continue
     fi
-    agent_volumes+=("      - $host_path:$container_path")
-  done <<< "$include_pairs"
+    agent_volumes+=("      - ${host_path}:${container_path}")
+  done <<< "${include_pairs}"
 
   # Read domain whitelist from merged settings
   local domains
-  domains=$(echo "$merged_settings" | jq -r '.network.domainWhitelist[]? // empty' 2>/dev/null) || true
-  if [[ -n "$domains" ]]; then
-    mkdir -p "$compose_dir"
+  domains=$(echo "${merged_settings}" | jq -r '.network.domainWhitelist[]? // empty' 2>/dev/null) || true
+  if [[ -n "${domains}" ]]; then
+    mkdir -p "${compose_dir}"
     # Start with default allowed domains
-    cp "$SCRIPT_DIR/proxy/allowed-domains.txt" "$whitelist_file"
+    cp "${SCRIPT_DIR}/proxy/allowed-domains.txt" "${whitelist_file}"
     # Append project-specific domains (escape dots for tinyproxy regex filter)
-    log_line >> "$whitelist_file"
-    echo "# Project-specific domains" >> "$whitelist_file"
+    printf '\n' >> "${whitelist_file}"
+    echo "# Project-specific domains" >> "${whitelist_file}"
     while IFS= read -r domain; do
-      [[ -z "$domain" ]] && continue
-      echo "${domain//./\\.}" >> "$whitelist_file"
-    done <<< "$domains"
+      [[ -z "${domain}" ]] && continue
+      echo "${domain//./\\.}" >> "${whitelist_file}"
+    done <<< "${domains}"
     has_custom_domains=true
   fi
 
   # Read dependencies from merged settings
   local deps
-  deps=$(echo "$merged_settings" | jq -r '.dependencies[]? // empty' 2>/dev/null) || true
-  if [[ -n "$deps" ]]; then
-    mkdir -p "$compose_dir"
-    local deps_file="$compose_dir/dependencies.txt"
-    echo "$deps" > "$deps_file"
-    agent_volumes+=("      - $deps_file:/tmp/hole-dependencies.txt:ro")
+  deps=$(echo "${merged_settings}" | jq -r '.dependencies[]? // empty' 2>/dev/null) || true
+  if [[ -n "${deps}" ]]; then
+    mkdir -p "${compose_dir}"
+    local deps_file="${compose_dir}/dependencies.txt"
+    echo "${deps}" > "${deps_file}"
+    agent_volumes+=("      - ${deps_file}:/tmp/hole-dependencies.txt:ro")
     # Auto-add Ubuntu apt repository domains to proxy whitelist
-    if [[ "$has_custom_domains" != true ]]; then
-      cp "$SCRIPT_DIR/proxy/allowed-domains.txt" "$whitelist_file"
-      log_line >> "$whitelist_file"
+    if [[ "${has_custom_domains}" != true ]]; then
+      cp "${SCRIPT_DIR}/proxy/allowed-domains.txt" "${whitelist_file}"
+      printf '\n' >> "${whitelist_file}"
     fi
-    echo "# Ubuntu apt repositories (auto-added for dependencies)" >> "$whitelist_file"
-    echo "ubuntu\.com" >> "$whitelist_file"
+    echo "# Ubuntu apt repositories (auto-added for dependencies)" >> "${whitelist_file}"
+    echo "ubuntu\.com" >> "${whitelist_file}"
     has_custom_domains=true
   fi
 
   # Read container memory settings from merged settings
   local agent_mem_limit
-  agent_mem_limit=$(echo "$merged_settings" | jq -r '.container.memoryLimit // empty' 2>/dev/null) || true
+  agent_mem_limit=$(echo "${merged_settings}" | jq -r '.container.memoryLimit // empty' 2>/dev/null) || true
   local agent_memswap_limit
-  agent_memswap_limit=$(echo "$merged_settings" | jq -r '.container.memorySwapLimit // empty' 2>/dev/null) || true
+  agent_memswap_limit=$(echo "${merged_settings}" | jq -r '.container.memorySwapLimit // empty' 2>/dev/null) || true
 
-  if [[ ${#agent_volumes[@]} -gt 0 || "$has_custom_domains" == true || -n "$agent_mem_limit" || -n "$agent_memswap_limit" || "$debug_mode" == true ]]; then
-    mkdir -p "$compose_dir"
+  if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || "${debug_mode}" == true ]]; then
+    mkdir -p "${compose_dir}"
     {
       echo "services:"
-      if [[ "$has_custom_domains" == true ]]; then
+      if [[ "${has_custom_domains}" == true ]]; then
         echo "  proxy:"
         echo "    volumes:"
-        echo "      - $compose_dir/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
+        echo "      - ${compose_dir}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
       fi
-      if [[ ${#agent_volumes[@]} -gt 0 || -n "$agent_mem_limit" || -n "$agent_memswap_limit" || "$debug_mode" == true ]]; then
-        echo "  $agent:"
-        if [[ -n "$agent_mem_limit" ]]; then
-          echo "    mem_limit: $agent_mem_limit"
+      if [[ ${#agent_volumes[@]} -gt 0 || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || "${debug_mode}" == true ]]; then
+        echo "  ${agent}:"
+        if [[ -n "${agent_mem_limit}" ]]; then
+          echo "    mem_limit: ${agent_mem_limit}"
         fi
-        if [[ -n "$agent_memswap_limit" ]]; then
-          echo "    memswap_limit: $agent_memswap_limit"
+        if [[ -n "${agent_memswap_limit}" ]]; then
+          echo "    memswap_limit: ${agent_memswap_limit}"
         fi
-        if [[ "$debug_mode" == true ]]; then
+        if [[ "${debug_mode}" == true ]]; then
           echo "    command: [\"bash\"]"
         fi
         if [[ ${#agent_volumes[@]} -gt 0 ]]; then
           echo "    volumes:"
           for v in "${agent_volumes[@]}"; do
-            echo "$v"
+            echo "${v}"
           done
         fi
       fi
-    } > "$compose_file"
+    } > "${compose_file}"
   else
     # No overrides — remove stale files if any
-    rm -f "$compose_file"
-    rm -f "$whitelist_file"
-    rm -f "$compose_dir/dependencies.txt"
-    rmdir "$compose_dir" 2>/dev/null || true
+    rm -f "${compose_file}"
+    rm -f "${whitelist_file}"
+    rm -f "${compose_dir}/dependencies.txt"
+    rmdir "${compose_dir}" 2>/dev/null || true
   fi
 
-  PROJECT_COMPOSE_FILE="$compose_file"
+  PROJECT_COMPOSE_FILE="${compose_file}"
 }
 
 # Build the docker compose command array, including optional override file
 build_compose_cmd() {
-  COMPOSE_CMD=(docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE")
-  if [[ -f "$PROJECT_COMPOSE_FILE" ]]; then
-    COMPOSE_CMD+=(-f "$PROJECT_COMPOSE_FILE")
+  COMPOSE_CMD=(docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}")
+  if [[ -f "${PROJECT_COMPOSE_FILE}" ]]; then
+    COMPOSE_CMD+=(-f "${PROJECT_COMPOSE_FILE}")
   fi
 }
 
 # Ensure the persistent agent home volume exists
 ensure_agent_volume() {
-  local agent="$1"
-  local volume_name="hole-agent-home-$agent"
-  if ! docker volume inspect "$volume_name" >/dev/null 2>&1; then
-    log_info "Creating persistent volume: $volume_name"
-    docker volume create "$volume_name"
+  local agent="${1}"
+  local volume_name="hole-agent-home-${agent}"
+  if ! docker volume inspect "${volume_name}" >/dev/null 2>&1; then
+    log_info "Creating persistent volume: ${volume_name}"
+    docker volume create "${volume_name}"
   fi
 }
 
 # Start command: create/start sandbox and attach to agent CLI
 cmd_start() {
-  local agent=$1
-  local project_dir=$2
-  local dump_network_access=${3:-false}
-  local debug_mode=${4:-false}
+  local agent="${1}"
+  local project_dir="${2}"
+  local dump_network_access="${3:-false}"
+  local debug_mode="${4:-false}"
 
   # Validate settings files if present
 #  todo fix validation
-#  validate_settings "$GLOBAL_SETTINGS_FILE" "global settings (~/.hole/settings.json)"
-#  validate_settings "$project_dir/.hole/settings.json" "project settings (.hole/settings.json)"
+#  validate_settings "${GLOBAL_SETTINGS_FILE}" "global settings (~/.hole/settings.json)"
+#  validate_settings "${project_dir}/.hole/settings.json" "project settings (.hole/settings.json)"
 
   # Merge global and project settings
   local merged_settings
-  merged_settings=$(merge_settings "$GLOBAL_SETTINGS_FILE" "$project_dir/.hole/settings.json")
+  merged_settings=$(merge_settings "${GLOBAL_SETTINGS_FILE}" "${project_dir}/.hole/settings.json")
 
   # Generate per-project compose override from merged settings
-  generate_project_compose "$agent" "$project_dir" "$COMPOSE_PROJECT_NAME" "$merged_settings" "$debug_mode"
+  generate_project_compose "${agent}" "${project_dir}" "${COMPOSE_PROJECT_NAME}" "${merged_settings}" "${debug_mode}"
   build_compose_cmd
 
-  if [[ "$debug_mode" == true ]]; then
+  if [[ "${debug_mode}" == true ]]; then
     log_warn "Debug mode: opening bash shell instead of agent CLI"
     log_line
   fi
-  log_info "Launching sandbox for: $project_dir"
-  log_info "Project name: $COMPOSE_PROJECT_NAME"
+  log_info "Launching sandbox for: ${project_dir}"
+  log_info "Project name: ${COMPOSE_PROJECT_NAME}"
   log_line
 
   check_for_update
 
   # Ensure persistent agent home volume exists
-  ensure_agent_volume "$agent"
+  ensure_agent_volume "${agent}"
 
   # Start proxy in detached mode with health check wait
   log_info "Starting proxy..."
   "${COMPOSE_CMD[@]}" up -d proxy
 
   # Start agent service
-  log_info "Starting $agent agent..."
+  log_info "Starting ${agent} agent..."
   log_line
-  "${COMPOSE_CMD[@]}" up -d "$agent"
+  "${COMPOSE_CMD[@]}" up -d "${agent}"
 
   # Attach terminal to the running agent
-  log_info "Attaching to $agent agent..."
+  log_info "Attaching to ${agent} agent..."
   log_line
-  docker attach "$COMPOSE_PROJECT_NAME-$agent-1"
+  docker attach "${COMPOSE_PROJECT_NAME}-${agent}-1"
 
   # Dump network access log if requested
-  if [[ "$dump_network_access" == true ]]; then
-    local log_file="$project_dir/$agent-network-access-$INSTANCE_ID.log"
-    docker logs "$COMPOSE_PROJECT_NAME-proxy-1" 2>&1 | \
+  if [[ "${dump_network_access}" == true ]]; then
+    local log_file="${project_dir}/${agent}-network-access-${INSTANCE_ID}.log"
+    docker logs "${COMPOSE_PROJECT_NAME}-proxy-1" 2>&1 | \
       grep -oE 'CONNECT [a-zA-Z0-9._-]+:[0-9]+|filtered url "[^"]+"' | \
       sed 's/CONNECT //; s/:[0-9]*$//; s/^filtered url "//; s/"$//' | \
-      sort -u > "$log_file" || true
+      sort -u > "${log_file}" || true
     log_line
-    log_info "Network access log written to: $log_file"
+    log_info "Network access log written to: ${log_file}"
   fi
 
   # Destroy the sandbox after user exits
   "${COMPOSE_CMD[@]}" down --rmi local --remove-orphans
 
   # Clean up per-project compose override
-  local compose_dir="$HOLE_TMP_DIR/projects/$COMPOSE_PROJECT_NAME"
-  if [[ -d "$compose_dir" ]]; then
-    rm -rf "$compose_dir"
+  local compose_dir="${HOLE_TMP_DIR}/projects/${COMPOSE_PROJECT_NAME}"
+  if [[ -d "${compose_dir}" ]]; then
+    rm -rf "${compose_dir}"
   fi
 
   log_line
-  log_info "Exited $agent CLI. Sandbox destroyed."
+  log_info "Exited ${agent} CLI. Sandbox destroyed."
 }
 
 # Print installed version
 cmd_version() {
-  local version_file="$SCRIPT_DIR/version"
-  if [[ -f "$version_file" ]]; then
-    echo "hole $(cat "$version_file")"
+  local version_file="${SCRIPT_DIR}/version"
+  if [[ -f "${version_file}" ]]; then
+    echo "hole $(cat "${version_file}")"
   else
     echo "hole development (no version file)"
   fi
@@ -398,16 +400,16 @@ fetch_latest_version() {
   local response=""
 
   if command -v curl >/dev/null 2>&1; then
-    response=$(curl -fsSL --max-time "$timeout" "$GITHUB_API" 2>/dev/null) || return 1
+    response=$(curl -fsSL --max-time "${timeout}" "${GITHUB_API}" 2>/dev/null) || return 1
   elif command -v wget >/dev/null 2>&1; then
-    response=$(wget -qO- --timeout="$timeout" "$GITHUB_API" 2>/dev/null) || return 1
+    response=$(wget -qO- --timeout="${timeout}" "${GITHUB_API}" 2>/dev/null) || return 1
   else
     return 1
   fi
 
   local tag
-  tag=$(echo "$response" | jq -r '.tag_name // empty' 2>/dev/null) || return 1
-  [[ -z "$tag" ]] && return 1
+  tag=$(echo "${response}" | jq -r '.tag_name // empty' 2>/dev/null) || return 1
+  [[ -z "${tag}" ]] && return 1
 
   # Strip v prefix
   echo "${tag#v}"
@@ -416,13 +418,14 @@ fetch_latest_version() {
 # Compare two semver strings; returns 0 if $1 > $2
 version_gt() {
   local IFS='.'
+  # Intentional word-splitting on IFS='.' to split version components
   local -a v1=($1) v2=($2)
-  local len=${#v1[@]}
-  (( ${#v2[@]} > len )) && len=${#v2[@]}
+  local len="${#v1[@]}"
+  (( ${#v2[@]} > len )) && len="${#v2[@]}"
 
   for (( i=0; i<len; i++ )); do
-    local n1=${v1[i]:-0}
-    local n2=${v2[i]:-0}
+    local n1="${v1[i]:-0}"
+    local n2="${v2[i]:-0}"
     if (( n1 > n2 )); then
       return 0
     elif (( n1 < n2 )); then
@@ -434,43 +437,43 @@ version_gt() {
 
 # Silent version check (1s timeout). Prints notice if a newer version is available.
 check_for_update() {
-  local version_file="$SCRIPT_DIR/version"
+  local version_file="${SCRIPT_DIR}/version"
   # Skip in dev mode (no version file)
-  [[ ! -f "$version_file" ]] && return 0
+  [[ ! -f "${version_file}" ]] && return 0
 
   local installed
-  installed=$(cat "$version_file")
+  installed=$(cat "${version_file}")
   local latest
   latest=$(fetch_latest_version 1) || return 0
 
-  if version_gt "$latest" "$installed"; then
-    log_info "A new version of hole is available: $latest (installed: $installed). Run 'hole update' to upgrade."
+  if version_gt "${latest}" "${installed}"; then
+    log_info "A new version of hole is available: ${latest} (installed: ${installed}). Run 'hole update' to upgrade."
   fi
 }
 
 # Update hole to the latest release
 cmd_update() {
-  local version_file="$SCRIPT_DIR/version"
-  if [[ ! -f "$version_file" ]]; then
-    log_error "cannot update a development installation (no version file)" >&2
+  local version_file="${SCRIPT_DIR}/version"
+  if [[ ! -f "${version_file}" ]]; then
+    log_error "cannot update a development installation (no version file)"
     exit 1
   fi
 
   local installed
-  installed=$(cat "$version_file")
+  installed=$(cat "${version_file}")
 
   log_info "Checking for updates..."
   local latest
   latest=$(fetch_latest_version) || {
-    log_error "failed to check for latest version" >&2
+    log_error "failed to check for latest version"
     exit 1
   }
 
-  if version_gt "$latest" "$installed"; then
-    log_info "Updating hole: $installed -> $latest"
-    curl -fsSL "$GITHUB_INSTALL_SCRIPT" | bash
+  if version_gt "${latest}" "${installed}"; then
+    log_info "Updating hole: ${installed} -> ${latest}"
+    curl -fsSL "${GITHUB_INSTALL_SCRIPT}" | bash
   else
-    log_info "hole is already up to date (version $installed)."
+    log_info "hole is already up to date (version ${installed})."
   fi
 }
 
@@ -484,7 +487,7 @@ main() {
     case "$arg" in
       --debug) debug_mode=true ;;
       --dump-network-access) dump_network_access=true ;;
-      *) positional+=("$arg") ;;
+      *) positional+=("${arg}") ;;
     esac
   done
 
@@ -494,37 +497,36 @@ main() {
   local target_dir="${positional[2]:-.}"
 
   # Handle top-level commands (no agent required)
-  if [[ "$command" == "version" ]]; then
+  if [[ "${command}" == "version" ]]; then
     cmd_version
     exit 0
   fi
-  if [[ "$command" == "update" ]]; then
+  if [[ "${command}" == "update" ]]; then
     cmd_update
     exit 0
   fi
-  if [[ "$command" == "help" ]] || [[ -z "$command" ]]; then
+  if [[ "${command}" == "help" ]] || [[ -z "${command}" ]]; then
     show_help
     exit 0
   fi
 
   # Validate inputs
-  validate_agent "$agent"
-  validate_command "$command"
+  validate_agent "${agent}"
+  validate_command "${command}"
 
   # Resolve path
   local project_dir
-  project_dir=$(resolve_project_dir "$target_dir")
+  project_dir=$(resolve_project_dir "${target_dir}")
 
   # Generate project name and export environment
-  export PROJECT_DIR="$project_dir"
+  export PROJECT_DIR="${project_dir}"
   INSTANCE_ID=$(generate_instance_id)
-  export COMPOSE_PROJECT_NAME="$(sanitize_path_to_project_name "$project_dir")-$agent-$INSTANCE_ID"
+  export COMPOSE_PROJECT_NAME="$(sanitize_path_to_project_name "${project_dir}")-${agent}-${INSTANCE_ID}"
 
   # Dispatch to command handler
-  case "$command" in
-    start)   cmd_start "$agent" "$project_dir" "$dump_network_access" "$debug_mode" ;;
-    help)    show_help ;;
-    *)       log_error "Unknown command: $command" >&2; exit 1 ;;
+  case "${command}" in
+    start)   cmd_start "${agent}" "${project_dir}" "${dump_network_access}" "${debug_mode}" ;;
+    *)       log_error "Unknown command: ${command}"; exit 1 ;;
   esac
 }
 

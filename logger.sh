@@ -37,5 +37,5 @@ log_error() {
 }
 
 log_line() {
-  echo ""
+  echo "" >&2
 }
