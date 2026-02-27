@@ -4,6 +4,8 @@ services:
     build:
       context: .
       dockerfile: agents/claude/Dockerfile
+      additional_contexts:
+        setup-context: ./agents/claude/setup-scripts
     image: hole-sandboxes/agent-claude-${PROJECT_NAME}:latest
     stdin_open: true
     tty: true

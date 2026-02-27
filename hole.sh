@@ -254,7 +254,31 @@ generate_instance_compose() {
   local agent_memswap_limit
   agent_memswap_limit=$(echo "${merged_settings}" | jq -r '.container.memorySwapLimit // empty' 2>/dev/null) || true
 
-  if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${debug_mode}" == true ]]; then
+  # Read setup hook script from merged settings
+  local setup_script_path
+  setup_script_path=$(echo "${merged_settings}" | jq -r '.hooks.setup.script // empty' 2>/dev/null) || true
+  local has_setup_script=false
+
+  if [[ -n "${setup_script_path}" ]]; then
+    setup_script_path="${setup_script_path%/}"
+    if [[ "${setup_script_path}" == "~/"* ]]; then
+      setup_script_path="${HOME}/${setup_script_path#\~/}"
+    elif [[ "${setup_script_path}" != /* ]]; then
+      setup_script_path="${project_dir}/${setup_script_path}"
+    fi
+    if [[ -f "${setup_script_path}" ]]; then
+      has_setup_script=true
+    else
+      log_warn "setup hook script '${setup_script_path}' not found, skipping"
+    fi
+  fi
+
+  if [[ "${has_setup_script}" == true ]]; then
+    mkdir -p "${compose_dir}"
+    cp "${setup_script_path}" "${compose_dir}/setup.sh"
+  fi
+
+  if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true ]]; then
     mkdir -p "${compose_dir}"
     {
       echo "services:"
@@ -263,12 +287,18 @@ generate_instance_compose() {
         echo "    volumes:"
         echo "      - ${compose_dir}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
       fi
-      if [[ ${#agent_volumes[@]} -gt 0 || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${debug_mode}" == true ]]; then
+      if [[ ${#agent_volumes[@]} -gt 0 || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true ]]; then
         echo "  ${agent}:"
-        if [[ -n "${extra_packages}" ]]; then
+        if [[ -n "${extra_packages}" || "${has_setup_script}" == true ]]; then
           echo "    build:"
-          echo "      args:"
-          echo "        EXTRA_PACKAGES: \"${extra_packages}\""
+          if [[ -n "${extra_packages}" ]]; then
+            echo "      args:"
+            echo "        EXTRA_PACKAGES: \"${extra_packages}\""
+          fi
+          if [[ "${has_setup_script}" == true ]]; then
+            echo "      additional_contexts:"
+            echo "        setup-context: ${compose_dir}"
+          fi
         fi
         if [[ -n "${agent_mem_limit}" ]]; then
           echo "    mem_limit: ${agent_mem_limit}"

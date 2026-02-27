@@ -229,6 +229,29 @@ Example `.hole/settings.json`:
 }
 ```
 
+### Setup Hook Script
+
+A custom bash script can be run during the Docker image build via `hooks.setup.script` in `settings.json` (both global and per-project). The script runs as **root** after dependency installation, so it can install system-level packages, configure locales, add apt repositories, etc.
+
+```json
+{
+  "hooks": {
+    "setup": {
+      "script": ".hole/my-project-setup.sh"
+    }
+  }
+}
+```
+
+- **Path resolution** (same as other settings):
+  - `~/...` → expanded to `$HOME/...`
+  - Relative paths → resolved against the project directory
+  - Absolute paths → used as-is
+- **Runs as root** during `docker build`, before switching to the `agent` user
+- **Script changes trigger image rebuild** (Docker layer caching based on content)
+- **Merge behavior**: Scalar value, so project setting overrides global
+- **Non-existent script path** → warning logged to stderr, skipped
+
 ### Agent Home Volume
 
 Each agent type has a persistent Docker named volume for its home directory (`hole-agent-home-<agent>`). Lifecycle:
