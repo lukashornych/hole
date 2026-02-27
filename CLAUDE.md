@@ -76,20 +76,6 @@ example\.com
 .*\.example\.com
 ```
 
-Rebuild proxy for changes to take effect:
-```bash
-docker compose -p <project-name> up -d --build proxy
-```
-
-### Adding New Agent Types
-
-1. Create `agents/<agent-name>/Dockerfile`
-2. Add service definition in `docker-compose.yml` under a new profile
-3. Configure proxy dependency and network: sandbox only
-4. Add allowed domains to `proxy/allowed-domains.txt`
-5. Update `hole.sh` VALID_AGENTS array to include the new agent
-6. Update `uninstall.sh` agents array to include the new agent (for volume cleanup)
-
 ### Global Settings
 
 Global defaults can be defined in `~/.hole/settings.json`. This file uses the same schema as per-project `.hole/settings.json`. When both exist, they are deep-merged before use:
@@ -240,25 +226,6 @@ Example `.hole/settings.json`:
   }
 }
 ```
-
-### Container Naming
-
-Project name derived from sanitized absolute path plus a random instance ID: `hole-$(sanitized_absolute_path)-$(agent)-$(instance_id)`
-
-Example: `/Users/lho/www/oss/hole` with claude agent → `hole-users-lho-www-oss-hole-claude-a1b2c3`
-
-This ensures:
-- Multiple sandboxes can run simultaneously for the same project
-- Clean separation between different sandboxes
-- No collisions between projects with same directory name in different locations
-
-### Version Check & Update
-
-`hole.sh` includes a version check mechanism and an `update` command:
-
-- **Silent version check**: Runs during `start` and `version` commands with a 1-second timeout. Compares the installed version (`version` file) against the latest GitHub release. Prints a one-line notice if a newer version exists. Skipped in dev mode (no version file). Network failures are silently ignored.
-- **`hole update` command**: Fetches the latest version from the GitHub API. If newer, downloads and runs `install.sh` from the main branch. Errors on dev installations (no version file).
-- **GitHub constants**: `GITHUB_REPO`, `GITHUB_API`, `GITHUB_INSTALL_SCRIPT` defined at the top of `hole.sh`.
 
 ### Agent Home Volume
 
