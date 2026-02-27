@@ -420,13 +420,29 @@ cmd_start() {
 
   # Dump network access log if requested
   if [[ "${dump_network_access}" == true ]]; then
-    local log_file="${project_dir}/${agent}-network-access-${instance_id}.log"
-    docker logs "${instance_name}-proxy-1" 2>&1 | \
-      grep -oE 'CONNECT [a-zA-Z0-9._-]+:[0-9]+|filtered url "[^"]+"' | \
-      sed 's/CONNECT //; s/:[0-9]*$//; s/^filtered url "//; s/"$//' | \
-      sort -u > "${log_file}" || true
-    log_line
-    log_info "Network access log written to: ${log_file}"
+    local log_dir="${project_dir}/.hole/logs"
+    mkdir -p "${log_dir}"
+    local log_file="${log_dir}/network-access-${agent}-${instance_id}.log"
+    local proxy_container="${instance_name}-proxy-1"
+    local tmp_proxy_log
+    tmp_proxy_log="$(mktemp "${TMPDIR:-/tmp}/hole-proxy-log.XXXXXX")"
+
+    # Stop proxy gracefully so tinyproxy exit() flushes stdio buffers to log file
+    docker stop "${proxy_container}" >/dev/null 2>&1 || true
+
+    # Copy the log file from the stopped container and extract domains
+    if docker cp "${proxy_container}:/var/log/tinyproxy/tinyproxy.log" "${tmp_proxy_log}" 2>/dev/null; then
+      grep -oE 'Established connection to host "[a-zA-Z0-9._-]+"|Proxying refused on filtered (url|domain) "[^"]+"' "${tmp_proxy_log}" | \
+        sed 's/Established connection to host "/ALLOWED /; s/Proxying refused on filtered [a-z]* "/DENIED /; s/"$//' | \
+        sort -u > "${log_file}" || true
+      log_line
+      log_info "Network access log written to: ${log_file}"
+    else
+      log_line
+      log_warn "Could not retrieve proxy log from container"
+    fi
+
+    rm -f "${tmp_proxy_log}"
   fi
 
   # Destroy the sandbox after user exits

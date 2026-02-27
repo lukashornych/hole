@@ -36,7 +36,7 @@ hole start claude . --rebuild             # force rebuild of cached Docker image
 
 `--debug` sets up the sandbox normally but drops you into an interactive shell for inspecting volumes, network connectivity, and installed packages.
 
-`--dump-network-access` writes a `claude-network-access-{id}.log` file to the project directory after the agent exits, containing a sorted list of distinct domains (both allowed and denied).
+`--dump-network-access` writes a `.hole/logs/network-access-{agent}-{instance id}.log` file to the project directory after the agent exits, containing a sorted list of distinct domains (both allowed and denied).
 
 `--rebuild` forces a fresh build of the sandbox Docker images. Sandbox images are cached per-project for fast startup — use this flag after changing `dependencies`, hook scripts, or when the base agent image needs updating.
 
@@ -92,6 +92,14 @@ hole uninstall
 ## Configuration
 
 Settings are defined in `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project). When both exist, they are deep-merged: objects are recursively merged (project values win for scalar conflicts), arrays are concatenated and deduplicated (global items first).
+
+### Project .gitignore
+
+It is recommended to add the following paths to your project `.gitignore` to avoid accidentally committing unwanted files:
+
+```
+.hole/logs/
+```
 
 ### File exclusions
 
