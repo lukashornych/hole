@@ -125,7 +125,7 @@ merge_settings() {
 }
 
 # Resolve project directory to absolute path
-resolve_project_dir() {
+resolve_absolute_project_dir() {
   local target_dir="${1:-.}"
 
   if [[ "${target_dir}" != /* ]]; then
@@ -147,10 +147,21 @@ resolve_project_dir() {
 }
 
 # Convert absolute path to valid Docker project name
-sanitize_path_to_project_name() {
+create_project_name_from_project_path() {
   local path="${1}"
+
+  local project_dir_basename
+  project_dir_basename="$(basename "${path}")"
+  local sanitized_project_dir_name
   # Remove leading slashes, replace / with -, lowercase, keep only valid chars
-  echo "hole-$(echo "${path}" | sed 's/^\/*//' | tr '/' '-' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
+  sanitized_project_dir_name="$(echo "${project_dir_basename}" | sed 's/^\/*//' | tr '/' '-' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
+
+  local sanitized_project_dir_path
+  sanitized_project_dir_path="$(echo "${path}" | sed 's/^\/*//' | tr '/' '-' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
+  local project_dir_path_hash
+  project_dir_path_hash="$(echo -n "${sanitized_project_dir_path}" | sha1sum | awk '{print $1}' | cut -c1-8)"
+
+  echo "${sanitized_project_dir_name}-${project_dir_path_hash}"
 }
 
 # Generate a random 6-character hex instance ID
@@ -159,14 +170,14 @@ generate_instance_id() {
 }
 
 # Generate per-project docker-compose override file from merged settings
-generate_project_compose() {
+generate_instance_compose() {
   local agent="${1}"
   local project_dir="${2}"
-  local project_name="${3}"
+  local instance_name="${3}"
   local merged_settings="${4}"
   local debug_mode="${5:-false}"
 
-  local compose_dir="${HOLE_TMP_DIR}/projects/${project_name}"
+  local compose_dir="${HOLE_TMP_DIR}/projects/${instance_name}"
   local compose_file="${compose_dir}/docker-compose.yml"
 
   local agent_volumes=()
@@ -289,14 +300,17 @@ generate_project_compose() {
     rmdir "${compose_dir}" 2>/dev/null || true
   fi
 
-  PROJECT_COMPOSE_FILE="${compose_file}"
+  echo "${compose_file}"
 }
 
 # Build the docker compose command array, including optional override file
-build_compose_cmd() {
-  COMPOSE_CMD=(docker compose -p "${COMPOSE_PROJECT_NAME}" -f "${COMPOSE_FILE}")
-  if [[ -f "${PROJECT_COMPOSE_FILE}" ]]; then
-    COMPOSE_CMD+=(-f "${PROJECT_COMPOSE_FILE}")
+create_compose_cmd() {
+  local instance_name="${1}"
+  local project_compose_file="${2}"
+
+  COMPOSE_CMD=(docker compose -p "${instance_name}" -f "${COMPOSE_FILE}")
+  if [[ -f "${project_compose_file}" ]]; then
+    COMPOSE_CMD+=(-f "${project_compose_file}")
   fi
 }
 
@@ -314,8 +328,11 @@ ensure_agent_volume() {
 cmd_start() {
   local agent="${1}"
   local project_dir="${2}"
-  local dump_network_access="${3:-false}"
-  local debug_mode="${4:-false}"
+  local project_name=${3}
+  local instance_id=${4}
+  local instance_name=${5}
+  local dump_network_access="${6:-false}"
+  local debug_mode="${7:-false}"
 
   # Validate settings files if present
 #  todo fix validation
@@ -327,15 +344,17 @@ cmd_start() {
   merged_settings=$(merge_settings "${GLOBAL_SETTINGS_FILE}" "${project_dir}/.hole/settings.json")
 
   # Generate per-project compose override from merged settings
-  generate_project_compose "${agent}" "${project_dir}" "${COMPOSE_PROJECT_NAME}" "${merged_settings}" "${debug_mode}"
-  build_compose_cmd
+  local project_compose_file
+  project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}")
+  create_compose_cmd "${instance_name}" "${project_compose_file}"
 
   if [[ "${debug_mode}" == true ]]; then
     log_warn "Debug mode: opening bash shell instead of agent CLI"
     log_line
   fi
   log_info "Launching sandbox for: ${project_dir}"
-  log_info "Project name: ${COMPOSE_PROJECT_NAME}"
+  log_info "Project name: ${project_name}"
+  log_info "Instance ID: ${instance_id}"
   log_line
 
   check_for_update
@@ -355,12 +374,12 @@ cmd_start() {
   # Attach terminal to the running agent
   log_info "Attaching to ${agent} agent..."
   log_line
-  docker attach "${COMPOSE_PROJECT_NAME}-${agent}-1"
+  docker attach "${instance_name}-${agent}-1"
 
   # Dump network access log if requested
   if [[ "${dump_network_access}" == true ]]; then
-    local log_file="${project_dir}/${agent}-network-access-${INSTANCE_ID}.log"
-    docker logs "${COMPOSE_PROJECT_NAME}-proxy-1" 2>&1 | \
+    local log_file="${project_dir}/${agent}-network-access-${instance_id}.log"
+    docker logs "${instance_name}-proxy-1" 2>&1 | \
       grep -oE 'CONNECT [a-zA-Z0-9._-]+:[0-9]+|filtered url "[^"]+"' | \
       sed 's/CONNECT //; s/:[0-9]*$//; s/^filtered url "//; s/"$//' | \
       sort -u > "${log_file}" || true
@@ -372,7 +391,7 @@ cmd_start() {
   "${COMPOSE_CMD[@]}" down --rmi local --remove-orphans
 
   # Clean up per-project compose override
-  local compose_dir="${HOLE_TMP_DIR}/projects/${COMPOSE_PROJECT_NAME}"
+  local compose_dir="${HOLE_TMP_DIR}/projects/${instance_name}"
   if [[ -d "${compose_dir}" ]]; then
     rm -rf "${compose_dir}"
   fi
@@ -516,16 +535,19 @@ main() {
 
   # Resolve path
   local project_dir
-  project_dir=$(resolve_project_dir "${target_dir}")
+  project_dir=$(resolve_absolute_project_dir "${target_dir}")
 
   # Generate project name and export environment
+  local project_name
+  project_name=$(create_project_name_from_project_path "${project_dir}")
   local instance_id
   instance_id=$(generate_instance_id)
-  export COMPOSE_PROJECT_NAME="$(sanitize_path_to_project_name "${project_dir}")-${agent}-${instance_id}"
+  local instance_name
+  instance_name="hole-${project_name}-${instance_id}"
 
   # Dispatch to command handler
   case "${command}" in
-    start)   cmd_start "${agent}" "${project_dir}" "${dump_network_access}" "${debug_mode}" ;;
+    start)   cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" ;;
     *)       log_error "Unknown command: ${command}"; exit 1 ;;
   esac
 }
