@@ -30,10 +30,11 @@ Agents:
   claude    Claude Code agent
 
 Options:
-  -d, --debug                 Open a bash shell instead of the agent CLI for
+  --debug                 Open a bash shell instead of the agent CLI for
                               inspecting the sandbox environment
-  -n, --dump-network-access   After the agent exits, write distinct accessed domains
+  --dump-network-access   After the agent exits, write distinct accessed domains
                               to {agent}-network-access-{id}.log in the project directory
+  --rebuild               Force rebuild of Docker images before starting
 
 Examples:
   hole start claude .
@@ -360,6 +361,12 @@ cmd_start() {
   local instance_name=${5}
   local dump_network_access="${6:-false}"
   local debug_mode="${7:-false}"
+   local rebuild="${8:-false}"
+
+    local build_flag=()
+    if [[ "${rebuild}" == true ]]; then
+      build_flag=(--build)
+    fi
 
   # Validate settings files if present
   validate_settings "${GLOBAL_SETTINGS_FILE}" "global settings (~/.hole/settings.json)"
@@ -394,12 +401,12 @@ cmd_start() {
 
   # Start proxy in detached mode with health check wait
   log_info "Starting proxy..."
-  "${COMPOSE_CMD[@]}" up -d --build proxy
+  "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} proxy
 
   # Start agent service
   log_info "Starting ${agent} agent..."
   log_line
-  "${COMPOSE_CMD[@]}" up -d --build "${agent}"
+  "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} "${agent}"
 
   # Attach terminal to the running agent
   log_info "Attaching to ${agent} agent..."
@@ -530,12 +537,14 @@ cmd_update() {
 main() {
   local dump_network_access=false
   local debug_mode=false
+  local rebuild=false
   local positional=()
 
   for arg in "$@"; do
     case "$arg" in
       --debug) debug_mode=true ;;
       --dump-network-access) dump_network_access=true ;;
+      --rebuild) rebuild=true ;;
       *) positional+=("${arg}") ;;
     esac
   done
@@ -577,7 +586,7 @@ main() {
 
   # Dispatch to command handler
   case "${command}" in
-    start)   cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" ;;
+    start)   cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" "${rebuild}" ;;
     *)       log_error "Unknown command: ${command}"; exit 1 ;;
   esac
 }
