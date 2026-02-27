@@ -31,11 +31,14 @@ Credentials persist across sessions in a Docker volume. On first run, the volume
 ```sh
 hole start claude . --debug               # open a bash shell instead of the agent CLI
 hole start claude . --dump-network-access  # write accessed domains to a log file on exit
+hole start claude . --rebuild             # force rebuild of cached Docker images
 ```
 
 `--debug` sets up the sandbox normally but drops you into an interactive shell for inspecting volumes, network connectivity, and installed packages.
 
 `--dump-network-access` writes a `claude-network-access-{id}.log` file to the project directory after the agent exits, containing a sorted list of distinct domains (both allowed and denied).
+
+`--rebuild` forces a fresh build of the sandbox Docker images. Sandbox images are cached per-project for fast startup — use this flag after changing `dependencies`, hook scripts, or when the base agent image needs updating.
 
 ### Other commands
 
@@ -129,7 +132,7 @@ By default, agents can only reach domains required for their operation (e.g. `ap
 }
 ```
 
-Use plain domain names — dots are auto-escaped for the proxy filter.
+Use plain domain names — dots are auto-escaped for the proxy filter. After changing the whitelist, restart the sandbox (changes take effect on next `hole start`).
 
 ### Dependencies
 
@@ -141,7 +144,7 @@ Install additional apt packages at container startup:
 }
 ```
 
-Packages are installed before the agent CLI starts. Ubuntu apt repository domains are automatically added to the proxy whitelist when dependencies are specified.
+Packages are installed during the Docker image build and baked into the cached per-project image, so subsequent startups are instant. After changing the dependency list, use `--rebuild` to apply the changes.
 
 ### Container settings
 
@@ -158,3 +161,30 @@ Configure container resource limits:
 
 - `memoryLimit` — Docker `mem_limit` (e.g. `"8g"`, `"512m"`)
 - `memorySwapLimit` — Docker `memswap_limit` (e.g. `"8g"`, `"512m"`)
+
+### Hooks
+
+Hooks allow you to inject some logic into sandbox lifecycle.
+
+#### Setup hook
+
+Run a custom bash script during the Docker image build to perform system-level setup (install packages, configure locales, add apt repositories, etc.):
+
+```json
+{
+  "hooks": {
+    "setup": {
+      "script": ".hole/setup.sh"
+    }
+  }
+}
+```
+
+The script runs as **root** during the image build, after dependency installation. Host paths starting with `~/` expand 
+to `$HOME`, relative paths resolve against the project directory, and absolute paths are used as-is. 
+Non-existent paths are skipped with a warning.
+
+**Important:** The agent home directory (`/home/agent`) is backed by a persistent Docker volume that overrides image contents.
+Do not install anything to `/home/agent` in the setup script — it will be hidden by the volume mount.
+
+Use `--rebuild` to force a fresh build if needed.
