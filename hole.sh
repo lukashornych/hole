@@ -174,6 +174,11 @@ generate_instance_id() {
   LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6; echo
 }
 
+# Check if a string contains glob metacharacters (*, ?, [)
+has_glob_chars() {
+  [[ "${1}" == *[\*\?\[]* ]]
+}
+
 # Generate per-project docker-compose override file from merged settings
 generate_instance_compose() {
   local agent="${1}"
@@ -190,21 +195,55 @@ generate_instance_compose() {
   local whitelist_file="${compose_dir}/tinyproxy-domain-whitelist.txt"
 
   # Read exclusions from merged settings and auto-detect files vs directories
+  # Supports both literal paths and glob patterns (*, **, ?, [abc])
   local entries
   entries=$(echo "${merged_settings}" | jq -r '.files.exclude[]? // empty' 2>/dev/null) || true
+  local -a resolved_paths=()
   while IFS= read -r line; do
     [[ -z "${line}" ]] && continue
     # Strip trailing slashes for consistent mount paths
     line="${line%/}"
-    local full_path="${project_dir}/${line}"
-    if [[ -f "${full_path}" ]]; then
-      agent_volumes+=("      - /dev/null:/workspace/${line}:ro")
-    elif [[ -d "${full_path}" ]]; then
-      agent_volumes+=("      - /workspace/${line}")
+    if has_glob_chars "${line}"; then
+      # Expand glob pattern in a subshell to isolate shopt changes
+      local -a matches=()
+      while IFS= read -r match; do
+        [[ -n "${match}" ]] && matches+=("${match}")
+      done < <(cd "${project_dir}" && bash -c 'shopt -s globstar nullglob; eval "for f in $1; do printf \"%s\n\" \"\$f\"; done"' _ "${line}" 2>/dev/null)
+      if [[ ${#matches[@]} -eq 0 ]]; then
+        log_warn "excluded pattern '${line}' matched no paths, skipping"
+      else
+        resolved_paths+=("${matches[@]}")
+      fi
     else
-      log_warn "excluded path '${line}' not found in project, skipping"
+      local full_path="${project_dir}/${line}"
+      if [[ -e "${full_path}" ]]; then
+        resolved_paths+=("${line}")
+      else
+        log_warn "excluded path '${line}' not found in project, skipping"
+      fi
     fi
   done <<< "${entries}"
+
+  # Deduplicate resolved paths and generate volume mounts
+  local seen_excludes=""
+  for resolved in ${resolved_paths[@]+"${resolved_paths[@]}"}; do
+    [[ -z "${resolved}" ]] && continue
+    # Strip trailing slashes again (glob expansion may include them)
+    resolved="${resolved%/}"
+    # Skip duplicates
+    case "${seen_excludes}" in
+      *"|${resolved}|"*) continue ;;
+    esac
+    seen_excludes="${seen_excludes}|${resolved}|"
+    local full_path="${project_dir}/${resolved}"
+    if [[ -f "${full_path}" ]]; then
+      agent_volumes+=("      - /dev/null:/workspace/${resolved}:ro")
+    elif [[ -d "${full_path}" ]]; then
+      agent_volumes+=("      - /workspace/${resolved}")
+    else
+      log_warn "excluded path '${resolved}' not found in project, skipping"
+    fi
+  done
 
   # Read file inclusions from merged settings (host_path -> container_path)
   local include_pairs

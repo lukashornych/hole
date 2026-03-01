@@ -105,22 +105,30 @@ If a project also has `.hole/settings.json` with `"files": { "exclude": [".env",
 
 ### Secret File/Folder Hiding
 
-Per-project exclusions are configured via `.hole/settings.json` in the project directory. The `files.exclude` array lists paths to hide from the agent. The script auto-detects whether each entry is a file or directory and generates the correct Docker volume mount:
+Per-project exclusions are configured via `.hole/settings.json` in the project directory. The `files.exclude` array lists paths or glob patterns to hide from the agent. The script auto-detects whether each resolved path is a file or directory and generates the correct Docker volume mount:
 - **Files** → mounted as `/dev/null:/workspace/<path>:ro`
 - **Directories** → mounted as anonymous volume at `/workspace/<path>`
 - **Non-existent paths** → warning printed to stderr, entry skipped
 
 Trailing slashes are stripped automatically (e.g., `node_modules/` → `node_modules`).
 
+**Glob pattern support:** Entries containing `*`, `?`, or `[` are treated as glob patterns and expanded against the project directory at `start` time. Supported syntax:
+- `*` — matches any characters within a single path segment (e.g., `.env*` matches `.env`, `.env.local`, `.env.production`)
+- `**` — matches zero or more path segments recursively (e.g., `**/secrets` matches `secrets`, `app/secrets`, `app/config/secrets`)
+- `?` — matches a single character
+- `[abc]` — matches one of the listed characters
+
+Patterns that match no files produce a warning and are skipped. When multiple entries (or overlapping patterns) resolve to the same path, it is mounted only once.
+
 Example `.hole/settings.json`:
 ```json
 {
   "files": {
     "exclude": [
-      ".env",
-      ".env.local",
+      ".env*",
       "node_modules",
-      "dist"
+      "apps/*/config",
+      "**/secrets"
     ]
   }
 }

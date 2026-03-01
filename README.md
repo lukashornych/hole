@@ -203,6 +203,23 @@ Hide files and directories from the agent:
 
 Files are mounted as `/dev/null` and directories as empty anonymous volumes inside the container. Non-existent paths are skipped with a warning.
 
+Glob patterns are supported for matching multiple paths at once:
+
+```json
+{
+  "files": {
+    "exclude": [".env*", "apps/*/config", "**/secrets"]
+  }
+}
+```
+
+- `*` — matches any characters within a single path segment (e.g. `.env*` matches `.env`, `.env.local`, `.env.production`)
+- `**` — matches zero or more path segments recursively (e.g. `**/secrets` matches `secrets`, `app/secrets`, `app/config/secrets`)
+- `?` — matches a single character
+- `[abc]` — matches one of the listed characters
+
+Patterns that match no files produce a warning and are skipped. Duplicate paths (from overlapping patterns) are mounted only once.
+
 ### File inclusions
 
 Mount additional host files or directories into the sandbox. Keys are host paths, values are absolute container paths:
