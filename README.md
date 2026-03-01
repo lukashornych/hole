@@ -12,7 +12,24 @@ Hole provides true isolation through:
 - **File access control** — project files are mounted into the container, with configurable exclusions (e.g. `.env`, `node_modules`) hidden from the agent
 - **Containerized execution** — the agent runs as a non-root user inside a Docker container that is destroyed on exit
 
-TODO CLAUDE add table of contents here
+- [What is Hole?](#what-is-hole)
+- [Usage](#usage)
+  - [Flags](#flags)
+  - [Other commands](#other-commands)
+- [Installation](#installation)
+  - [Update](#update)
+  - [Uninstall](#uninstall)
+- [Agents](#agents)
+  - [Claude Code](#claude-code)
+- [Configuration](#configuration)
+  - [Project .gitignore](#project-gitignore)
+  - [File exclusions](#file-exclusions)
+  - [File inclusions](#file-inclusions)
+  - [Domain whitelist](#domain-whitelist)
+  - [Dependencies](#dependencies)
+  - [Container settings](#container-settings)
+  - [Hooks](#hooks)
+  - [Configuration examples](#configuration-examples)
 
 ## Usage
 
