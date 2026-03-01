@@ -350,7 +350,7 @@ create_compose_cmd() {
 # Ensure the persistent agent home volume exists
 ensure_agent_volume() {
   local agent="${1}"
-  local volume_name="hole-agent-home-${agent}"
+  local volume_name="hole-sandbox-agent-home-${agent}"
   if ! docker volume inspect "${volume_name}" >/dev/null 2>&1; then
     log_info "Creating persistent volume: ${volume_name}"
     docker volume create "${volume_name}"
@@ -425,7 +425,7 @@ cmd_start() {
     local log_file="${log_dir}/network-access-${agent}-${instance_id}.log"
     local proxy_container="${instance_name}-proxy-1"
     local tmp_proxy_log
-    tmp_proxy_log="$(mktemp "${TMPDIR:-/tmp}/hole-proxy-log.XXXXXX")"
+    tmp_proxy_log="$(mktemp "${TMPDIR:-/tmp}/hole-sandbox-proxy-log.XXXXXX")"
 
     # Stop proxy gracefully so tinyproxy exit() flushes stdio buffers to log file
     docker stop "${proxy_container}" >/dev/null 2>&1 || true
@@ -469,7 +469,7 @@ cmd_destroy() {
 
   # Stop running containers for this project
   local running_containers
-  running_containers=$(docker ps -q --filter "name=hole-${project_name}-") || true
+  running_containers=$(docker ps -q --filter "name=hole-sandbox-${project_name}-") || true
   if [[ -n "${running_containers}" ]]; then
     log_info "Stopping running containers..."
     docker stop ${running_containers} || log_warn "Failed to stop some containers"
@@ -479,7 +479,7 @@ cmd_destroy() {
 
   # Remove all containers (running or stopped) for this project
   local all_containers
-  all_containers=$(docker ps -aq --filter "name=hole-${project_name}-") || true
+  all_containers=$(docker ps -aq --filter "name=hole-sandbox-${project_name}-") || true
   if [[ -n "${all_containers}" ]]; then
     log_info "Removing containers..."
     docker rm -f ${all_containers} || log_warn "Failed to remove some containers"
@@ -489,7 +489,7 @@ cmd_destroy() {
 
   # Remove networks for this project
   local networks
-  networks=$(docker network ls -q --filter "name=hole-${project_name}-") || true
+  networks=$(docker network ls -q --filter "name=hole-sandbox-${project_name}-") || true
   if [[ -n "${networks}" ]]; then
     log_info "Removing networks..."
     docker network rm ${networks} || log_warn "Failed to remove some networks"
@@ -499,7 +499,7 @@ cmd_destroy() {
 
   # Remove cached agent images for all agent types
   for agent in "${VALID_AGENTS[@]}"; do
-    local agent_image="hole-sandboxes/agent-${agent}-${project_name}:latest"
+    local agent_image="hole-sandbox/agent-${agent}-${project_name}:latest"
     if docker image inspect "${agent_image}" >/dev/null 2>&1; then
       log_info "Removing agent image: ${agent_image}"
       docker rmi "${agent_image}" || log_warn "Failed to remove image ${agent_image}"
@@ -509,7 +509,7 @@ cmd_destroy() {
   done
 
   # Remove cached proxy image
-  local proxy_image="hole-sandboxes/proxy-${project_name}:latest"
+  local proxy_image="hole-sandbox/proxy-${project_name}:latest"
   if docker image inspect "${proxy_image}" >/dev/null 2>&1; then
     log_info "Removing proxy image: ${proxy_image}"
     docker rmi "${proxy_image}" || log_warn "Failed to remove image ${proxy_image}"
@@ -518,7 +518,7 @@ cmd_destroy() {
   fi
 
   # Remove temp files for this project
-  local tmp_pattern="${HOLE_TMP_DIR}/projects/hole-${project_name}-*"
+  local tmp_pattern="${HOLE_TMP_DIR}/projects/hole-sandbox-${project_name}-*"
   local tmp_dirs
   tmp_dirs=$(compgen -G "${tmp_pattern}" 2>/dev/null) || true
   if [[ -n "${tmp_dirs}" ]]; then
@@ -724,7 +724,7 @@ main() {
   local instance_id
   instance_id=$(generate_instance_id)
   local instance_name
-  instance_name="hole-${project_name}-${instance_id}"
+  instance_name="hole-sandbox-${project_name}-${instance_id}"
 
   # Handle start command (no agent argument required)
   if [[ "${command}" == "start" ]]; then

@@ -49,7 +49,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 
 **File access control:**
 - Project directory mounted read-write at /workspace
-- Agent home directory (`/home/agent`) backed by a persistent Docker named volume (`hole-agent-home-claude`). Credentials, settings, and CLI state survive sandbox teardown.
+- Agent home directory (`/home/agent`) backed by a persistent Docker named volume (`hole-sandbox-agent-home-claude`). Credentials, settings, and CLI state survive sandbox teardown.
 - Secret files/folders hidden by mounting /dev/null over them (e.g., .env, .env.local)
 - Exclusions configured via `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project), merged at runtime
 
@@ -183,7 +183,7 @@ Additional apt packages can be installed via the `dependencies` array in `settin
 
 - **Format**: apt package names (`python3`) or with version pinning (`python3=3.10.6-1~22.04`)
 - **Merge behavior**: Arrays from global and project settings are concatenated and deduplicated (same as other array properties)
-- **Installation**: Packages are passed as the `EXTRA_PACKAGES` Docker build arg and installed during image build via a conditional `RUN` layer in the Dockerfile. They are baked into the per-project cached image (`hole-sandboxes/agent-claude-${PROJECT_NAME}:latest`), so subsequent sandbox starts are instant.
+- **Installation**: Packages are passed as the `EXTRA_PACKAGES` Docker build arg and installed during image build via a conditional `RUN` layer in the Dockerfile. They are baked into the per-project cached image (`hole-sandbox/agent-claude-${PROJECT_NAME}:latest`), so subsequent sandbox starts are instant.
 - **Rebuilding**: Dockerfile is automatically rebuild every start
 - **Network**: Since apt runs during `docker build` (with host networking), Ubuntu apt repository domains are **not** added to the sandbox proxy whitelist.
 
@@ -254,7 +254,7 @@ A custom bash script can be run during the Docker image build via `hooks.setup.s
 
 ### Agent Home Volume
 
-Each agent type has a persistent Docker named volume for its home directory (`hole-agent-home-<agent>`). Lifecycle:
+Each agent type has a persistent Docker named volume for its home directory (`hole-sandbox-agent-home-<agent>`). Lifecycle:
 
 - **Created** by `hole.sh ensure_agent_volume()` on first `start` for that agent
 - **Auto-populated** by Docker from the image's `/home/agent` contents on first use (CLI binary, `.bashrc`, etc.)
