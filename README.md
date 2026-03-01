@@ -200,6 +200,8 @@ If your marketplace is private, you will need also need some sort of authenticat
 
 Settings are defined in `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project). When both exist, they are deep-merged: objects are recursively merged (project values win for scalar conflicts), arrays are concatenated and deduplicated (global items first).
 
+You can find JSON chema definition at `~/.local/share/hole/schema/settings.schema.json`.
+
 ### Project .gitignore
 
 It is recommended to add the following paths to your project `.gitignore` to avoid accidentally committing unwanted files:
