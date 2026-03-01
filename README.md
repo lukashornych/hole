@@ -12,6 +12,8 @@ Hole provides true isolation through:
 - **File access control** — project files are mounted into the container, with configurable exclusions (e.g. `.env`, `node_modules`) hidden from the agent
 - **Containerized execution** — the agent runs as a non-root user inside a Docker container that is destroyed on exit
 
+Table of contents:
+
 - [What is Hole?](#what-is-hole)
 - [Usage](#usage)
   - [Flags](#flags)
