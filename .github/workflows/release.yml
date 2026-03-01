@@ -39,15 +39,18 @@ jobs:
         run: |
           mkdir hole
           cp version                          hole/
+          cp logger.sh                        hole/
           cp hole.sh                          hole/
           cp docker-compose.yml               hole/
           cp uninstall.sh                     hole/
           mkdir -p hole/agents/claude
-          cp agents/claude/Dockerfile         hole/agents/claude/
-          cp agents/claude/entrypoint.sh      hole/agents/claude/
-          cp agents/claude/docker-compose.yml hole/agents/claude/
+          mkdir -p hole/agents/claude/setup-scripts
+          cp agents/claude/Dockerfile             hole/agents/claude/
+          cp agents/claude/docker-compose.yml     hole/agents/claude/
+          cp agents/claude/setup-scripts/.gitkeep hole/agents/claude/
           mkdir -p hole/proxy
           cp proxy/Dockerfile                 hole/proxy/
+          cp proxy/docker-compose.yml         hole/proxy/
           cp proxy/tinyproxy.conf             hole/proxy/
           cp proxy/allowed-domains.txt        hole/proxy/
           mkdir -p hole/schema
