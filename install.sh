@@ -10,50 +10,51 @@ BIN_PATH="$BIN_DIR/hole"
 TMPDIR_WORK=""
 DOWNLOAD_URL=""
 
-info()    { echo "[hole] $*"; }
-success() { echo "[hole] OK: $*"; }
-warn()    { echo "[hole] WARN: $*"; }
-error()   { echo "[hole] ERROR: $*" >&2; exit 1; }
+# We don't use logger library here because this scripts needs to be runnable on its own
+log_info()    { echo "[INFO] $*"; }
+log_success() { echo "[OK] $*"; }
+log_warn()    { echo "[WARN] $*"; }
+log_error()   { echo "[ERROR] $*" >&2; exit 1; }
 
 detect_os() {
     local os
     os="$(uname -s)"
     case "$os" in
         Linux|Darwin) ;;
-        *) error "Unsupported OS: $os. hole supports Linux and macOS." ;;
+        *) log_error "Unsupported OS: $os. hole supports Linux and macOS." ;;
     esac
 }
 
 check_installer_deps() {
     if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
-        error "curl or wget is required to install hole."
+        log_error "curl or wget is required to install hole."
     fi
     if ! command -v tar >/dev/null 2>&1; then
-        error "tar is required to install hole."
+        log_error "tar is required to install hole."
     fi
 }
 
 check_runtime_deps() {
     if ! command -v docker >/dev/null 2>&1; then
-        warn "docker is not installed or not in PATH."
-        warn "hole requires Docker to run sandboxes. Install it from https://docs.docker.com/get-docker/"
+        log_warn "docker is not installed or not in PATH."
+        log_warn "hole requires Docker to run sandboxes. Install it from https://docs.docker.com/get-docker/"
     fi
     if ! command -v jq >/dev/null 2>&1; then
-        warn "jq is not installed or not in PATH."
-        warn "hole requires jq to parse project settings. Install it from https://jqlang.github.io/jq/download/"
+        log_warn "jq is not installed or not in PATH."
+        log_warn "hole requires jq to parse project settings. Install it using your package manager or from https://jqlang.github.io/jq/download/"
     fi
     if ! command -v jv >/dev/null 2>&1; then
-        warn "jv is not installed or not in PATH."
-        warn "hole requires jv to validate project settings. Install it from https://github.com/santhosh-tekuri/jsonschema"
+        log_warn "jv is not installed or not in PATH."
+        log_warn "hole requires jv to validate project settings. Install it using your package manager or from https://github.com/santhosh-tekuri/jsonschema/releases"
     fi
 }
 
 check_existing() {
     if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_PATH" ]; then
-        info "Existing installation detected. Removing old installation..."
+        log_info "Existing installation detected. Removing old installation..."
         rm -rf "$INSTALL_DIR"
         rm -f "$BIN_PATH"
-        success "Old installation removed."
+        log_success "Old installation removed."
     fi
 }
 
@@ -63,7 +64,7 @@ setup_cleanup() {
 }
 
 resolve_download_url() {
-    info "Resolving latest release..."
+    log_info "Resolving latest release..."
     local response
     if command -v curl >/dev/null 2>&1; then
         response=$(curl -fsSL "$GITHUB_API")
@@ -74,36 +75,36 @@ resolve_download_url() {
     local tag
     tag=$(echo "$response" | grep '"tag_name"' | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
     if [ -z "$tag" ]; then
-        error "Failed to resolve latest release. No releases found at $GITHUB_API"
+        log_error "Failed to resolve latest release. No releases found at $GITHUB_API"
     fi
 
     DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/$tag/hole.tar.gz"
-    success "Latest release: $tag"
+    log_success "Latest release: $tag"
 }
 
 download() {
-    info "Downloading hole from GitHub..."
+    log_info "Downloading hole from GitHub..."
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$DOWNLOAD_URL" -o "$TMPDIR_WORK/hole.tar.gz"
     else
         wget -q "$DOWNLOAD_URL" -O "$TMPDIR_WORK/hole.tar.gz"
     fi
-    success "Download complete."
+    log_success "Download complete."
 }
 
 extract_and_install() {
-    info "Extracting archive..."
+    log_info "Extracting archive..."
     tar -xzf "$TMPDIR_WORK/hole.tar.gz" -C "$TMPDIR_WORK"
 
     local src_dir="$TMPDIR_WORK/hole"
     if [ ! -d "$src_dir" ]; then
-        error "Failed to locate extracted hole directory."
+        log_error "Failed to locate extracted hole directory."
     fi
 
     mkdir -p $INSTALL_DIR
     cp -r "$src_dir"/* "$INSTALL_DIR"
 
-    success "Files installed."
+    log_success "Files installed."
 }
 
 create_wrapper() {
@@ -113,16 +114,16 @@ create_wrapper() {
 exec "${INSTALL_DIR}/hole.sh" "\$@"
 EOF
     chmod +x "$BIN_PATH"
-    success "Created wrapper: $BIN_PATH"
+    log_success "Created wrapper: $BIN_PATH"
 }
 
 check_path() {
     case ":${PATH}:" in
         *":${BIN_DIR}:"*) ;;
         *)
-            warn "$BIN_DIR is not in your PATH."
-            warn "Add to ~/.bashrc / ~/.zshrc:"
-            warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+            log_warn "$BIN_DIR is not in your PATH."
+            log_warn "Add to ~/.bashrc / ~/.zshrc:"
+            log_warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
             ;;
     esac
 }
@@ -140,7 +141,7 @@ print_success() {
 }
 
 main() {
-    info "Starting hole installation..."
+    log_info "Starting hole installation..."
     detect_os
     check_installer_deps
     check_runtime_deps

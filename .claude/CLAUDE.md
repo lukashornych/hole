@@ -11,6 +11,20 @@ Hole is a CLI tool for creating and managing sandboxes for AI agents. It provide
 
 Currently supports Claude Code agent (with placeholder for Gemini agent).
 
+## Code guidelines
+
+- use local variables in functions
+- do NOT use global variables to pass data between functions
+- use shell strict mode
+- always Double-Quote Variables
+- prefer ${VAR} Syntax
+- use Lowercase for Local Variables
+- use $() for Command Substitution
+- use [[ ]] for Conditionals
+- use Arithmetic Expansion (( )) for math
+- use `getopts` for command-line argument parsing
+- log using sourced logger.sh library (log_info, log_error, log_warn, log_line), do not use echo for logging
+
 ## Architecture
 
 The project uses Docker Compose to orchestrate a multi-container sandbox environment:
@@ -23,7 +37,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 
 **Two main services:**
 - `proxy`: Tinyproxy-based HTTP/HTTPS proxy that filters requests to allowed domains only (proxy/allowed-domains.txt)
-- `claude`: Claude Code CLI agent running in Ubuntu 24.04 container with workspace access
+- `{agent}`: agent container e.g.: Claude Code CLI, running in Ubuntu 24.04 container with workspace access
 
 ### Security Model
 
@@ -35,7 +49,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 
 **File access control:**
 - Project directory mounted read-write at /workspace
-- Agent home directory (`/home/agent`) backed by a persistent Docker named volume (`hole-agent-home-claude`). Credentials, settings, and CLI state survive sandbox teardown.
+- Agent home directory (`/home/agent`) backed by a persistent Docker named volume (`hole-sandbox-agent-home-claude`). Credentials, settings, and CLI state survive sandbox teardown.
 - Secret files/folders hidden by mounting /dev/null over them (e.g., .env, .env.local)
 - Exclusions configured via `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project), merged at runtime
 
@@ -43,51 +57,11 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 - User `agent` created in container (agents/claude/Dockerfile:13)
 - Agent CLI installed in user space (~/.local/bin)
 
-## Usage
-
-### Setup (first time)
-
-No host-side setup is required. On first `hole start claude`, the persistent agent home volume is created automatically. Log in inside the sandbox using the `/login` command in Claude Code. Credentials persist across sandbox sessions in the `hole-agent-home-claude` Docker volume.
-
-### Running the Sandbox
-
-**Start a sandbox:**
-```bash
-./hole.sh start claude /path/to/project
-```
-Or from within a project directory:
-```bash
-./hole.sh start claude .
-```
-
-The sandbox is fully destroyed when you exit the agent CLI.
-
-**Get help:**
-```bash
-./hole.sh help
-```
-
-### How It Works
-
-1. `hole.sh` derives unique project name from sanitized absolute path (e.g., "hole-users-lho-www-oss-myproject")
-2. Starts proxy container in detached mode with health check
-3. Runs agent container interactively using `docker compose run`:
-   - PROJECT_DIR env var set to target directory
-   - COMPOSE_PROJECT_NAME for unique container naming based on absolute path
-   - Proxy dependency (waits for healthy status)
-   - Allocates TTY and connects stdin for interactive CLI
-4. **Full teardown on exit** - all containers, networks, and per-project config are removed when the agent CLI exits
-
-### Key Behavior
-
-- **Fresh sandbox each time**: Each `start` creates a new sandbox from scratch
-- **Auto-destroy on exit**: When you exit the agent CLI, the entire sandbox (containers, networks, images, per-project config) is automatically destroyed
-- **Unique naming**: Project names based on absolute path prevent collisions between projects
-
 ## Key Files
 
 - `hole.sh` - CLI tool for managing sandboxes (start command)
-- `docker-compose.yml` - Service orchestration with profiles (claude, gemini)
+- `docker-compose.yml` - Shared infrastructure (proxy service + networks)
+- `agents/claude/docker-compose.yml` - Claude agent service definition
 - `agents/claude/Dockerfile` - Claude agent image (Ubuntu 24.04 + curl, git, ripgrep, Claude CLI)
 - `proxy/Dockerfile` - Proxy image (Alpine + tinyproxy)
 - `proxy/tinyproxy.conf` - Proxy configuration (port 8888, filter enabled)
@@ -102,20 +76,6 @@ Edit `proxy/allowed-domains.txt` with regex patterns:
 example\.com
 .*\.example\.com
 ```
-
-Rebuild proxy for changes to take effect:
-```bash
-docker compose -p <project-name> up -d --build proxy
-```
-
-### Adding New Agent Types
-
-1. Create `agents/<agent-name>/Dockerfile`
-2. Add service definition in `docker-compose.yml` under a new profile
-3. Configure proxy dependency and network: sandbox only
-4. Add allowed domains to `proxy/allowed-domains.txt`
-5. Update `hole.sh` VALID_AGENTS array to include the new agent
-6. Update `uninstall.sh` agents array to include the new agent (for volume cleanup)
 
 ### Global Settings
 
@@ -145,22 +105,30 @@ If a project also has `.hole/settings.json` with `"files": { "exclude": [".env",
 
 ### Secret File/Folder Hiding
 
-Per-project exclusions are configured via `.hole/settings.json` in the project directory. The `files.exclude` array lists paths to hide from the agent. The script auto-detects whether each entry is a file or directory and generates the correct Docker volume mount:
+Per-project exclusions are configured via `.hole/settings.json` in the project directory. The `files.exclude` array lists paths or glob patterns to hide from the agent. The script auto-detects whether each resolved path is a file or directory and generates the correct Docker volume mount:
 - **Files** → mounted as `/dev/null:/workspace/<path>:ro`
 - **Directories** → mounted as anonymous volume at `/workspace/<path>`
 - **Non-existent paths** → warning printed to stderr, entry skipped
 
 Trailing slashes are stripped automatically (e.g., `node_modules/` → `node_modules`).
 
+**Glob pattern support:** Entries containing `*`, `?`, or `[` are treated as glob patterns and expanded against the project directory at `start` time. Supported syntax:
+- `*` — matches any characters within a single path segment (e.g., `.env*` matches `.env`, `.env.local`, `.env.production`)
+- `**` — matches zero or more path segments recursively (e.g., `**/secrets` matches `secrets`, `app/secrets`, `app/config/secrets`)
+- `?` — matches a single character
+- `[abc]` — matches one of the listed characters
+
+Patterns that match no files produce a warning and are skipped. When multiple entries (or overlapping patterns) resolve to the same path, it is mounted only once.
+
 Example `.hole/settings.json`:
 ```json
 {
   "files": {
     "exclude": [
-      ".env",
-      ".env.local",
+      ".env*",
       "node_modules",
-      "dist"
+      "apps/*/config",
+      "**/secrets"
     ]
   }
 }
@@ -219,12 +187,13 @@ Example `.hole/settings.json`:
 
 ### Dependencies (apt packages)
 
-Additional apt packages can be installed at container startup via the `dependencies` array in `settings.json`. This works in both global (`~/.hole/settings.json`) and per-project (`.hole/settings.json`) settings.
+Additional apt packages can be installed via the `dependencies` array in `settings.json`. This works in both global (`~/.hole/settings.json`) and per-project (`.hole/settings.json`) settings.
 
 - **Format**: apt package names (`python3`) or with version pinning (`python3=3.10.6-1~22.04`)
 - **Merge behavior**: Arrays from global and project settings are concatenated and deduplicated (same as other array properties)
-- **Network**: When dependencies are specified, Ubuntu apt repository domains (`archive.ubuntu.com`, `security.ubuntu.com`) are automatically added to the proxy whitelist
-- **Installation**: Packages are installed via `sudo apt-get install` in `entrypoint.sh` at container startup, before the agent CLI starts
+- **Installation**: Packages are passed as the `EXTRA_PACKAGES` Docker build arg and installed during image build via a conditional `RUN` layer in the Dockerfile. They are baked into the per-project cached image (`hole-sandbox/agent-claude-${PROJECT_NAME}:latest`), so subsequent sandbox starts are instant.
+- **Rebuilding**: Dockerfile is automatically rebuild every start
+- **Network**: Since apt runs during `docker build` (with host networking), Ubuntu apt repository domains are **not** added to the sandbox proxy whitelist.
 
 Example `.hole/settings.json`:
 ```json
@@ -268,28 +237,32 @@ Example `.hole/settings.json`:
 }
 ```
 
-### Container Naming
+### Setup Hook Script
 
-Project name derived from sanitized absolute path plus a random instance ID: `hole-$(sanitized_absolute_path)-$(agent)-$(instance_id)`
+A custom bash script can be run during the Docker image build via `hooks.setup.script` in `settings.json` (both global and per-project). The script runs as **root** after dependency installation, so it can install system-level packages, configure locales, add apt repositories, etc.
 
-Example: `/Users/lho/www/oss/hole` with claude agent → `hole-users-lho-www-oss-hole-claude-a1b2c3`
+```json
+{
+  "hooks": {
+    "setup": {
+      "script": ".hole/my-project-setup.sh"
+    }
+  }
+}
+```
 
-This ensures:
-- Multiple sandboxes can run simultaneously for the same project
-- Clean separation between different sandboxes
-- No collisions between projects with same directory name in different locations
-
-### Version Check & Update
-
-`hole.sh` includes a version check mechanism and an `update` command:
-
-- **Silent version check**: Runs during `start` and `version` commands with a 1-second timeout. Compares the installed version (`version` file) against the latest GitHub release. Prints a one-line notice if a newer version exists. Skipped in dev mode (no version file). Network failures are silently ignored.
-- **`hole update` command**: Fetches the latest version from the GitHub API. If newer, downloads and runs `install.sh` from the main branch. Errors on dev installations (no version file).
-- **GitHub constants**: `GITHUB_REPO`, `GITHUB_API`, `GITHUB_INSTALL_SCRIPT` defined at the top of `hole.sh`.
+- **Path resolution** (same as other settings):
+  - `~/...` → expanded to `$HOME/...`
+  - Relative paths → resolved against the project directory
+  - Absolute paths → used as-is
+- **Runs as root** during `docker build`, before switching to the `agent` user
+- **Script changes trigger image rebuild** (Docker layer caching based on content)
+- **Merge behavior**: Scalar value, so project setting overrides global
+- **Non-existent script path** → warning logged to stderr, skipped
 
 ### Agent Home Volume
 
-Each agent type has a persistent Docker named volume for its home directory (`hole-agent-home-<agent>`). Lifecycle:
+Each agent type has a persistent Docker named volume for its home directory (`hole-sandbox-agent-home-<agent>`). Lifecycle:
 
 - **Created** by `hole.sh ensure_agent_volume()` on first `start` for that agent
 - **Auto-populated** by Docker from the image's `/home/agent` contents on first use (CLI binary, `.bashrc`, etc.)

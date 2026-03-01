@@ -1,63 +1,8 @@
-services:
+# Base docker-compose file with infrastructure settings
 
-  # Network proxy to allow agents access only specified domains
-  #   Should be started for every agent
-  proxy:
-    build:
-      context: .
-      dockerfile: proxy/Dockerfile
-    volumes:
-      - ./proxy/tinyproxy.conf:/etc/tinyproxy/tinyproxy.conf:ro
-      - ./proxy/allowed-domains.txt:/etc/tinyproxy/allowed-domains.txt:ro
-    networks:
-      - sandbox
-      - internet
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 8888"]
-      interval: 2s
-      timeout: 2s
-      retries: 5
+## Services are injected from docker-compose file of started components (proxy, agents, ...).
 
-  # Claude Code CLI agent
-  claude:
-    build:
-      context: .
-      dockerfile: agents/claude/Dockerfile
-    command: ["claude", "--dangerously-skip-permissions"]
-    stdin_open: true # Equivalent to docker run -i (keeps stdin open)
-    tty: true        # Equivalent to docker run -t (allocates a pseudo-TTY)
-    volumes:
-      # persistent agent home directory (created by hole.sh, auto-populated from image on first use)
-      - hole-agent-home-claude:/home/agent
-      # mount project
-      - ${PROJECT_DIR:-.}:/workspace
-    environment:
-      # setup where the inside app should direct network requests
-      - HTTP_PROXY=http://proxy:8888
-      - HTTPS_PROXY=http://proxy:8888
-      - http_proxy=http://proxy:8888
-      - https_proxy=http://proxy:8888
-      # do not proxy localhost network requests
-      - NO_PROXY=localhost,127.0.0.1
-      - no_proxy=localhost,127.0.0.1
-    depends_on:
-      proxy:
-        condition: service_healthy
-    networks:
-      - sandbox
-
-  # todo lho example of other agents, implement
-  # gemini:
-  #   build:
-  #     context: .
-  #     dockerfile: agents/gemini/Dockerfile
-  #   depends_on:
-  #     proxy:
-  #       condition: service_healthy
-  #   networks:
-  #     - sandbox
-
+## Networks available for all services
 networks:
   # network for agents to not be able to access internet directly, but to force them to proxy all requests
   sandbox:
@@ -65,7 +10,3 @@ networks:
   # network for proxy container with access to internet
   internet:
     driver: bridge
-
-volumes:
-  hole-agent-home-claude:
-    external: true
