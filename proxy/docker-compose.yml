@@ -6,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: proxy/Dockerfile
-    image: hole/proxy-${PROJECT_NAME}:latest
+    image: hole-sandbox/proxy-${PROJECT_NAME}:latest
     volumes:
       - ./proxy/tinyproxy.conf:/etc/tinyproxy/tinyproxy.conf:ro
       - ./proxy/allowed-domains.txt:/etc/tinyproxy/allowed-domains.txt:ro
