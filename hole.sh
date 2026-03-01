@@ -642,7 +642,7 @@ cmd_update() {
 #!/usr/bin/env bash
 set -euo pipefail
 trap 'rm -f "${tmp_uninstall}" "${tmp_wrapper}"' EXIT
-bash "${tmp_uninstall}"
+bash "${tmp_uninstall}" --soft-wipe
 curl -fsSL "${GITHUB_INSTALL_SCRIPT}" | bash
 WRAPPER
     chmod +x "${tmp_wrapper}"

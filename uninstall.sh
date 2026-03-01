@@ -18,6 +18,7 @@ print_success() {
 }
 
 remove_docker_resources() {
+    local soft_wipe="${1:-false}"
     # Stop and remove all containers with name prefix "hole-sandbox-"
     local containers
     containers=$(docker ps -aq --filter "name=hole-sandbox-") || true
@@ -55,6 +56,9 @@ remove_docker_resources() {
     # Remove all volumes matching "hole-sandbox-"
     local volumes
     volumes=$(docker volume ls --filter "name=hole-sandbox-" -q) || true
+    if [[ "${soft_wipe}" == "true" ]]; then
+        volumes=$(echo "${volumes}" | grep -v "^hole-sandbox-agent-home-" || true)
+    fi
     if [[ -n "${volumes}" ]]; then
         log_info "Removing volumes..."
         docker volume rm ${volumes} || log_warn "Failed to remove some volumes"
@@ -65,9 +69,20 @@ remove_docker_resources() {
 }
 
 main() {
+    local soft_wipe="false"
+    for arg in "$@"; do
+        case "${arg}" in
+            --soft-wipe) soft_wipe="true" ;;
+        esac
+    done
+
     log_info "Starting hole uninstallation..."
 
-    log_warn "Proceeding will remove hole files, Docker resources and agent home volumes."
+    if [[ "${soft_wipe}" == "true" ]]; then
+        log_warn "Proceeding will remove hole files and Docker resources (preserving agent home volumes)."
+    else
+        log_warn "Proceeding will remove hole files, Docker resources and agent home volumes."
+    fi
 
     if [ ! -d "$INSTALL_DIR" ] && [ ! -f "$BIN_PATH" ]; then
         log_info "No hole installation found. Nothing to do."
@@ -86,7 +101,7 @@ main() {
         log_success "Removed $BIN_PATH"
     fi
 
-    remove_docker_resources
+    remove_docker_resources "${soft_wipe}"
 
     print_success
 }
@@ -94,4 +109,4 @@ main() {
 # Self-cleanup when run from a temp copy (hole uninstall)
 [[ "${0}" == "${TMPDIR:-/tmp}/hole-uninstall."* ]] && rm -f "${0}" 2>/dev/null || true
 
-main
+main "$@"
