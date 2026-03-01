@@ -6,7 +6,7 @@ services:
       dockerfile: agents/claude/Dockerfile
       additional_contexts:
         setup-context: ./agents/claude/setup-scripts
-    image: hole/agent-claude-${PROJECT_NAME}:latest
+    image: hole-sandbox/agent-claude-${PROJECT_NAME}:latest
     stdin_open: true
     tty: true
     volumes:
