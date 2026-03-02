@@ -233,6 +233,8 @@ It is recommended to add the following paths to your project `.gitignore` to avo
 
 ### File exclusions
 
+> _Note: if the excluded files are already in Git history, the agent may potentically find it in the history if you don't exclude entire `.git` folder._
+
 Hide files and directories from the agent:
 
 ```json
