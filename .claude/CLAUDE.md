@@ -165,6 +165,27 @@ Additional host files or directories can be mounted into the sandbox via `files.
 
 Each entry becomes a bind mount in the agent container: `{resolved_host_path}:{container_path}`.
 
+### Libraries
+
+Additional directories can be mounted **read-only** into the sandbox via `libraries` in `settings.json` (both global and per-project). This is an object where keys are host paths and values are absolute container paths:
+
+```json
+{
+  "libraries": {
+    "~/repos/shared-utils": "/libs/shared-utils",
+    "/opt/company/sdk": "/libs/company-sdk",
+    "./sibling-project": "/libs/sibling"
+  }
+}
+```
+
+- **Host path resolution**: same as `files.include` (`~/...` → `$HOME/...`, relative → project dir, absolute → as-is)
+- **Container paths** must be absolute (enforced by schema `^/` pattern)
+- **Non-existent or non-directory host paths** → warning printed to stderr, entry skipped
+- **Always read-only**: libraries are mounted with `:ro`
+- **Merge behavior**: Since `libraries` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
+- **Per-library exclusions**: If a library has its own `.hole/settings.json`, its `files.exclude` entries are resolved against the library source directory and mounted scoped to the library's container mount point. Other settings in the library's `.hole/settings.json` are ignored.
+
 ### Project-Specific Domain Whitelist
 
 Per-project domain whitelists are configured via the `network.domainWhitelist` array in `.hole/settings.json`. This allows projects to access additional domains (e.g., npm registry, custom API endpoints) beyond the default allowed domains.
