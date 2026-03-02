@@ -9,7 +9,7 @@ GLOBAL_SETTINGS_FILE="${HOME}/.hole/settings.json"
 GITHUB_REPO="lukashornych/hole"
 GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
 GITHUB_INSTALL_SCRIPT="https://raw.githubusercontent.com/${GITHUB_REPO}/main/install.sh"
-VALID_AGENTS=("claude")
+VALID_AGENTS=("claude" "gemini" "codex")
 VALID_COMMANDS=("start" "destroy" "help" "version" "update" "uninstall")
 
 # Import the logging library
@@ -30,6 +30,8 @@ Commands:
 
 Agents:
   claude    Claude Code agent
+  gemini    Gemini CLI agent
+  codex     Codex CLI agent
 
 Options:
   --debug                 Open a bash shell instead of the agent CLI for

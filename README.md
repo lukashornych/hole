@@ -23,6 +23,8 @@ Table of contents:
   - [Uninstall](#uninstall)
 - [Agents](#agents)
   - [Claude Code](#claude-code)
+  - [Gemini CLI](#gemini-cli)
+  - [Codex CLI](#codex-cli)
 - [Configuration](#configuration)
   - [Project .gitignore](#project-gitignore)
   - [File exclusions](#file-exclusions)
@@ -117,7 +119,7 @@ The uninstall command will remove all application data as well as sandbox resour
 
 ## Agents
 
-These are currently supported agents: [Claude Code](https://claude.com/product/claude-code)
+These are currently supported agents: [Claude Code](https://claude.com/product/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CLI](https://github.com/openai/codex)
 
 ### Claude Code
 
@@ -195,6 +197,25 @@ If your marketplace is private, you will need also need some sort of authenticat
 /plugin marketplace add https://{username}:{pat}@gitlab.mydomain.com/internal/claude-marketplace.git
 ```
 
+### Gemini CLI
+
+Start a sandbox with Gemini CLI agent:
+
+```shell
+hole start gemini .
+# or
+hole start gemini /path/to/project
+```
+
+### Codex CLI
+
+Start a sandbox with Codex CLI agent:
+
+```shell
+hole start codex .
+# or
+hole start codex /path/to/project
+```
 
 ## Configuration
 

@@ -2,3 +2,12 @@
 api\.anthropic\.com
 claude\.ai
 platform\.claude\.com
+
+# Gemini agent
+googleapis\.com
+oauth2\.googleapis\.com
+
+# Codex agent
+api\.openai\.com
+auth\.openai\.com
+chatgpt\.com

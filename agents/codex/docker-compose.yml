@@ -1,0 +1,35 @@
+services:
+  # Codex CLI agent
+  codex:
+    build:
+      context: .
+      dockerfile: agents/codex/Dockerfile
+      additional_contexts:
+        setup-context: ./agents/codex/setup-scripts
+    image: hole-sandbox/agent-codex-${PROJECT_NAME}:latest
+    stdin_open: true
+    tty: true
+    volumes:
+      # persistent agent home directory (created by hole.sh, auto-populated from image on first use)
+      - hole-sandbox-agent-home-codex:/home/agent
+      # mount project
+      - ${PROJECT_DIR:-.}:/workspace
+    environment:
+      # setup where the inside app should direct network requests
+      - HTTP_PROXY=http://proxy:8888
+      - HTTPS_PROXY=http://proxy:8888
+      - http_proxy=http://proxy:8888
+      - https_proxy=http://proxy:8888
+      # do not proxy localhost network requests
+      - NO_PROXY=localhost,127.0.0.1
+      - no_proxy=localhost,127.0.0.1
+    depends_on:
+      proxy:
+        condition: service_healthy
+    networks:
+      # references network from global docker-compose.yml
+      - sandbox
+
+volumes:
+  hole-sandbox-agent-home-codex:
+    external: true
