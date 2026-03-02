@@ -9,7 +9,7 @@ GLOBAL_SETTINGS_FILE="${HOME}/.hole/settings.json"
 GITHUB_REPO="lukashornych/hole"
 GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
 GITHUB_INSTALL_SCRIPT="https://raw.githubusercontent.com/${GITHUB_REPO}/main/install.sh"
-VALID_AGENTS=("claude")
+VALID_AGENTS=("claude" "gemini" "codex")
 VALID_COMMANDS=("start" "destroy" "help" "version" "update" "uninstall")
 
 # Import the logging library
@@ -30,6 +30,8 @@ Commands:
 
 Agents:
   claude    Claude Code agent
+  gemini    Gemini CLI agent
+  codex     Codex CLI agent
 
 Options:
   --debug                 Open a bash shell instead of the agent CLI for
@@ -267,22 +269,28 @@ generate_instance_compose() {
     agent_volumes+=("      - ${host_path}:${container_path}")
   done <<< "${include_pairs}"
 
-  # Read domain whitelist from merged settings
+  # Build merged whitelist: default + agent-specific + user domains
   local domains
   domains=$(echo "${merged_settings}" | jq -r '.network.domainWhitelist[]? // empty' 2>/dev/null) || true
+  mkdir -p "${compose_dir}"
+  # Start with default allowed domains
+  cp "${SCRIPT_DIR}/proxy/allowed-domains.txt" "${whitelist_file}"
+  # Append agent-specific domains
+  local agent_whitelist="${SCRIPT_DIR}/agents/${agent}/allowed-domains.txt"
+  if [[ -f "${agent_whitelist}" ]]; then
+    printf '\n' >> "${whitelist_file}"
+    cat "${agent_whitelist}" >> "${whitelist_file}"
+  fi
+  # Append user-defined domains (from settings.json)
   if [[ -n "${domains}" ]]; then
-    mkdir -p "${compose_dir}"
-    # Start with default allowed domains
-    cp "${SCRIPT_DIR}/proxy/allowed-domains.txt" "${whitelist_file}"
-    # Append project-specific domains (escape dots for tinyproxy regex filter)
     printf '\n' >> "${whitelist_file}"
     echo "# Project-specific domains" >> "${whitelist_file}"
     while IFS= read -r domain; do
       [[ -z "${domain}" ]] && continue
       echo "${domain//./\\.}" >> "${whitelist_file}"
     done <<< "${domains}"
-    has_custom_domains=true
   fi
+  has_custom_domains=true
 
   # Read dependencies from merged settings (installed at build time via EXTRA_PACKAGES arg)
   local deps

@@ -1,0 +1,37 @@
+services:
+  # Gemini CLI agent
+  gemini:
+    build:
+      context: .
+      dockerfile: agents/gemini/Dockerfile
+      additional_contexts:
+        setup-context: ./agents/gemini/setup-scripts
+    image: hole-sandbox/agent-gemini-${PROJECT_NAME}:latest
+    stdin_open: true
+    tty: true
+    volumes:
+      # persistent agent home directory (created by hole.sh, auto-populated from image on first use)
+      - hole-sandbox-agent-home-gemini:/home/agent
+      # mount project
+      - ${PROJECT_DIR:-.}:/workspace
+    environment:
+      # setup where the inside app should direct network requests
+      - HTTP_PROXY=http://proxy:8888
+      - HTTPS_PROXY=http://proxy:8888
+      - http_proxy=http://proxy:8888
+      - https_proxy=http://proxy:8888
+      # do not proxy localhost network requests
+      - NO_PROXY=localhost,127.0.0.1
+      - no_proxy=localhost,127.0.0.1
+      # disable Gemini's built-in Docker sandbox (Hole provides sandboxing)
+      - GEMINI_SANDBOX=false
+    depends_on:
+      proxy:
+        condition: service_healthy
+    networks:
+      # references network from global docker-compose.yml
+      - sandbox
+
+volumes:
+  hole-sandbox-agent-home-gemini:
+    external: true

@@ -44,8 +44,9 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 **Network isolation:**
 - Agent containers cannot access internet directly
 - All HTTP/HTTPS traffic routed through proxy (via HTTP_PROXY/HTTPS_PROXY env vars)
-- Proxy uses domain whitelist filter (proxy/allowed-domains.txt) to restrict access
-- Currently allowed domains for Claude: api.anthropic.com, claude.ai, platform.claude.com
+- Proxy uses domain whitelist filter with per-agent allowed domains (`agents/<agent>/allowed-domains.txt`)
+- Default whitelist (`proxy/allowed-domains.txt`) is empty; each agent defines its own domains
+- Merge order: default → agent-specific → user-defined (from `settings.json`)
 
 **File access control:**
 - Project directory mounted read-write at /workspace
@@ -65,17 +66,20 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 - `agents/claude/Dockerfile` - Claude agent image (Ubuntu 24.04 + curl, git, ripgrep, Claude CLI)
 - `proxy/Dockerfile` - Proxy image (Alpine + tinyproxy)
 - `proxy/tinyproxy.conf` - Proxy configuration (port 8888, filter enabled)
-- `proxy/allowed-domains.txt` - Domain whitelist (regex patterns)
+- `proxy/allowed-domains.txt` - Default domain whitelist (empty; shared base for all agents)
+- `agents/<agent>/allowed-domains.txt` - Per-agent domain whitelist (regex patterns)
 
 ## Development Notes
 
 ### Adding Allowed Domains
 
-Edit `proxy/allowed-domains.txt` with regex patterns:
+Agent-specific domains go in `agents/<agent>/allowed-domains.txt` with regex patterns:
 ```
 example\.com
 .*\.example\.com
 ```
+
+The default whitelist (`proxy/allowed-domains.txt`) is empty and serves as the shared base. Per-project user domains are configured via `network.domainWhitelist` in `settings.json`.
 
 ### Global Settings
 
@@ -166,7 +170,7 @@ Each entry becomes a bind mount in the agent container: `{resolved_host_path}:{c
 Per-project domain whitelists are configured via the `network.domainWhitelist` array in `.hole/settings.json`. This allows projects to access additional domains (e.g., npm registry, custom API endpoints) beyond the default allowed domains.
 
 - **Format**: Plain domain names (e.g., `registry.npmjs.org`). Dots are auto-escaped for tinyproxy's regex filter.
-- **Merge strategy**: Default domains from `proxy/allowed-domains.txt` are always included. Project-specific domains are appended.
+- **Merge strategy**: Domains are merged in order: default (`proxy/allowed-domains.txt`) → agent-specific (`agents/<agent>/allowed-domains.txt`) → user-defined. All are included in the final whitelist.
 - **Storage**: The merged whitelist file is written to `${TMPDIR:-/tmp}/hole/projects/<project-name>/tinyproxy-domain-whitelist.txt` and bind-mounted into the proxy container.
 - **Cleanup**: The whitelist file is removed when the sandbox is destroyed on exit.
 
