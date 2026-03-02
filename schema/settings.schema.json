@@ -73,6 +73,17 @@
           }
         }
       }
+    },
+    "libraries": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^/"
+      },
+      "propertyNames": {
+        "minLength": 1
+      }
     }
   }
 }

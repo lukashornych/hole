@@ -29,6 +29,7 @@ Table of contents:
   - [Project .gitignore](#project-gitignore)
   - [File exclusions](#file-exclusions)
   - [File inclusions](#file-inclusions)
+  - [Libraries](#libraries)
   - [Domain whitelist](#domain-whitelist)
   - [Dependencies](#dependencies)
   - [Container settings](#container-settings)
@@ -279,6 +280,26 @@ Mount additional host files or directories into the sandbox. Keys are host paths
 ```
 
 Host paths starting with `~/` expand to `$HOME`, relative paths resolve against the project directory, and absolute paths are used as-is. Non-existent paths are skipped with a warning.
+
+### Libraries
+
+Mount additional directories read-only into the sandbox. This is useful for giving the agent access to shared libraries, SDKs, or sibling projects as reference material. Keys are host paths, values are absolute container paths:
+
+```json
+{
+  "libraries": {
+    "~/repos/shared-utils": "/libs/shared-utils",
+    "/opt/company/sdk": "/libs/company-sdk",
+    "./sibling-project": "/libs/sibling"
+  }
+}
+```
+
+Host paths starting with `~/` expand to `$HOME`, relative paths resolve against the project directory, and absolute paths are used as-is. Non-existent paths or non-directory paths are skipped with a warning.
+
+Libraries are always mounted **read-only**.
+
+If a library has its own `.hole/settings.json`, its `files.exclude` entries are applied scoped to that library's mount point (not mixed with the main project's exclusions). Other settings in the library's `.hole/settings.json` are ignored.
 
 ### Domain whitelist
 

@@ -40,6 +40,10 @@ Options:
                               to {agent}-network-access-{id}.log in the project directory
   --rebuild               Force rebuild of Docker images before starting
 
+Configure file exclusions, inclusions, libraries, domain whitelist,
+dependencies, container settings and hooks via .hole/settings.json
+(per-project) or ~/.hole/settings.json (global).
+
 Examples:
   hole start claude .
   hole start claude /path/to/project
@@ -181,25 +185,28 @@ has_glob_chars() {
   [[ "${1}" == *[\*\?\[]* ]]
 }
 
-# Generate per-project docker-compose override file from merged settings
-generate_instance_compose() {
-  local agent="${1}"
-  local project_dir="${2}"
-  local instance_name="${3}"
-  local merged_settings="${4}"
-  local debug_mode="${5:-false}"
+# Resolve a host path: expand ~/, resolve relative paths against base_dir, strip trailing slashes
+resolve_host_path() {
+  local raw_path="${1}"
+  local base_dir="${2}"
+  raw_path="${raw_path%/}"
+  if [[ "${raw_path}" == "~/"* ]]; then
+    echo "${HOME}/${raw_path#\~/}"
+  elif [[ "${raw_path}" != /* ]]; then
+    echo "${base_dir}/${raw_path}"
+  else
+    echo "${raw_path}"
+  fi
+}
 
-  local compose_dir="${HOLE_TMP_DIR}/projects/${instance_name}"
-  local compose_file="${compose_dir}/docker-compose.yml"
+# Resolve file exclusion entries (literal paths + globs) and output volume mount lines.
+# Args: $1 = source directory, $2 = mount point prefix, $3 = newline-separated entries
+# Outputs volume mount lines to stdout, one per line.
+resolve_file_exclusions() {
+  local source_dir="${1}"
+  local mount_point="${2}"
+  local entries="${3}"
 
-  local agent_volumes=()
-  local has_custom_domains=false
-  local whitelist_file="${compose_dir}/tinyproxy-domain-whitelist.txt"
-
-  # Read exclusions from merged settings and auto-detect files vs directories
-  # Supports both literal paths and glob patterns (*, **, ?, [abc])
-  local entries
-  entries=$(echo "${merged_settings}" | jq -r '.files.exclude[]? // empty' 2>/dev/null) || true
   local -a resolved_paths=()
   while IFS= read -r line; do
     [[ -z "${line}" ]] && continue
@@ -210,18 +217,18 @@ generate_instance_compose() {
       local -a matches=()
       while IFS= read -r match; do
         [[ -n "${match}" ]] && matches+=("${match}")
-      done < <(cd "${project_dir}" && bash -c 'shopt -s globstar nullglob; eval "for f in $1; do printf \"%s\n\" \"\$f\"; done"' _ "${line}" 2>/dev/null)
+      done < <(cd "${source_dir}" && bash -c 'shopt -s globstar nullglob; eval "for f in $1; do printf \"%s\n\" \"\$f\"; done"' _ "${line}" 2>/dev/null)
       if [[ ${#matches[@]} -eq 0 ]]; then
         log_warn "excluded pattern '${line}' matched no paths, skipping"
       else
         resolved_paths+=("${matches[@]}")
       fi
     else
-      local full_path="${project_dir}/${line}"
+      local full_path="${source_dir}/${line}"
       if [[ -e "${full_path}" ]]; then
         resolved_paths+=("${line}")
       else
-        log_warn "excluded path '${line}' not found in project, skipping"
+        log_warn "excluded path '${line}' not found in ${source_dir}, skipping"
       fi
     fi
   done <<< "${entries}"
@@ -237,15 +244,40 @@ generate_instance_compose() {
       *"|${resolved}|"*) continue ;;
     esac
     seen_excludes="${seen_excludes}|${resolved}|"
-    local full_path="${project_dir}/${resolved}"
+    local full_path="${source_dir}/${resolved}"
     if [[ -f "${full_path}" ]]; then
-      agent_volumes+=("      - /dev/null:/workspace/${resolved}:ro")
+      echo "      - /dev/null:${mount_point}/${resolved}:ro"
     elif [[ -d "${full_path}" ]]; then
-      agent_volumes+=("      - /workspace/${resolved}")
+      echo "      - ${mount_point}/${resolved}"
     else
-      log_warn "excluded path '${resolved}' not found in project, skipping"
+      log_warn "excluded path '${resolved}' not found in ${source_dir}, skipping"
     fi
   done
+}
+
+# Generate per-project docker-compose override file from merged settings
+generate_instance_compose() {
+  local agent="${1}"
+  local project_dir="${2}"
+  local instance_name="${3}"
+  local merged_settings="${4}"
+  local debug_mode="${5:-false}"
+
+  local compose_dir="${HOLE_TMP_DIR}/projects/${instance_name}"
+  local compose_file="${compose_dir}/docker-compose.yml"
+
+  local agent_volumes=()
+  local has_custom_domains=false
+  local whitelist_file="${compose_dir}/tinyproxy-domain-whitelist.txt"
+
+  # Read exclusions from merged settings and resolve to volume mounts
+  local entries
+  entries=$(echo "${merged_settings}" | jq -r '.files.exclude[]? // empty' 2>/dev/null) || true
+  if [[ -n "${entries}" ]]; then
+    while IFS= read -r mount_line; do
+      [[ -n "${mount_line}" ]] && agent_volumes+=("${mount_line}")
+    done < <(resolve_file_exclusions "${project_dir}" "/workspace" "${entries}")
+  fi
 
   # Read file inclusions from merged settings (host_path -> container_path)
   local include_pairs
@@ -256,11 +288,7 @@ generate_instance_compose() {
     host_path="${host_path%/}"
     container_path="${container_path%/}"
     # Resolve host path
-    if [[ "${host_path}" == "~/"* ]]; then
-      host_path="${HOME}/${host_path#\~/}"
-    elif [[ "${host_path}" != /* ]]; then
-      host_path="${project_dir}/${host_path}"
-    fi
+    host_path=$(resolve_host_path "${host_path}" "${project_dir}")
     # Validate host path exists
     if [[ ! -e "${host_path}" ]]; then
       log_warn "included path '${host_path}' not found, skipping"
@@ -268,6 +296,33 @@ generate_instance_compose() {
     fi
     agent_volumes+=("      - ${host_path}:${container_path}")
   done <<< "${include_pairs}"
+
+  # Process libraries: mount read-only + apply per-library file exclusions
+  local lib_pairs
+  lib_pairs=$(echo "${merged_settings}" | jq -r '.libraries // {} | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null) || true
+  while IFS=$'\t' read -r lib_host_path lib_container_path; do
+    [[ -z "${lib_host_path}" ]] && continue
+    lib_host_path="${lib_host_path%/}"
+    lib_container_path="${lib_container_path%/}"
+    lib_host_path=$(resolve_host_path "${lib_host_path}" "${project_dir}")
+    if [[ ! -d "${lib_host_path}" ]]; then
+      log_warn "library '${lib_host_path}' not found or not a directory, skipping"
+      continue
+    fi
+    agent_volumes+=("      - ${lib_host_path}:${lib_container_path}:ro")
+    # Apply library's own .hole/settings.json file exclusions (scoped to library mount)
+    local lib_settings_file="${lib_host_path}/.hole/settings.json"
+    if [[ -f "${lib_settings_file}" ]]; then
+      validate_settings "${lib_settings_file}" "library settings (${lib_settings_file})"
+      local lib_entries
+      lib_entries=$(jq -r '.files.exclude[]? // empty' "${lib_settings_file}" 2>/dev/null) || true
+      if [[ -n "${lib_entries}" ]]; then
+        while IFS= read -r mount_line; do
+          [[ -n "${mount_line}" ]] && agent_volumes+=("${mount_line}")
+        done < <(resolve_file_exclusions "${lib_host_path}" "${lib_container_path}" "${lib_entries}")
+      fi
+    fi
+  done <<< "${lib_pairs}"
 
   # Build merged whitelist: default + agent-specific + user domains
   local domains
@@ -312,12 +367,7 @@ generate_instance_compose() {
   local has_setup_script=false
 
   if [[ -n "${setup_script_path}" ]]; then
-    setup_script_path="${setup_script_path%/}"
-    if [[ "${setup_script_path}" == "~/"* ]]; then
-      setup_script_path="${HOME}/${setup_script_path#\~/}"
-    elif [[ "${setup_script_path}" != /* ]]; then
-      setup_script_path="${project_dir}/${setup_script_path}"
-    fi
+    setup_script_path=$(resolve_host_path "${setup_script_path}" "${project_dir}")
     if [[ -f "${setup_script_path}" ]]; then
       has_setup_script=true
     else
