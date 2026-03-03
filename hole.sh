@@ -185,11 +185,56 @@ has_glob_chars() {
   [[ "${1}" == *[\*\?\[]* ]]
 }
 
+# Expand environment variables ($VAR and ${VAR}) in a string using indirect expansion.
+# Undefined variables produce a warning and are left unexpanded.
+expand_env_vars() {
+  local input="${1}"
+  local result="${input}"
+
+  # Replace ${VAR_NAME} patterns first
+  while [[ "${result}" =~ \$\{([a-zA-Z_][a-zA-Z0-9_]*)\} ]]; do
+    local var_name="${BASH_REMATCH[1]}"
+    local full_match="\${${var_name}}"
+    if [[ -n "${!var_name+x}" ]]; then
+      result="${result//"${full_match}"/${!var_name}}"
+    else
+      log_warn "undefined environment variable '\${${var_name}}', leaving unexpanded"
+      # Use placeholder to avoid infinite loop on undefined vars
+      result="${result//"${full_match}"/__HOLE_UNDEF_BRACE_${var_name}__}"
+    fi
+  done
+
+  # Replace $VAR_NAME patterns (not followed by {, already handled above)
+  while [[ "${result}" =~ \$([a-zA-Z_][a-zA-Z0-9_]*) ]]; do
+    local var_name="${BASH_REMATCH[1]}"
+    local full_match="\$${var_name}"
+    if [[ -n "${!var_name+x}" ]]; then
+      result="${result//"${full_match}"/${!var_name}}"
+    else
+      log_warn "undefined environment variable '\$${var_name}', leaving unexpanded"
+      result="${result//"${full_match}"/__HOLE_UNDEF_${var_name}__}"
+    fi
+  done
+
+  # Restore undefined var placeholders to original syntax
+  while [[ "${result}" =~ __HOLE_UNDEF_BRACE_([a-zA-Z_][a-zA-Z0-9_]*)__ ]]; do
+    local var_name="${BASH_REMATCH[1]}"
+    result="${result//__HOLE_UNDEF_BRACE_${var_name}__/\$\{${var_name}\}}"
+  done
+  while [[ "${result}" =~ __HOLE_UNDEF_([a-zA-Z_][a-zA-Z0-9_]*)__ ]]; do
+    local var_name="${BASH_REMATCH[1]}"
+    result="${result//__HOLE_UNDEF_${var_name}__/\$${var_name}}"
+  done
+
+  echo "${result}"
+}
+
 # Resolve a host path: expand ~/, resolve relative paths against base_dir, strip trailing slashes
 resolve_host_path() {
   local raw_path="${1}"
   local base_dir="${2}"
   raw_path="${raw_path%/}"
+  raw_path=$(expand_env_vars "${raw_path}")
   if [[ "${raw_path}" == "~/"* ]]; then
     echo "${HOME}/${raw_path#\~/}"
   elif [[ "${raw_path}" != /* ]]; then
@@ -212,6 +257,7 @@ resolve_file_exclusions() {
     [[ -z "${line}" ]] && continue
     # Strip trailing slashes for consistent mount paths
     line="${line%/}"
+    line=$(expand_env_vars "${line}")
     if has_glob_chars "${line}"; then
       # Expand glob pattern in a subshell to isolate shopt changes
       local -a matches=()
@@ -287,6 +333,7 @@ generate_instance_compose() {
     # Strip trailing slashes
     host_path="${host_path%/}"
     container_path="${container_path%/}"
+    container_path=$(expand_env_vars "${container_path}")
     # Resolve host path
     host_path=$(resolve_host_path "${host_path}" "${project_dir}")
     # Validate host path exists
@@ -304,6 +351,7 @@ generate_instance_compose() {
     [[ -z "${lib_host_path}" ]] && continue
     lib_host_path="${lib_host_path%/}"
     lib_container_path="${lib_container_path%/}"
+    lib_container_path=$(expand_env_vars "${lib_container_path}")
     lib_host_path=$(resolve_host_path "${lib_host_path}" "${project_dir}")
     if [[ ! -d "${lib_host_path}" ]]; then
       log_warn "library '${lib_host_path}' not found or not a directory, skipping"
