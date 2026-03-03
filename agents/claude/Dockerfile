@@ -1,5 +1,8 @@
 FROM ubuntu:24.04
 
+ARG UID=1000
+ARG GID=1000
+
 RUN apt-get update && apt-get install -y \
     curl \
     git \
@@ -10,7 +13,8 @@ RUN apt-get update && apt-get install -y \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -s /bin/bash agent
+RUN groupadd -o -g "${GID}" agent && \
+    useradd -o -u "${UID}" -g "${GID}" -m -s /bin/bash agent
 RUN echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent
 
 WORKDIR /workspace

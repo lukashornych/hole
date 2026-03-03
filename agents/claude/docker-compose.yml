@@ -4,6 +4,9 @@ services:
     build:
       context: .
       dockerfile: agents/claude/Dockerfile
+      args:
+        UID: "${SANDBOX_UID:-1000}"
+        GID: "${SANDBOX_GID:-1000}"
       additional_contexts:
         setup-context: ./agents/claude/setup-scripts
     image: hole-sandbox/agent-claude-${PROJECT_NAME}:latest

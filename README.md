@@ -88,6 +88,8 @@ hole uninstall                # uninstall hole and optionally remove Docker reso
 
 **Requirements:** `curl` or `wget`, `tar`, [`docker`](https://www.docker.com/get-started/), [`jq`](https://jqlang.github.io/jq/download/), [`jv`](https://github.com/santhosh-tekuri/jsonschema/releases)
 
+> _Note: `jv` utility documentation mentions installation through golang, you don't have to do that, you can download the binary from their [release page](https://github.com/santhosh-tekuri/jsonschema/releases)._
+
 To install the latest version, run the following command in your terminal:
 
 ```sh

@@ -548,6 +548,14 @@ cmd_start() {
   # Expose project name and directory for docker-compose.yml
   export PROJECT_NAME="${project_name}"
   export PROJECT_DIR="${project_dir}"
+  if [ "$(uname -s)" = "Linux" ]; then # only needed on Linux, Docker Desktop (Windows, macOS)/Orbstack should solve the id mismatches automatically
+    local sandbox_uid
+    sandbox_uid=$(id -u)
+    export SANDBOX_UID="${sandbox_uid}"
+    local sandbox_gid
+    sandbox_gid=$(id -g)
+    export SANDBOX_GID="${sandbox_gid}"
+  fi
 
   # Start proxy in detached mode with health check wait
   log_info "Starting proxy..."
