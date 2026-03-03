@@ -4,6 +4,9 @@ services:
     build:
       context: .
       dockerfile: agents/codex/Dockerfile
+      args:
+        UID: "${SANDBOX_UID:-1000}"
+        GID: "${SANDBOX_GID:-1000}"
       additional_contexts:
         setup-context: ./agents/codex/setup-scripts
     image: hole-sandbox/agent-codex-${PROJECT_NAME}:latest
