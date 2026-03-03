@@ -28,6 +28,7 @@ Table of contents:
 - [Configuration](#configuration)
   - [Project .gitignore](#project-gitignore)
   - [File exclusions](#file-exclusions)
+  - [Environment variable expansion](#environment-variable-expansion)
   - [File inclusions](#file-inclusions)
   - [Libraries](#libraries)
   - [Domain whitelist](#domain-whitelist)
@@ -248,7 +249,7 @@ Hide files and directories from the agent:
 
 Files are mounted as `/dev/null` and directories as empty anonymous volumes inside the container. Non-existent paths are skipped with a warning.
 
-Glob patterns are supported for matching multiple paths at once:
+Paths support environment variable expansion (`$VAR`, `${VAR}`) and glob patterns are supported for matching multiple paths at once:
 
 ```json
 {
@@ -264,6 +265,7 @@ Glob patterns are supported for matching multiple paths at once:
 - `[abc]` — matches one of the listed characters
 
 Patterns that match no files produce a warning and are skipped. Duplicate paths (from overlapping patterns) are mounted only once.
+Undefined variables produce a warning and are left unexpanded.
 
 ### File inclusions
 
@@ -281,7 +283,11 @@ Mount additional host files or directories into the sandbox. Keys are host paths
 }
 ```
 
-Host paths starting with `~/` expand to `$HOME`, relative paths resolve against the project directory, and absolute paths are used as-is. Non-existent paths are skipped with a warning.
+Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`). Host paths also support tilde
+expansion (`~/`), relative paths (resolved 
+against the project directory). 
+
+Non-existent paths are skipped with a warning. Undefined variables produce a warning and are left unexpanded.
 
 ### Libraries
 
@@ -297,7 +303,11 @@ Mount additional directories read-only into the sandbox. This is useful for givi
 }
 ```
 
-Host paths starting with `~/` expand to `$HOME`, relative paths resolve against the project directory, and absolute paths are used as-is. Non-existent paths or non-directory paths are skipped with a warning.
+Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`). Host paths also support tilde
+expansion (`~/`), relative paths (resolved
+against the project directory).
+
+Non-existent paths are skipped with a warning. Undefined variables produce a warning and are left unexpanded.
 
 Libraries are always mounted **read-only**.
 
@@ -363,9 +373,7 @@ Run a custom bash script during the Docker image build to perform system-level s
 }
 ```
 
-The script runs as **root** during the image build, after dependency installation. Host paths starting with `~/` expand 
-to `$HOME`, relative paths resolve against the project directory, and absolute paths are used as-is. 
-Non-existent paths are skipped with a warning.
+The script runs as **root** during the image build, after dependency installation. Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
 
 **Important:** The agent home directory (`/home/agent`) is backed by a persistent Docker volume that overrides image contents.
 Do not install anything to `/home/agent` in the setup script — it will be hidden by the volume mount.

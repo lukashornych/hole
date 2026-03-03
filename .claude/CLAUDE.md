@@ -25,6 +25,10 @@ Currently supports Claude Code agent (with placeholder for Gemini agent).
 - use `getopts` for command-line argument parsing
 - log using sourced logger.sh library (log_info, log_error, log_warn, log_line), do not use echo for logging
 
+## Documentation
+
+If the implemented feature affects user configuration or behavior, document it in the README.md file.
+
 ## Architecture
 
 The project uses Docker Compose to orchestrate a multi-container sandbox environment:
@@ -138,6 +142,28 @@ Example `.hole/settings.json`:
 }
 ```
 
+### Environment Variable Expansion
+
+All path settings (`files.include`, `files.exclude`, `libraries`, `hooks.setup.script`) support environment variable expansion. Both `$VAR` and `${VAR}` syntax are supported.
+
+- **Expansion order**: env vars → tilde (`~/`) → relative path resolution
+- **Undefined variables**: produce a `log_warn` and are left unexpanded
+- **Implementation**: uses bash indirect expansion (`${!var_name}`) — no `eval`
+
+Example `.hole/settings.json`:
+```json
+{
+  "files": {
+    "include": {
+      "$PROJECT_PATH/shared": "/workspace/shared"
+    }
+  },
+  "libraries": {
+    "${SDK_ROOT}/core": "/libs/core"
+  }
+}
+```
+
 ### File Inclusion
 
 Additional host files or directories can be mounted into the sandbox via `files.include` in `settings.json` (both global and per-project). This is an object where keys are host paths and values are absolute container paths:
@@ -155,10 +181,11 @@ Additional host files or directories can be mounted into the sandbox via `files.
 ```
 
 - **Host path resolution:**
+  - `$VAR` / `${VAR}` → expanded from environment variables
   - `~/...` → expanded to `$HOME/...`
   - Relative paths → resolved against the project directory
   - Absolute paths → used as-is
-- **Container paths** must be absolute (enforced by schema `^/` pattern)
+- **Container paths** must start with `/` or `$` (env var reference)
 - **Non-existent host paths** → warning printed to stderr, entry skipped
 - **Trailing slashes** are stripped from both host and container paths
 - **Merge behavior**: Since `include` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
@@ -179,8 +206,8 @@ Additional directories can be mounted **read-only** into the sandbox via `librar
 }
 ```
 
-- **Host path resolution**: same as `files.include` (`~/...` → `$HOME/...`, relative → project dir, absolute → as-is)
-- **Container paths** must be absolute (enforced by schema `^/` pattern)
+- **Host path resolution**: same as `files.include` (`$VAR` / `${VAR}` → env var, `~/...` → `$HOME/...`, relative → project dir, absolute → as-is)
+- **Container paths** must start with `/` or `$` (env var reference)
 - **Non-existent or non-directory host paths** → warning printed to stderr, entry skipped
 - **Always read-only**: libraries are mounted with `:ro`
 - **Merge behavior**: Since `libraries` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
