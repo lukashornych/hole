@@ -545,7 +545,7 @@ cmd_start() {
   # Ensure persistent agent home volume exists
   ensure_agent_volume "${agent}"
 
-  # Expose project name and directory for docker-compose.yml
+  # Expose runtime variables for docker-compose.yml
   export PROJECT_NAME="${project_name}"
   export PROJECT_DIR="${project_dir}"
   if [ "$(uname -s)" = "Linux" ]; then # only needed on Linux, Docker Desktop (Windows, macOS)/Orbstack should solve the id mismatches automatically
