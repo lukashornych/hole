@@ -1,5 +1,8 @@
 FROM ubuntu:24.04
 
+# removes default ubuntu user whose id we need for the agent user
+RUN touch /var/mail/ubuntu && chown ubuntu /var/mail/ubuntu && userdel -r ubuntu
+
 ARG UID=1000
 ARG GID=1000
 
@@ -21,8 +24,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # Install Codex CLI globally (in /usr/local/bin, not /home/agent which is a persistent volume)
 RUN npm install -g @openai/codex
 
-RUN groupadd -o -g "${GID}" agent && \
-    useradd -o -u "${UID}" -g "${GID}" -m -s /bin/bash agent
+RUN groupadd -g "${GID}" agent && \
+    useradd -u "${UID}" -g "${GID}" -m -s /bin/bash agent
 RUN echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent
 
 WORKDIR /workspace
