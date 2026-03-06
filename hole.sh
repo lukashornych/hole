@@ -4,7 +4,7 @@ set -euo pipefail
 # Constants
 SCRIPT_DIR="$(cd "$(dirname "${0}")" && pwd)"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
-HOLE_TMP_DIR="${TMPDIR:-/tmp}/hole"
+HOLE_TMP_DIR="" # set later in cmd_start
 GLOBAL_SETTINGS_FILE="${HOME}/.hole/settings.json"
 GITHUB_REPO="lukashornych/hole"
 GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
@@ -309,12 +309,11 @@ generate_instance_compose() {
   local merged_settings="${4}"
   local debug_mode="${5:-false}"
 
-  local compose_dir="${HOLE_TMP_DIR}/projects/${instance_name}"
-  local compose_file="${compose_dir}/docker-compose.yml"
+  local compose_file="${HOLE_TMP_DIR}/docker-compose.yml"
 
   local agent_volumes=()
   local has_custom_domains=false
-  local whitelist_file="${compose_dir}/tinyproxy-domain-whitelist.txt"
+  local whitelist_file="${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt"
 
   # Read exclusions from merged settings and resolve to volume mounts
   local entries
@@ -375,7 +374,6 @@ generate_instance_compose() {
   # Build merged whitelist: default + agent-specific + user domains
   local domains
   domains=$(echo "${merged_settings}" | jq -r '.network.domainWhitelist[]? // empty' 2>/dev/null) || true
-  mkdir -p "${compose_dir}"
   # Start with default allowed domains
   cp "${SCRIPT_DIR}/proxy/allowed-domains.txt" "${whitelist_file}"
   # Append agent-specific domains
@@ -424,18 +422,16 @@ generate_instance_compose() {
   fi
 
   if [[ "${has_setup_script}" == true ]]; then
-    mkdir -p "${compose_dir}"
-    cp "${setup_script_path}" "${compose_dir}/setup.sh"
+    cp "${setup_script_path}" "${HOLE_TMP_DIR}/setup.sh"
   fi
 
   if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true ]]; then
-    mkdir -p "${compose_dir}"
     {
       echo "services:"
       if [[ "${has_custom_domains}" == true ]]; then
         echo "  proxy:"
         echo "    volumes:"
-        echo "      - ${compose_dir}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
+        echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
       fi
       if [[ ${#agent_volumes[@]} -gt 0 || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true ]]; then
         echo "  ${agent}:"
@@ -447,7 +443,7 @@ generate_instance_compose() {
           fi
           if [[ "${has_setup_script}" == true ]]; then
             echo "      additional_contexts:"
-            echo "        setup-context: ${compose_dir}"
+            echo "        setup-context: ${HOLE_TMP_DIR}"
           fi
         fi
         if [[ -n "${agent_mem_limit}" ]]; then
@@ -467,11 +463,6 @@ generate_instance_compose() {
         fi
       fi
     } > "${compose_file}"
-  else
-    # No overrides — remove stale files if any
-    rm -f "${compose_file}"
-    rm -f "${whitelist_file}"
-    rmdir "${compose_dir}" 2>/dev/null || true
   fi
 
   echo "${compose_file}"
@@ -511,12 +502,16 @@ cmd_start() {
   local instance_name=${5}
   local dump_network_access="${6:-false}"
   local debug_mode="${7:-false}"
-   local rebuild="${8:-false}"
+  local rebuild="${8:-false}"
 
-    local build_flag=()
-    if [[ "${rebuild}" == true ]]; then
-      build_flag=(--build)
-    fi
+  local build_flag=()
+  if [[ "${rebuild}" == true ]]; then
+    build_flag=(--build)
+  fi
+
+  HOLE_TMP_DIR="$(mktemp -d)"
+  # clean up temp folder after the script exits
+  trap 'rm -rf "${HOLE_TMP_DIR}"' EXIT
 
   # Validate settings files if present
   validate_settings "${GLOBAL_SETTINGS_FILE}" "global settings (~/.hole/settings.json)"
@@ -601,12 +596,6 @@ cmd_start() {
   # Destroy the sandbox after user exits
   "${COMPOSE_CMD[@]}" down --remove-orphans
 
-  # Clean up per-project compose override
-  local compose_dir="${HOLE_TMP_DIR}/projects/${instance_name}"
-  if [[ -d "${compose_dir}" ]]; then
-    rm -rf "${compose_dir}"
-  fi
-
   log_line
   log_info "Exited ${agent} CLI. Sandbox destroyed."
 }
@@ -668,17 +657,6 @@ cmd_destroy() {
     docker rmi "${proxy_image}" || log_warn "Failed to remove image ${proxy_image}"
   else
     log_info "No cached proxy image found"
-  fi
-
-  # Remove temp files for this project
-  local tmp_pattern="${HOLE_TMP_DIR}/projects/hole-sandbox-${project_name}-*"
-  local tmp_dirs
-  tmp_dirs=$(compgen -G "${tmp_pattern}" 2>/dev/null) || true
-  if [[ -n "${tmp_dirs}" ]]; then
-    log_info "Removing temp files..."
-    rm -rf ${tmp_pattern} || log_warn "Failed to remove some temp files"
-  else
-    log_info "No temp files found"
   fi
 
   log_line
