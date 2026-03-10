@@ -39,6 +39,8 @@ Options:
   --dump-network-access   After the agent exits, write distinct accessed domains
                               to {agent}-network-access-{id}.log in the project directory
   --rebuild               Force rebuild of Docker images before starting
+  --                      Separator for agent-specific arguments;
+                              everything after -- is passed to the agent CLI
 
 Configure file exclusions, inclusions, libraries, domain whitelist,
 dependencies, container settings and hooks via .hole/settings.json
@@ -48,6 +50,8 @@ Examples:
   hole start claude .
   hole start claude /path/to/project
   hole start claude . --dump-network-access
+  hole start claude . -- -p "explain this function"
+  hole start claude . --rebuild -- --output-format stream-json
   hole destroy .
   hole destroy /path/to/project
 
@@ -301,6 +305,19 @@ resolve_file_exclusions() {
   done
 }
 
+# Read the base command for an agent from its command.json config file.
+# Args: $1 = agent name
+# Outputs command parts to stdout, one per line.
+get_agent_base_command() {
+  local agent="${1}"
+  local command_file="${SCRIPT_DIR}/agents/${agent}/command.json"
+  if [[ ! -f "${command_file}" ]]; then
+    log_error "command.json not found for agent '${agent}'"
+    exit 1
+  fi
+  jq -r '.[]' "${command_file}"
+}
+
 # Generate per-project docker-compose override file from merged settings
 generate_instance_compose() {
   local agent="${1}"
@@ -308,6 +325,7 @@ generate_instance_compose() {
   local instance_name="${3}"
   local merged_settings="${4}"
   local debug_mode="${5:-false}"
+  local agent_args=("${@:6}")
 
   local compose_file="${HOLE_TMP_DIR}/docker-compose.yml"
 
@@ -425,7 +443,12 @@ generate_instance_compose() {
     cp "${setup_script_path}" "${HOLE_TMP_DIR}/setup.sh"
   fi
 
-  if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true ]]; then
+  local has_agent_args=false
+  if [[ ${#agent_args[@]} -gt 0 ]]; then
+    has_agent_args=true
+  fi
+
+  if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true || "${has_agent_args}" == true ]]; then
     {
       echo "services:"
       if [[ "${has_custom_domains}" == true ]]; then
@@ -433,7 +456,7 @@ generate_instance_compose() {
         echo "    volumes:"
         echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
       fi
-      if [[ ${#agent_volumes[@]} -gt 0 || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true ]]; then
+      if [[ ${#agent_volumes[@]} -gt 0 || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true || "${has_agent_args}" == true ]]; then
         echo "  ${agent}:"
         if [[ -n "${extra_packages}" || "${has_setup_script}" == true ]]; then
           echo "    build:"
@@ -454,6 +477,15 @@ generate_instance_compose() {
         fi
         if [[ "${debug_mode}" == true ]]; then
           echo "    command: [\"bash\"]"
+        elif [[ "${has_agent_args}" == true ]]; then
+          local -a base_cmd=()
+          while IFS= read -r cmd_part; do
+            base_cmd+=("${cmd_part}")
+          done < <(get_agent_base_command "${agent}")
+          local -a full_cmd=("${base_cmd[@]}" "${agent_args[@]}")
+          local cmd_str
+          cmd_str=$(printf '%s\n' "${full_cmd[@]}" | jq -R . | jq -s -c .)
+          echo "    command: ${cmd_str}"
         fi
         if [[ ${#agent_volumes[@]} -gt 0 ]]; then
           echo "    volumes:"
@@ -503,6 +535,8 @@ cmd_start() {
   local dump_network_access="${6:-false}"
   local debug_mode="${7:-false}"
   local rebuild="${8:-false}"
+  shift 8
+  local agent_args=("$@")
 
   local build_flag=()
   if [[ "${rebuild}" == true ]]; then
@@ -523,7 +557,7 @@ cmd_start() {
 
   # Generate per-project compose override from merged settings
   local project_compose_file
-  project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}")
+  project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}" ${agent_args[@]+"${agent_args[@]}"})
   create_compose_cmd "${instance_name}" "${agent}" "${project_compose_file}"
 
   if [[ "${debug_mode}" == true ]]; then
@@ -809,14 +843,21 @@ main() {
   local debug_mode=false
   local rebuild=false
   local positional=()
+  local agent_args=()
+  local parsing_hole_args=true
 
   for arg in "$@"; do
-    case "$arg" in
-      --debug) debug_mode=true ;;
-      --dump-network-access) dump_network_access=true ;;
-      --rebuild) rebuild=true ;;
-      *) positional+=("${arg}") ;;
-    esac
+    if [[ "${parsing_hole_args}" == true ]]; then
+      case "${arg}" in
+        --debug) debug_mode=true ;;
+        --dump-network-access) dump_network_access=true ;;
+        --rebuild) rebuild=true ;;
+        --) parsing_hole_args=false ;;
+        *) positional+=("${arg}") ;;
+      esac
+    else
+      agent_args+=("${arg}")
+    fi
   done
 
   # Parse positional arguments with defaults
@@ -861,7 +902,12 @@ main() {
   if [[ "${command}" == "start" ]]; then
     validate_agent "${agent}"
 
-    cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" "${rebuild}"
+    if [[ "${debug_mode}" == true && ${#agent_args[@]} -gt 0 ]]; then
+      log_error "--debug and agent arguments (after --) cannot be used together"
+      exit 1
+    fi
+
+    cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" "${rebuild}" ${agent_args[@]+"${agent_args[@]}"}
     exit 0
   fi
 

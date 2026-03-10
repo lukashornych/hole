@@ -321,3 +321,8 @@ Each agent type has a persistent Docker named volume for its home directory (`ho
 - **Survives** sandbox teardown (`docker compose down --rmi local` does not remove named volumes)
 - **Declared `external: true`** in `docker-compose.yml` to prevent accidental removal by `docker compose down -v`
 - **Removed** by `uninstall.sh` during full uninstallation
+
+### Adding new source files
+
+If you add a new source file to the project, it MUST be added to the `.github/workflows/release.yml` release workflow
+to be present in the release.

@@ -17,6 +17,7 @@ Table of contents:
 - [What is Hole?](#what-is-hole)
 - [Usage](#usage)
   - [Flags](#flags)
+  - [Passing arguments to the agent](#passing-arguments-to-the-agent)
   - [Other commands](#other-commands)
 - [Installation](#installation)
   - [Update](#update)
@@ -71,6 +72,20 @@ hole start {agent} {project path} --rebuild
 `--dump-network-access` writes a `.hole/logs/network-access-{agent}-{instance id}.log` file to the project directory after the agent exits, containing a sorted list of distinct domains (both allowed and denied).
 
 `--rebuild` forces a fresh build of the sandbox Docker images. Sandbox images are cached per-project for fast startup — use this flag after changing `dependencies`, hook scripts, or when the base agent image needs updating.
+
+### Passing arguments to the agent
+
+Use `--` to separate hole flags from agent-specific arguments. Everything after `--` is passed directly to the agent CLI:
+
+```sh
+hole start claude . -- -p "explain this function"
+hole start claude . --rebuild -- --output-format stream-json
+hole start gemini . -- -p "refactor this code"
+```
+
+The base command for each agent (e.g. `claude --dangerously-skip-permissions`) is defined in `agents/<agent>/command.json`. User arguments are appended to this base command.
+
+Note: `--debug` and agent arguments cannot be used together.
 
 ### Other commands
 
