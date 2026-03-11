@@ -35,7 +35,7 @@ RUN if [ -n "$EXTRA_PACKAGES" ]; then \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 
-COPY --from=setup-context . /tmp/setup-scripts/
+COPY setup-scripts/ /tmp/setup-scripts/
 RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
       chmod +x /tmp/setup-scripts/setup.sh \
       && /tmp/setup-scripts/setup.sh; \

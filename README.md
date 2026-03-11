@@ -62,9 +62,10 @@ This allows for credentials to persist across sandbox instances. On first run, t
 ### Flags
 
 ```sh
-hole start {agent} {project path} --debug               
-hole start {agent} {project path} --dump-network-access  
-hole start {agent} {project path} --rebuild              
+hole start {agent} {project path} --debug
+hole start {agent} {project path} --dump-network-access
+hole start {agent} {project path} --rebuild
+hole start {agent} {project path} --unrestricted-network
 ```
 
 `--debug` sets up the sandbox normally but drops you into an interactive shell for inspecting volumes, network connectivity, and installed packages.
@@ -72,6 +73,8 @@ hole start {agent} {project path} --rebuild
 `--dump-network-access` writes a `.hole/logs/network-access-{agent}-{instance id}.log` file to the project directory after the agent exits, containing a sorted list of distinct domains (both allowed and denied).
 
 `--rebuild` forces a fresh build of the sandbox Docker images. Sandbox images are cached per-project for fast startup — use this flag after changing `dependencies`, hook scripts, or when the base agent image needs updating.
+
+`--unrestricted-network` disables domain whitelist filtering, allowing the agent to access any domain. Traffic still flows through the proxy, so `--dump-network-access` logging continues to work. This is useful when the agent needs broad internet access and maintaining a whitelist is impractical.
 
 ### Passing arguments to the agent
 
@@ -101,9 +104,17 @@ hole uninstall                # uninstall hole and optionally remove Docker reso
 
 **Supported platforms:** Linux, macOS, and WSL
 
-**Requirements:** `curl` or `wget`, `tar`, [`docker`](https://www.docker.com/get-started/), [`jq`](https://jqlang.github.io/jq/download/), [`jv`](https://github.com/santhosh-tekuri/jsonschema/releases)
+**Requirements:** `curl` or `wget`, `tar`, [`docker`](https://www.docker.com/get-started/) or [`podman`](https://podman.io/docs/installation) (with compose plugin), [`jq`](https://jqlang.github.io/jq/download/), [`jv`](https://github.com/santhosh-tekuri/jsonschema/releases)
 
 > _Note: `jv` utility documentation mentions installation through golang, you don't have to do that, you can download the binary from their [release page](https://github.com/santhosh-tekuri/jsonschema/releases)._
+
+**Container runtime:** Hole auto-detects Docker or Podman (Docker is preferred when both are available). To override the auto-detection, set the `HOLE_RUNTIME` environment variable:
+
+```sh
+export HOLE_RUNTIME=podman
+```
+
+> _Note: When using Podman, ensure `podman compose` is available (via `podman-compose` or the Podman Compose plugin). Rootless Podman may require additional configuration for bind mount permissions._
 
 To install the latest version, run the following command in your terminal:
 
@@ -371,6 +382,21 @@ Configure container resource limits:
 
 - `memoryLimit` — Docker `mem_limit` (e.g. `"8g"`, `"512m"`)
 - `memorySwapLimit` — Docker `memswap_limit` (e.g. `"8g"`, `"512m"`)
+
+### Environment variables
+
+Define custom environment variables for the agent container:
+
+```json
+{
+  "environment": {
+    "NODE_ENV": "development",
+    "API_URL": "https://api.example.com"
+  }
+}
+```
+
+Variables are set in the agent container at startup. Since `environment` is an object, global and project settings are deep-merged — unique keys from both are combined, and if both define the same key, the project value wins.
 
 ### Hooks
 
