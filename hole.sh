@@ -36,12 +36,12 @@ Agents:
   codex     Codex CLI agent
 
 Options:
-  --debug                 Open a bash shell instead of the agent CLI for
-                              inspecting the sandbox environment
-  --dump-network-access   After the agent exits, write distinct accessed domains
-                              to {agent}-network-access-{id}.log in the project directory
-  --rebuild               Force rebuild of Docker images before starting
-  --unrestricted-network  Disable domain whitelist filtering; allow all network access
+  -d, --debug                 Open a bash shell instead of the agent CLI for
+                                  inspecting the sandbox environment
+  -n, --dump-network-access   After the agent exits, write distinct accessed domains
+                                  to {agent}-network-access-{id}.log in the project directory
+  -r, --rebuild               Force rebuild of Docker images before starting
+  -u, --unrestricted-network  Disable domain whitelist filtering; allow all network access
   --                      Separator for agent-specific arguments;
                               everything after -- is passed to the agent CLI
 
@@ -880,10 +880,10 @@ main() {
   for arg in "$@"; do
     if [[ "${parsing_hole_args}" == true ]]; then
       case "${arg}" in
-        --debug) debug_mode=true ;;
-        --dump-network-access) dump_network_access=true ;;
-        --rebuild) rebuild=true ;;
-        --unrestricted-network) unrestricted_network=true ;;
+        -d|--debug) debug_mode=true ;;
+        -n|--dump-network-access) dump_network_access=true ;;
+        -r|--rebuild) rebuild=true ;;
+        -u|--unrestricted-network) unrestricted_network=true ;;
         --) parsing_hole_args=false ;;
         *) positional+=("${arg}") ;;
       esac
