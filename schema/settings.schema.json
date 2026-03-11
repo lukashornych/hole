@@ -84,6 +84,15 @@
       "propertyNames": {
         "minLength": 1
       }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      }
     }
   }
 }

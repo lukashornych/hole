@@ -43,7 +43,7 @@ Options:
                               everything after -- is passed to the agent CLI
 
 Configure file exclusions, inclusions, libraries, domain whitelist,
-dependencies, container settings and hooks via .hole/settings.json
+dependencies, environment variables, container settings and hooks via .hole/settings.json
 (per-project) or ~/.hole/settings.json (global).
 
 Examples:
@@ -443,12 +443,21 @@ generate_instance_compose() {
     cp "${setup_script_path}" "${HOLE_TMP_DIR}/setup.sh"
   fi
 
+  # Read environment variables from merged settings
+  local env_pairs
+  env_pairs=$(echo "${merged_settings}" | jq -r '.environment // {} | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null) || true
+  local -a agent_env_vars=()
+  while IFS=$'\t' read -r env_key env_value; do
+    [[ -z "${env_key}" ]] && continue
+    agent_env_vars+=("      - ${env_key}=${env_value}")
+  done <<< "${env_pairs}"
+
   local has_agent_args=false
   if [[ ${#agent_args[@]} -gt 0 ]]; then
     has_agent_args=true
   fi
 
-  if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true || "${has_agent_args}" == true ]]; then
+  if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true || "${has_agent_args}" == true || ${#agent_env_vars[@]} -gt 0 ]]; then
     {
       echo "services:"
       if [[ "${has_custom_domains}" == true ]]; then
@@ -456,7 +465,7 @@ generate_instance_compose() {
         echo "    volumes:"
         echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
       fi
-      if [[ ${#agent_volumes[@]} -gt 0 || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true || "${has_agent_args}" == true ]]; then
+      if [[ ${#agent_volumes[@]} -gt 0 || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true || "${has_agent_args}" == true || ${#agent_env_vars[@]} -gt 0 ]]; then
         echo "  ${agent}:"
         if [[ -n "${extra_packages}" || "${has_setup_script}" == true ]]; then
           echo "    build:"
@@ -474,6 +483,12 @@ generate_instance_compose() {
         fi
         if [[ -n "${agent_memswap_limit}" ]]; then
           echo "    memswap_limit: ${agent_memswap_limit}"
+        fi
+        if [[ ${#agent_env_vars[@]} -gt 0 ]]; then
+          echo "    environment:"
+          for e in "${agent_env_vars[@]}"; do
+            echo "${e}"
+          done
         fi
         if [[ "${debug_mode}" == true ]]; then
           echo "    command: [\"bash\"]"

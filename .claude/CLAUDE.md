@@ -270,6 +270,22 @@ Example `~/.hole/settings.json` (global):
 
 If both exist, the merged result includes all unique packages from both files.
 
+### Environment Variables
+
+Custom environment variables can be defined via `environment` in `settings.json` (both global and per-project). This is an object where keys are variable names and values are strings:
+
+```json
+{
+  "environment": {
+    "NODE_ENV": "development",
+    "API_URL": "https://api.example.com"
+  }
+}
+```
+
+- **Merge behavior**: Since `environment` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
+- Variables are injected into the agent container's `environment` section in the compose override
+
 ### Container Settings
 
 Container options can be configured via `container` in `settings.json` (both global and per-project).

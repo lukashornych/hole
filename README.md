@@ -372,6 +372,21 @@ Configure container resource limits:
 - `memoryLimit` — Docker `mem_limit` (e.g. `"8g"`, `"512m"`)
 - `memorySwapLimit` — Docker `memswap_limit` (e.g. `"8g"`, `"512m"`)
 
+### Environment variables
+
+Define custom environment variables for the agent container:
+
+```json
+{
+  "environment": {
+    "NODE_ENV": "development",
+    "API_URL": "https://api.example.com"
+  }
+}
+```
+
+Variables are set in the agent container at startup. Since `environment` is an object, global and project settings are deep-merged — unique keys from both are combined, and if both define the same key, the project value wins.
+
 ### Hooks
 
 Hooks allow you to inject some logic into sandbox lifecycle.
