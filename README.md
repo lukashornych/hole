@@ -62,9 +62,10 @@ This allows for credentials to persist across sandbox instances. On first run, t
 ### Flags
 
 ```sh
-hole start {agent} {project path} --debug               
-hole start {agent} {project path} --dump-network-access  
-hole start {agent} {project path} --rebuild              
+hole start {agent} {project path} --debug
+hole start {agent} {project path} --dump-network-access
+hole start {agent} {project path} --rebuild
+hole start {agent} {project path} --unrestricted-network
 ```
 
 `--debug` sets up the sandbox normally but drops you into an interactive shell for inspecting volumes, network connectivity, and installed packages.
@@ -72,6 +73,8 @@ hole start {agent} {project path} --rebuild
 `--dump-network-access` writes a `.hole/logs/network-access-{agent}-{instance id}.log` file to the project directory after the agent exits, containing a sorted list of distinct domains (both allowed and denied).
 
 `--rebuild` forces a fresh build of the sandbox Docker images. Sandbox images are cached per-project for fast startup — use this flag after changing `dependencies`, hook scripts, or when the base agent image needs updating.
+
+`--unrestricted-network` disables domain whitelist filtering, allowing the agent to access any domain. Traffic still flows through the proxy, so `--dump-network-access` logging continues to work. This is useful when the agent needs broad internet access and maintaining a whitelist is impractical.
 
 ### Passing arguments to the agent
 

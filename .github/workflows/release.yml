@@ -69,6 +69,7 @@ jobs:
           cp proxy/Dockerfile                 hole/proxy/
           cp proxy/docker-compose.yml         hole/proxy/
           cp proxy/tinyproxy.conf             hole/proxy/
+          cp proxy/tinyproxy-unrestricted.conf hole/proxy/
           cp proxy/allowed-domains.txt        hole/proxy/
           mkdir -p hole/schema
           cp schema/settings.schema.json      hole/schema/

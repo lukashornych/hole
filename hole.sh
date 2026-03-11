@@ -41,6 +41,7 @@ Options:
   --dump-network-access   After the agent exits, write distinct accessed domains
                               to {agent}-network-access-{id}.log in the project directory
   --rebuild               Force rebuild of Docker images before starting
+  --unrestricted-network  Disable domain whitelist filtering; allow all network access
   --                      Separator for agent-specific arguments;
                               everything after -- is passed to the agent CLI
 
@@ -330,7 +331,8 @@ generate_instance_compose() {
   local instance_name="${3}"
   local merged_settings="${4}"
   local debug_mode="${5:-false}"
-  local agent_args=("${@:6}")
+  local unrestricted_network="${6:-false}"
+  local agent_args=("${@:7}")
 
   local compose_file="${HOLE_TMP_DIR}/docker-compose.yml"
 
@@ -462,13 +464,18 @@ generate_instance_compose() {
     has_agent_args=true
   fi
 
-  if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true || "${has_agent_args}" == true || ${#agent_env_vars[@]} -gt 0 ]]; then
+  if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || "${unrestricted_network}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true || "${has_agent_args}" == true || ${#agent_env_vars[@]} -gt 0 ]]; then
     {
       echo "services:"
-      if [[ "${has_custom_domains}" == true ]]; then
+      if [[ "${has_custom_domains}" == true || "${unrestricted_network}" == true ]]; then
         echo "  proxy:"
         echo "    volumes:"
-        echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
+        if [[ "${unrestricted_network}" == true ]]; then
+          echo "      - ${SCRIPT_DIR}/proxy/tinyproxy-unrestricted.conf:/etc/tinyproxy/tinyproxy.conf:ro"
+        fi
+        if [[ "${has_custom_domains}" == true ]]; then
+          echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
+        fi
       fi
       if [[ ${#agent_volumes[@]} -gt 0 || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true || "${has_agent_args}" == true || ${#agent_env_vars[@]} -gt 0 ]]; then
         echo "  ${agent}:"
@@ -555,7 +562,8 @@ cmd_start() {
   local dump_network_access="${6:-false}"
   local debug_mode="${7:-false}"
   local rebuild="${8:-false}"
-  shift 8
+  local unrestricted_network="${9:-false}"
+  shift 9
   local agent_args=("$@")
   require_cmd "docker"
 
@@ -578,7 +586,7 @@ cmd_start() {
 
   # Generate per-project compose override from merged settings
   local project_compose_file
-  project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}" ${agent_args[@]+"${agent_args[@]}"})
+  project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}" "${unrestricted_network}" ${agent_args[@]+"${agent_args[@]}"})
   create_compose_cmd "${instance_name}" "${agent}" "${project_compose_file}"
 
   if [[ "${debug_mode}" == true ]]; then
@@ -864,6 +872,7 @@ main() {
   local dump_network_access=false
   local debug_mode=false
   local rebuild=false
+  local unrestricted_network=false
   local positional=()
   local agent_args=()
   local parsing_hole_args=true
@@ -874,6 +883,7 @@ main() {
         --debug) debug_mode=true ;;
         --dump-network-access) dump_network_access=true ;;
         --rebuild) rebuild=true ;;
+        --unrestricted-network) unrestricted_network=true ;;
         --) parsing_hole_args=false ;;
         *) positional+=("${arg}") ;;
       esac
@@ -929,7 +939,7 @@ main() {
       exit 1
     fi
 
-    cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" "${rebuild}" ${agent_args[@]+"${agent_args[@]}"}
+    cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" "${rebuild}" "${unrestricted_network}" ${agent_args[@]+"${agent_args[@]}"}
     exit 0
   fi
 
