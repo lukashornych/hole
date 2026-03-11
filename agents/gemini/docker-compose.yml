@@ -7,8 +7,6 @@ services:
       args:
         UID: "${SANDBOX_UID:-1000}"
         GID: "${SANDBOX_GID:-1000}"
-      additional_contexts:
-        setup-context: ./agents/gemini/setup-scripts
     image: hole-sandbox/agent-gemini-${PROJECT_NAME}:latest
     stdin_open: true
     tty: true

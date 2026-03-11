@@ -35,9 +35,9 @@ check_installer_deps() {
 }
 
 check_runtime_deps() {
-    if ! command -v docker >/dev/null 2>&1; then
-        log_warn "docker is not installed or not in PATH."
-        log_warn "hole requires Docker to run sandboxes. Install it from https://docs.docker.com/get-docker/"
+    if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
+        log_warn "neither docker nor podman is installed or in PATH."
+        log_warn "hole requires Docker or Podman to run sandboxes."
     fi
     if ! command -v jq >/dev/null 2>&1; then
         log_warn "jq is not installed or not in PATH."

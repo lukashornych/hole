@@ -17,6 +17,31 @@ source "${SCRIPT_DIR}/logger.sh"
 # Import utility functions
 source "${SCRIPT_DIR}/utils.sh"
 
+# Detect container runtime (docker or podman)
+# Priority: $HOLE_RUNTIME env var → docker → podman → error
+detect_container_runtime() {
+  if [[ -n "${HOLE_RUNTIME:-}" ]]; then
+    if ! command -v "${HOLE_RUNTIME}" >/dev/null 2>&1; then
+      log_error "HOLE_RUNTIME is set to '${HOLE_RUNTIME}' but it is not installed or not in PATH"
+      exit 1
+    fi
+    CONTAINER_RUNTIME="${HOLE_RUNTIME}"
+  elif command -v docker >/dev/null 2>&1; then
+    CONTAINER_RUNTIME="docker"
+  elif command -v podman >/dev/null 2>&1; then
+    CONTAINER_RUNTIME="podman"
+  else
+    log_error "neither docker nor podman is installed or in PATH"
+    exit 1
+  fi
+
+  # Validate compose subcommand works
+  if ! "${CONTAINER_RUNTIME}" compose version >/dev/null 2>&1; then
+    log_error "'${CONTAINER_RUNTIME} compose' is not available. Please install the compose plugin."
+    exit 1
+  fi
+}
+
 # Show help message
 show_help() {
   cat <<EOF
@@ -446,8 +471,11 @@ generate_instance_compose() {
     fi
   fi
 
+  # Always create setup-scripts dir in temp (even if empty) so Dockerfile COPY works
+  mkdir -p "${HOLE_TMP_DIR}/setup-scripts"
+  cp "${SCRIPT_DIR}/agents/${agent}/setup-scripts/.gitkeep" "${HOLE_TMP_DIR}/setup-scripts/.gitkeep"
   if [[ "${has_setup_script}" == true ]]; then
-    cp "${setup_script_path}" "${HOLE_TMP_DIR}/setup.sh"
+    cp "${setup_script_path}" "${HOLE_TMP_DIR}/setup-scripts/setup.sh"
   fi
 
   # Read environment variables from merged settings
@@ -464,65 +492,57 @@ generate_instance_compose() {
     has_agent_args=true
   fi
 
-  if [[ ${#agent_volumes[@]} -gt 0 || "${has_custom_domains}" == true || "${unrestricted_network}" == true || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true || "${has_agent_args}" == true || ${#agent_env_vars[@]} -gt 0 ]]; then
-    {
-      echo "services:"
-      if [[ "${has_custom_domains}" == true || "${unrestricted_network}" == true ]]; then
-        echo "  proxy:"
-        echo "    volumes:"
-        if [[ "${unrestricted_network}" == true ]]; then
-          echo "      - ${SCRIPT_DIR}/proxy/tinyproxy-unrestricted.conf:/etc/tinyproxy/tinyproxy.conf:ro"
-        fi
-        if [[ "${has_custom_domains}" == true ]]; then
-          echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
-        fi
+  {
+    echo "services:"
+    if [[ "${has_custom_domains}" == true || "${unrestricted_network}" == true ]]; then
+      echo "  proxy:"
+      echo "    volumes:"
+      if [[ "${unrestricted_network}" == true ]]; then
+        echo "      - ${SCRIPT_DIR}/proxy/tinyproxy-unrestricted.conf:/etc/tinyproxy/tinyproxy.conf:ro"
       fi
-      if [[ ${#agent_volumes[@]} -gt 0 || -n "${agent_mem_limit}" || -n "${agent_memswap_limit}" || -n "${extra_packages}" || "${has_setup_script}" == true || "${debug_mode}" == true || "${has_agent_args}" == true || ${#agent_env_vars[@]} -gt 0 ]]; then
-        echo "  ${agent}:"
-        if [[ -n "${extra_packages}" || "${has_setup_script}" == true ]]; then
-          echo "    build:"
-          if [[ -n "${extra_packages}" ]]; then
-            echo "      args:"
-            echo "        EXTRA_PACKAGES: \"${extra_packages}\""
-          fi
-          if [[ "${has_setup_script}" == true ]]; then
-            echo "      additional_contexts:"
-            echo "        setup-context: ${HOLE_TMP_DIR}"
-          fi
-        fi
-        if [[ -n "${agent_mem_limit}" ]]; then
-          echo "    mem_limit: ${agent_mem_limit}"
-        fi
-        if [[ -n "${agent_memswap_limit}" ]]; then
-          echo "    memswap_limit: ${agent_memswap_limit}"
-        fi
-        if [[ ${#agent_env_vars[@]} -gt 0 ]]; then
-          echo "    environment:"
-          for e in "${agent_env_vars[@]}"; do
-            echo "${e}"
-          done
-        fi
-        if [[ "${debug_mode}" == true ]]; then
-          echo "    command: [\"bash\"]"
-        elif [[ "${has_agent_args}" == true ]]; then
-          local -a base_cmd=()
-          while IFS= read -r cmd_part; do
-            base_cmd+=("${cmd_part}")
-          done < <(get_agent_base_command "${agent}")
-          local -a full_cmd=("${base_cmd[@]}" "${agent_args[@]}")
-          local cmd_str
-          cmd_str=$(printf '%s\n' "${full_cmd[@]}" | jq -R . | jq -s -c .)
-          echo "    command: ${cmd_str}"
-        fi
-        if [[ ${#agent_volumes[@]} -gt 0 ]]; then
-          echo "    volumes:"
-          for v in "${agent_volumes[@]}"; do
-            echo "${v}"
-          done
-        fi
+      if [[ "${has_custom_domains}" == true ]]; then
+        echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
       fi
-    } > "${compose_file}"
-  fi
+    fi
+    echo "  ${agent}:"
+    echo "    build:"
+    echo "      context: ${HOLE_TMP_DIR}"
+    echo "      dockerfile: ${SCRIPT_DIR}/agents/${agent}/Dockerfile"
+    if [[ -n "${extra_packages}" ]]; then
+      echo "      args:"
+      echo "        EXTRA_PACKAGES: \"${extra_packages}\""
+    fi
+    if [[ -n "${agent_mem_limit}" ]]; then
+      echo "    mem_limit: ${agent_mem_limit}"
+    fi
+    if [[ -n "${agent_memswap_limit}" ]]; then
+      echo "    memswap_limit: ${agent_memswap_limit}"
+    fi
+    if [[ ${#agent_env_vars[@]} -gt 0 ]]; then
+      echo "    environment:"
+      for e in "${agent_env_vars[@]}"; do
+        echo "${e}"
+      done
+    fi
+    if [[ "${debug_mode}" == true ]]; then
+      echo "    command: [\"bash\"]"
+    elif [[ "${has_agent_args}" == true ]]; then
+      local -a base_cmd=()
+      while IFS= read -r cmd_part; do
+        base_cmd+=("${cmd_part}")
+      done < <(get_agent_base_command "${agent}")
+      local -a full_cmd=("${base_cmd[@]}" "${agent_args[@]}")
+      local cmd_str
+      cmd_str=$(printf '%s\n' "${full_cmd[@]}" | jq -R . | jq -s -c .)
+      echo "    command: ${cmd_str}"
+    fi
+    if [[ ${#agent_volumes[@]} -gt 0 ]]; then
+      echo "    volumes:"
+      for v in "${agent_volumes[@]}"; do
+        echo "${v}"
+      done
+    fi
+  } > "${compose_file}"
 
   echo "${compose_file}"
 }
@@ -536,7 +556,7 @@ create_compose_cmd() {
   local proxy_compose_file="${SCRIPT_DIR}/proxy/docker-compose.yml"
   local agent_compose_file="${SCRIPT_DIR}/agents/${agent}/docker-compose.yml"
 
-  COMPOSE_CMD=(docker compose -p "${instance_name}" -f "${COMPOSE_FILE}" -f "${proxy_compose_file}" -f "${agent_compose_file}")
+  COMPOSE_CMD=("${CONTAINER_RUNTIME}" compose -p "${instance_name}" -f "${COMPOSE_FILE}" -f "${proxy_compose_file}" -f "${agent_compose_file}")
   if [[ -f "${project_compose_file}" ]]; then
     COMPOSE_CMD+=(-f "${project_compose_file}")
   fi
@@ -546,9 +566,9 @@ create_compose_cmd() {
 ensure_agent_volume() {
   local agent="${1}"
   local volume_name="hole-sandbox-agent-home-${agent}"
-  if ! docker volume inspect "${volume_name}" >/dev/null 2>&1; then
+  if ! "${CONTAINER_RUNTIME}" volume inspect "${volume_name}" >/dev/null 2>&1; then
     log_info "Creating persistent volume: ${volume_name}"
-    docker volume create "${volume_name}"
+    "${CONTAINER_RUNTIME}" volume create "${volume_name}"
   fi
 }
 
@@ -565,7 +585,7 @@ cmd_start() {
   local unrestricted_network="${9:-false}"
   shift 9
   local agent_args=("$@")
-  require_cmd "docker"
+  detect_container_runtime
 
   local build_flag=()
   if [[ "${rebuild}" == true ]]; then
@@ -574,7 +594,7 @@ cmd_start() {
 
   HOLE_TMP_DIR="$(mktemp -d)"
   # clean up temp folder after the script exits
-  trap 'rm -rf "${HOLE_TMP_DIR}"' EXIT
+  trap "rm -rf '${HOLE_TMP_DIR}'" EXIT
 
   # Validate settings files if present
   validate_settings "${GLOBAL_SETTINGS_FILE}" "global settings (~/.hole/settings.json)"
@@ -627,7 +647,7 @@ cmd_start() {
   # Attach terminal to the running agent
   log_info "Attaching to ${agent} agent..."
   log_line
-  docker attach "${instance_name}-${agent}-1"
+  "${CONTAINER_RUNTIME}" attach "${instance_name}-${agent}-1"
 
   # Dump network access log if requested
   if [[ "${dump_network_access}" == true ]]; then
@@ -639,10 +659,10 @@ cmd_start() {
     tmp_proxy_log="$(mktemp "${TMPDIR:-/tmp}/hole-sandbox-proxy-log.XXXXXX")"
 
     # Stop proxy gracefully so tinyproxy exit() flushes stdio buffers to log file
-    docker stop "${proxy_container}" >/dev/null 2>&1 || true
+    "${CONTAINER_RUNTIME}" stop "${proxy_container}" >/dev/null 2>&1 || true
 
     # Copy the log file from the stopped container and extract domains
-    if docker cp "${proxy_container}:/var/log/tinyproxy/tinyproxy.log" "${tmp_proxy_log}" 2>/dev/null; then
+    if "${CONTAINER_RUNTIME}" cp "${proxy_container}:/var/log/tinyproxy/tinyproxy.log" "${tmp_proxy_log}" 2>/dev/null; then
       grep -oE 'Established connection to host "[a-zA-Z0-9._-]+"|Proxying refused on filtered (url|domain) "[^"]+"' "${tmp_proxy_log}" | \
         sed 's/Established connection to host "/ALLOWED /; s/Proxying refused on filtered [a-z]* "/DENIED /; s/"$//' | \
         sort -u > "${log_file}" || true
@@ -671,34 +691,34 @@ cmd_destroy() {
   log_info "Destroying cached resources for project: ${project_dir}"
   log_info "Project name: ${project_name}"
   log_line
-  require_cmd "docker"
+  detect_container_runtime
 
   # Stop running containers for this project
   local running_containers
-  running_containers=$(docker ps -q --filter "name=hole-sandbox-${project_name}-") || true
+  running_containers=$("${CONTAINER_RUNTIME}" ps -q --filter "name=hole-sandbox-${project_name}-") || true
   if [[ -n "${running_containers}" ]]; then
     log_info "Stopping running containers..."
-    docker stop ${running_containers} || log_warn "Failed to stop some containers"
+    "${CONTAINER_RUNTIME}" stop ${running_containers} || log_warn "Failed to stop some containers"
   else
     log_info "No running containers found"
   fi
 
   # Remove all containers (running or stopped) for this project
   local all_containers
-  all_containers=$(docker ps -aq --filter "name=hole-sandbox-${project_name}-") || true
+  all_containers=$("${CONTAINER_RUNTIME}" ps -aq --filter "name=hole-sandbox-${project_name}-") || true
   if [[ -n "${all_containers}" ]]; then
     log_info "Removing containers..."
-    docker rm -f ${all_containers} || log_warn "Failed to remove some containers"
+    "${CONTAINER_RUNTIME}" rm -f ${all_containers} || log_warn "Failed to remove some containers"
   else
     log_info "No containers found"
   fi
 
   # Remove networks for this project
   local networks
-  networks=$(docker network ls -q --filter "name=hole-sandbox-${project_name}-") || true
+  networks=$("${CONTAINER_RUNTIME}" network ls -q --filter "name=hole-sandbox-${project_name}-") || true
   if [[ -n "${networks}" ]]; then
     log_info "Removing networks..."
-    docker network rm ${networks} || log_warn "Failed to remove some networks"
+    "${CONTAINER_RUNTIME}" network rm ${networks} || log_warn "Failed to remove some networks"
   else
     log_info "No networks found"
   fi
@@ -706,9 +726,9 @@ cmd_destroy() {
   # Remove cached agent images for all agent types
   for agent in "${VALID_AGENTS[@]}"; do
     local agent_image="hole-sandbox/agent-${agent}-${project_name}:latest"
-    if docker image inspect "${agent_image}" >/dev/null 2>&1; then
+    if "${CONTAINER_RUNTIME}" image inspect "${agent_image}" >/dev/null 2>&1; then
       log_info "Removing agent image: ${agent_image}"
-      docker rmi "${agent_image}" || log_warn "Failed to remove image ${agent_image}"
+      "${CONTAINER_RUNTIME}" rmi "${agent_image}" || log_warn "Failed to remove image ${agent_image}"
     else
       log_info "No cached image found for agent '${agent}'"
     fi
@@ -716,9 +736,9 @@ cmd_destroy() {
 
   # Remove cached proxy image
   local proxy_image="hole-sandbox/proxy-${project_name}:latest"
-  if docker image inspect "${proxy_image}" >/dev/null 2>&1; then
+  if "${CONTAINER_RUNTIME}" image inspect "${proxy_image}" >/dev/null 2>&1; then
     log_info "Removing proxy image: ${proxy_image}"
-    docker rmi "${proxy_image}" || log_warn "Failed to remove image ${proxy_image}"
+    "${CONTAINER_RUNTIME}" rmi "${proxy_image}" || log_warn "Failed to remove image ${proxy_image}"
   else
     log_info "No cached proxy image found"
   fi

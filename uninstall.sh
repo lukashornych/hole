@@ -11,21 +11,46 @@ log_success() { echo "[OK] $*"; }
 log_warn()    { echo "[WARN] $*"; }
 log_error()   { echo "[ERROR] $*" >&2; exit 1; }
 
+# Detect container runtime (docker or podman)
+detect_container_runtime() {
+    if [[ -n "${HOLE_RUNTIME:-}" ]]; then
+        if ! command -v "${HOLE_RUNTIME}" >/dev/null 2>&1; then
+            log_warn "HOLE_RUNTIME is set to '${HOLE_RUNTIME}' but it is not installed"
+            CONTAINER_RUNTIME=""
+            return
+        fi
+        CONTAINER_RUNTIME="${HOLE_RUNTIME}"
+    elif command -v docker >/dev/null 2>&1; then
+        CONTAINER_RUNTIME="docker"
+    elif command -v podman >/dev/null 2>&1; then
+        CONTAINER_RUNTIME="podman"
+    else
+        log_warn "neither docker nor podman found, skipping container resource cleanup"
+        CONTAINER_RUNTIME=""
+    fi
+}
+
 print_success() {
     echo ""
     echo "  hole uninstalled successfully."
     echo ""
 }
 
-remove_docker_resources() {
+remove_container_resources() {
     local soft_wipe="${1:-false}"
+
+    if [[ -z "${CONTAINER_RUNTIME}" ]]; then
+        log_warn "No container runtime available, skipping resource cleanup"
+        return
+    fi
+
     # Stop and remove all containers with name prefix "hole-sandbox-"
     local containers
-    containers=$(docker ps -aq --filter "name=hole-sandbox-") || true
+    containers=$("${CONTAINER_RUNTIME}" ps -aq --filter "name=hole-sandbox-") || true
     if [[ -n "${containers}" ]]; then
         log_info "Stopping and removing containers..."
-        docker stop ${containers} 2>/dev/null || true
-        docker rm -f ${containers} || log_warn "Failed to remove some containers"
+        "${CONTAINER_RUNTIME}" stop ${containers} 2>/dev/null || true
+        "${CONTAINER_RUNTIME}" rm -f ${containers} || log_warn "Failed to remove some containers"
         log_success "Removed containers"
     else
         log_info "No containers found"
@@ -33,10 +58,10 @@ remove_docker_resources() {
 
     # Remove all images matching "hole-sandbox/*"
     local images
-    images=$(docker images --filter "reference=hole-sandbox/*" -q) || true
+    images=$("${CONTAINER_RUNTIME}" images --filter "reference=hole-sandbox/*" -q) || true
     if [[ -n "${images}" ]]; then
         log_info "Removing images..."
-        docker rmi ${images} || log_warn "Failed to remove some images"
+        "${CONTAINER_RUNTIME}" rmi ${images} || log_warn "Failed to remove some images"
         log_success "Removed images"
     else
         log_info "No images found"
@@ -44,10 +69,10 @@ remove_docker_resources() {
 
     # Remove all networks matching "hole-sandbox-"
     local networks
-    networks=$(docker network ls --filter "name=hole-sandbox-" -q) || true
+    networks=$("${CONTAINER_RUNTIME}" network ls --filter "name=hole-sandbox-" -q) || true
     if [[ -n "${networks}" ]]; then
         log_info "Removing networks..."
-        docker network rm ${networks} || log_warn "Failed to remove some networks"
+        "${CONTAINER_RUNTIME}" network rm ${networks} || log_warn "Failed to remove some networks"
         log_success "Removed networks"
     else
         log_info "No networks found"
@@ -55,13 +80,13 @@ remove_docker_resources() {
 
     # Remove all volumes matching "hole-sandbox-"
     local volumes
-    volumes=$(docker volume ls --filter "name=hole-sandbox-" -q) || true
+    volumes=$("${CONTAINER_RUNTIME}" volume ls --filter "name=hole-sandbox-" -q) || true
     if [[ "${soft_wipe}" == "true" ]]; then
         volumes=$(echo "${volumes}" | grep -v "^hole-sandbox-agent-home-" || true)
     fi
     if [[ -n "${volumes}" ]]; then
         log_info "Removing volumes..."
-        docker volume rm ${volumes} || log_warn "Failed to remove some volumes"
+        "${CONTAINER_RUNTIME}" volume rm ${volumes} || log_warn "Failed to remove some volumes"
         log_success "Removed volumes"
     else
         log_info "No volumes found"
@@ -79,10 +104,12 @@ main() {
     log_info "Starting hole uninstallation..."
 
     if [[ "${soft_wipe}" == "true" ]]; then
-        log_warn "Proceeding will remove hole files and Docker resources (preserving agent home volumes)."
+        log_warn "Proceeding will remove hole files and container resources (preserving agent home volumes)."
     else
-        log_warn "Proceeding will remove hole files, Docker resources and agent home volumes."
+        log_warn "Proceeding will remove hole files, container resources and agent home volumes."
     fi
+
+    detect_container_runtime
 
     if [ ! -d "$INSTALL_DIR" ] && [ ! -f "$BIN_PATH" ]; then
         log_info "No hole installation found. Nothing to do."
@@ -101,7 +128,7 @@ main() {
         log_success "Removed $BIN_PATH"
     fi
 
-    remove_docker_resources "${soft_wipe}"
+    remove_container_resources "${soft_wipe}"
 
     print_success
 }

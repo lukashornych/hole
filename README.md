@@ -104,9 +104,17 @@ hole uninstall                # uninstall hole and optionally remove Docker reso
 
 **Supported platforms:** Linux, macOS, and WSL
 
-**Requirements:** `curl` or `wget`, `tar`, [`docker`](https://www.docker.com/get-started/), [`jq`](https://jqlang.github.io/jq/download/), [`jv`](https://github.com/santhosh-tekuri/jsonschema/releases)
+**Requirements:** `curl` or `wget`, `tar`, [`docker`](https://www.docker.com/get-started/) or [`podman`](https://podman.io/docs/installation) (with compose plugin), [`jq`](https://jqlang.github.io/jq/download/), [`jv`](https://github.com/santhosh-tekuri/jsonschema/releases)
 
 > _Note: `jv` utility documentation mentions installation through golang, you don't have to do that, you can download the binary from their [release page](https://github.com/santhosh-tekuri/jsonschema/releases)._
+
+**Container runtime:** Hole auto-detects Docker or Podman (Docker is preferred when both are available). To override the auto-detection, set the `HOLE_RUNTIME` environment variable:
+
+```sh
+export HOLE_RUNTIME=podman
+```
+
+> _Note: When using Podman, ensure `podman compose` is available (via `podman-compose` or the Podman Compose plugin). Rootless Podman may require additional configuration for bind mount permissions._
 
 To install the latest version, run the following command in your terminal:
 
