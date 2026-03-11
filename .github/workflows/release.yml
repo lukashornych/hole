@@ -40,6 +40,7 @@ jobs:
           mkdir hole
           cp version                          hole/
           cp logger.sh                        hole/
+          cp utils.sh                         hole/
           cp hole.sh                          hole/
           cp docker-compose.yml               hole/
           cp uninstall.sh                     hole/

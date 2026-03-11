@@ -14,6 +14,8 @@ VALID_COMMANDS=("start" "destroy" "help" "version" "update" "uninstall")
 
 # Import the logging library
 source "${SCRIPT_DIR}/logger.sh"
+# Import utility functions
+source "${SCRIPT_DIR}/utils.sh"
 
 # Show help message
 show_help() {
@@ -96,6 +98,7 @@ validate_settings() {
   fi
 
   local schema_file="${SCRIPT_DIR}/schema/settings.schema.json"
+  require_cmd "jv"
   local output
   if ! output=$(jv "${schema_file}" "${settings_file}" 2>&1); then
     log_error "${label} is not valid:"
@@ -114,6 +117,7 @@ merge_settings() {
   local project_file="${2}"
   local global_json="{}"
   local project_json="{}"
+  require_cmd "jq"
   [[ -f "${global_file}" ]] && global_json=$(cat "${global_file}")
   [[ -f "${project_file}" ]] && project_json=$(cat "${project_file}")
   jq -n --argjson global "${global_json}" --argjson project "${project_json}" '
@@ -164,6 +168,7 @@ resolve_absolute_project_dir() {
 # Convert absolute path to valid Docker project name
 create_project_name_from_project_path() {
   local path="${1}"
+  require_cmd "sha1sum"
 
   local project_dir_basename
   project_dir_basename="$(basename "${path}")"
@@ -552,6 +557,7 @@ cmd_start() {
   local rebuild="${8:-false}"
   shift 8
   local agent_args=("$@")
+  require_cmd "docker"
 
   local build_flag=()
   if [[ "${rebuild}" == true ]]; then
@@ -657,6 +663,7 @@ cmd_destroy() {
   log_info "Destroying cached resources for project: ${project_dir}"
   log_info "Project name: ${project_name}"
   log_line
+  require_cmd "docker"
 
   # Stop running containers for this project
   local running_containers
