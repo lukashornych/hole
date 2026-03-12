@@ -237,6 +237,10 @@ hole start gemini .
 hole start gemini /path/to/project
 ```
 
+> **Note:** there is an issue with initial login where it freezes the agent after a successful login. To work around this,
+> start the agent normally and login, then in another terminal in same project run `hole destroy {project path}`. Then
+> you can start the agent again, and you should be logged in.
+
 ### Codex CLI
 
 Start a sandbox with Codex CLI agent:
