@@ -55,6 +55,9 @@
         "memorySwapLimit": {
           "type": "string",
           "minLength": 1
+        },
+        "docker": {
+          "type": "boolean"
         }
       }
     },

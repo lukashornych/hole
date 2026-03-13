@@ -338,6 +338,17 @@ Each agent type has a persistent Docker named volume for its home directory (`ho
 - **Declared `external: true`** in `docker-compose.yml` to prevent accidental removal by `docker compose down -v`
 - **Removed** by `uninstall.sh` during full uninstallation
 
+### Docker-in-Docker (DinD) Sidecar
+
+When `container.docker` is `true` in settings, the sandbox includes a `docker:dind` sidecar:
+
+- **Build arg**: `DOCKER_ENABLED` build arg triggers Docker CLI + Compose plugin installation in agent Dockerfiles
+- **Compose override**: `generate_instance_compose()` emits the `docker` service definition with proxy env vars, shared `/workspace` mount, mirrored file exclusion volumes, and a healthcheck (`docker info`)
+- **Agent connection**: `DOCKER_HOST=tcp://docker:2375` (no TLS — internal network only)
+- **NO_PROXY**: Agent's `NO_PROXY`/`no_proxy` extended with `docker` to prevent Docker CLI TCP traffic from routing through the HTTP proxy
+- **Startup order**: DinD depends on proxy (`service_healthy`), agent depends on DinD (`service_healthy`)
+- **Registry access**: Users must whitelist Docker registry domains themselves in `network.domainWhitelist`
+
 ### Adding new source files
 
 If you add a new source file to the project, it MUST be added to the `.github/workflows/release.yml` release workflow

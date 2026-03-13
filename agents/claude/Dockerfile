@@ -35,6 +35,15 @@ RUN if [ -n "$EXTRA_PACKAGES" ]; then \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 
+ARG DOCKER_ENABLED=""
+RUN if [ -n "$DOCKER_ENABLED" ]; then \
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+      && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list \
+      && apt-get update \
+      && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 COPY setup-scripts/ /tmp/setup-scripts/
 RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
       chmod +x /tmp/setup-scripts/setup.sh \
