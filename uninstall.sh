@@ -82,7 +82,7 @@ remove_container_resources() {
     local volumes
     volumes=$("${CONTAINER_RUNTIME}" volume ls --filter "name=hole-sandbox-" -q) || true
     if [[ "${soft_wipe}" == "true" ]]; then
-        volumes=$(echo "${volumes}" | grep -v "^hole-sandbox-agent-home-" || true)
+        volumes=$(echo "${volumes}" | grep -v "^hole-sandbox-agent-home-\|^hole-sandbox-docker-cache\|^hole-sandbox-docker-data-" || true)
     fi
     if [[ -n "${volumes}" ]]; then
         log_info "Removing volumes..."
@@ -104,7 +104,7 @@ main() {
     log_info "Starting hole uninstallation..."
 
     if [[ "${soft_wipe}" == "true" ]]; then
-        log_warn "Proceeding will remove hole files and container resources (preserving agent home volumes)."
+        log_warn "Proceeding will remove hole files and container resources (preserving agent home and Docker cache volumes)."
     else
         log_warn "Proceeding will remove hole files, container resources and agent home volumes."
     fi

@@ -110,6 +110,8 @@ hole uninstall                # uninstall hole and optionally remove Docker reso
 
 **Requirements:** `curl` or `wget`, `tar`, [`docker`](https://www.docker.com/get-started/) or [`podman`](https://podman.io/docs/installation) (with compose plugin), [`jq`](https://jqlang.github.io/jq/download/), [`jv`](https://github.com/santhosh-tekuri/jsonschema/releases)
 
+**Optional:** `flock` (from `util-linux`) — enables persistent Docker image caching across sandbox restarts when using Docker-in-Docker. Pre-installed on most Linux distributions; on macOS, install via `brew install util-linux`.
+
 > _Note: `jv` utility documentation mentions installation through golang, you don't have to do that, you can download the binary from their [release page](https://github.com/santhosh-tekuri/jsonschema/releases)._
 
 **Container runtime:** Hole auto-detects Docker or Podman (Docker is preferred when both are available). To override the auto-detection, set the `HOLE_RUNTIME` environment variable:
@@ -436,6 +438,8 @@ For other registries (GitHub Container Registry, AWS ECR, etc.), add the corresp
 **Workspace bind mounts:** The project directory is mounted at `/workspace` in both the agent and DinD containers, so bind mounts in user `docker-compose.yml` files resolve correctly.
 
 **File exclusions:** Exclusion volumes from the agent are mirrored on the DinD container's `/workspace` mount, so `docker compose` files cannot access excluded secrets.
+
+**Persistent image cache:** Each DinD sidecar gets its own ephemeral instance volume (`hole-sandbox-docker-data-<instance>`), seeded on start from a global cache volume (`hole-sandbox-docker-cache`). On teardown the instance data is synced back to the cache and the instance volume is removed. This means images survive sandbox teardown (via the cache) and do not need to be re-downloaded, while multiple sandboxes (even across different projects) can run simultaneously without conflicts (each has its own `/var/lib/docker`). Images pulled in one project are available to seed any other project. The cache volume is preserved during `hole update` (soft-wipe) and only removed on full `hole uninstall`.
 
 **Security:** The DinD container runs with `privileged: true`, which is required for Docker-in-Docker. This is contained within the isolated sandbox network — the DinD container has no direct internet access (all traffic routes through the proxy).
 

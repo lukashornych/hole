@@ -574,6 +574,14 @@ generate_instance_compose() {
       echo "  docker:"
       echo "    image: docker:dind"
       echo "    privileged: true"
+      echo "    entrypoint:"
+      echo "      - sh"
+      echo "      - -c"
+      echo "      - |"
+      echo "        rm -rf /var/lib/docker/containerd/daemon/io.containerd.metadata.v1.bolt/meta.db-lock"
+      echo "        rm -f /var/run/docker.pid"
+      echo '        exec dockerd-entrypoint.sh "$$@"'
+      echo "      - --"
       echo "    environment:"
       echo "      - DOCKER_TLS_CERTDIR="
       echo "      - HTTP_PROXY=http://proxy:8888"
@@ -584,6 +592,7 @@ generate_instance_compose() {
       echo "      - no_proxy=localhost,127.0.0.1"
       echo "    volumes:"
       echo "      - \${PROJECT_DIR:-.}:/workspace"
+      echo "      - hole-sandbox-docker-data-${instance_name}:/var/lib/docker"
       # Mirror file exclusion volumes on DinD container
       for v in "${agent_volumes[@]}"; do
         echo "${v}"
@@ -598,6 +607,13 @@ generate_instance_compose() {
       echo "      interval: 3s"
       echo "      timeout: 5s"
       echo "      retries: 10"
+    fi
+
+    # Top-level volumes declaration for DinD persistent cache
+    if [[ "${docker_enabled}" == "true" ]]; then
+      echo "volumes:"
+      echo "  hole-sandbox-docker-data-${instance_name}:"
+      echo "    external: true"
     fi
   } > "${compose_file}"
 
@@ -627,6 +643,62 @@ ensure_agent_volume() {
     log_info "Creating persistent volume: ${volume_name}"
     "${CONTAINER_RUNTIME}" volume create "${volume_name}"
   fi
+}
+
+# Ensure the persistent Docker cache volume exists (seed for per-instance DinD volumes)
+ensure_docker_cache_volume() {
+  local volume_name="hole-sandbox-docker-cache"
+  if ! "${CONTAINER_RUNTIME}" volume inspect "${volume_name}" >/dev/null 2>&1; then
+    log_info "Creating persistent volume: ${volume_name}"
+    "${CONTAINER_RUNTIME}" volume create "${volume_name}"
+  fi
+}
+
+# Create a per-instance Docker data volume and seed it from the project cache
+seed_docker_instance_volume() {
+  local instance_name="${1}"
+  local cache_vol="hole-sandbox-docker-cache"
+  local instance_vol="hole-sandbox-docker-data-${instance_name}"
+
+  log_info "Creating instance volume: ${instance_vol}"
+  "${CONTAINER_RUNTIME}" volume create "${instance_vol}" >/dev/null
+
+  log_info "Seeding instance volume from cache..."
+  "${CONTAINER_RUNTIME}" run --rm \
+    -v "${cache_vol}:/src:ro" \
+    -v "${instance_vol}:/dst" \
+    alpine sh -c 'cp -a /src/. /dst/ 2>/dev/null || true' >/dev/null 2>&1 || true
+}
+
+# Sync instance Docker data back to cache, then remove instance volume
+sync_and_remove_docker_instance_volume() {
+  local instance_name="${1}"
+  local cache_vol="hole-sandbox-docker-cache"
+  local instance_vol="hole-sandbox-docker-data-${instance_name}"
+  local lock_file="${TMPDIR:-/tmp}/hole-docker-cache.lock"
+
+  # Best-effort sync: serialize concurrent syncs with flock
+  if command -v flock >/dev/null 2>&1; then
+    (
+      if flock -w 120 9 2>/dev/null; then
+        # Clear cache and copy instance data into it
+        "${CONTAINER_RUNTIME}" run --rm \
+          -v "${cache_vol}:/dst" \
+          alpine sh -c 'rm -rf /dst/* /dst/..?* /dst/.[!.]* 2>/dev/null || true' >/dev/null 2>&1 || true
+        "${CONTAINER_RUNTIME}" run --rm \
+          -v "${instance_vol}:/src:ro" \
+          -v "${cache_vol}:/dst" \
+          alpine sh -c 'cp -a /src/. /dst/ 2>/dev/null || true' >/dev/null 2>&1 || true
+      else
+        log_warn "Could not acquire cache lock, skipping cache sync"
+      fi
+    ) 9>"${lock_file}" || true
+  else
+    log_warn "flock not available, skipping cache sync"
+  fi
+
+  # Remove the ephemeral instance volume
+  "${CONTAINER_RUNTIME}" volume rm "${instance_vol}" >/dev/null 2>&1 || true
 }
 
 # Start command: create/start sandbox and attach to agent CLI
@@ -680,6 +752,14 @@ cmd_start() {
 
   # Ensure persistent agent home volume exists
   ensure_agent_volume "${agent}"
+
+  # Ensure persistent Docker cache volume and seed per-instance volume
+  local docker_enabled_vol
+  docker_enabled_vol=$(echo "${merged_settings}" | jq -r '.container.docker // empty' 2>/dev/null) || true
+  if [[ "${with_docker}" == "true" || "${docker_enabled_vol}" == "true" ]]; then
+    ensure_docker_cache_volume
+    seed_docker_instance_volume "${instance_name}"
+  fi
 
   # Expose runtime variables for docker-compose.yml
   export PROJECT_NAME="${project_name}"
@@ -748,6 +828,12 @@ cmd_start() {
   # Destroy the sandbox after user exits
   "${COMPOSE_CMD[@]}" down --remove-orphans
 
+  # Sync Docker instance volume back to cache and remove it
+  if [[ "${with_docker}" == "true" || "${docker_enabled_vol}" == "true" ]]; then
+    log_info "Syncing Docker data to cache..."
+    sync_and_remove_docker_instance_volume "${instance_name}"
+  fi
+
   log_line
   log_info "Exited ${agent} CLI. Sandbox destroyed."
 }
@@ -810,6 +896,16 @@ cmd_destroy() {
     "${CONTAINER_RUNTIME}" rmi "${proxy_image}" || log_warn "Failed to remove image ${proxy_image}"
   else
     log_info "No cached proxy image found"
+  fi
+
+  # Remove orphaned Docker instance volumes for this project
+  local orphaned_instance_vols
+  orphaned_instance_vols=$("${CONTAINER_RUNTIME}" volume ls -q --filter "name=hole-sandbox-docker-data-hole-sandbox-${project_name}-" 2>/dev/null) || true
+  if [[ -n "${orphaned_instance_vols}" ]]; then
+    log_info "Removing orphaned Docker instance volumes..."
+    echo "${orphaned_instance_vols}" | while IFS= read -r vol; do
+      "${CONTAINER_RUNTIME}" volume rm "${vol}" 2>/dev/null || log_warn "Failed to remove ${vol}"
+    done
   fi
 
   log_line
