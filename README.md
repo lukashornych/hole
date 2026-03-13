@@ -35,6 +35,7 @@ Table of contents:
   - [Domain whitelist](#domain-whitelist)
   - [Dependencies](#dependencies)
   - [Container settings](#container-settings)
+  - [Docker-in-Docker](#docker-in-docker)
   - [Hooks](#hooks)
   - [Configuration examples](#configuration-examples)
 
@@ -66,6 +67,7 @@ hole start {agent} {project path} --debug
 hole start {agent} {project path} --dump-network-access
 hole start {agent} {project path} --rebuild
 hole start {agent} {project path} --unrestricted-network
+hole start {agent} {project path} --with-docker
 ```
 
 `-d`, `--debug` sets up the sandbox normally but drops you into an interactive shell for inspecting volumes, network connectivity, and installed packages.
@@ -74,7 +76,9 @@ hole start {agent} {project path} --unrestricted-network
 
 `-r`, `--rebuild` forces a fresh build of the sandbox Docker images. Sandbox images are cached per-project for fast startup — use this flag after changing `dependencies`, hook scripts, or when the base agent image needs updating.
 
-`u`, `--unrestricted-network` disables domain whitelist filtering, allowing the agent to access any domain. Traffic still flows through the proxy, so `--dump-network-access` logging continues to work. This is useful when the agent needs broad internet access and maintaining a whitelist is impractical.
+`-u`, `--unrestricted-network` disables domain whitelist filtering, allowing the agent to access any domain. Traffic still flows through the proxy, so `--dump-network-access` logging continues to work. This is useful when the agent needs broad internet access and maintaining a whitelist is impractical.
+
+`--with-docker` enables a Docker-in-Docker sidecar for the sandbox, allowing the agent to run `docker` and `docker compose` commands. This is equivalent to setting `container.docker: true` in settings. See [Docker-in-Docker](#docker-in-docker) for details.
 
 ### Passing arguments to the agent
 
@@ -386,6 +390,56 @@ Configure container resource limits:
 
 - `memoryLimit` — Docker `mem_limit` (e.g. `"8g"`, `"512m"`)
 - `memorySwapLimit` — Docker `memswap_limit` (e.g. `"8g"`, `"512m"`)
+
+### Docker-in-Docker
+
+Enable an isolated Docker daemon inside the sandbox so the agent can run `docker` and `docker compose` (e.g., to spin up PostgreSQL, Redis, or other services for tests).
+
+Via settings:
+
+```json
+{
+  "container": {
+    "docker": true
+  }
+}
+```
+
+Or ad-hoc via startup flag:
+
+```sh
+hole start claude . --with-docker
+```
+
+When enabled, a `docker:dind` sidecar container starts on the internal `sandbox` network. The agent gets Docker CLI and Compose plugin installed automatically.
+
+**Registry domain whitelist:** Image pulls go through the sandbox proxy, so you must whitelist your registry domains. For Docker Hub, add:
+
+```json
+{
+  "network": {
+    "domainWhitelist": [
+      "registry-1.docker.io",
+      "auth.docker.io",
+      "production.cloudflare.docker.com",
+      "docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com",
+      "docker-images-prod.r2.cloudflarestorage.com"
+    ]
+  }
+}
+```
+
+For other registries (GitHub Container Registry, AWS ECR, etc.), add the corresponding domains.
+
+**Accessing services:** Containers started inside DinD are reachable from the agent at hostname `docker`, not `localhost`. For example, if you run PostgreSQL on port 5432 inside DinD, connect to `docker:5432` from the agent. When exposing ports in `docker run` or `docker-compose.yml`, bind to all interfaces (e.g., `3307:3306`) rather than localhost (e.g., `127.0.0.1:3307:3306`), because the agent connects to the DinD sidecar over the Docker network, not via loopback.
+
+**Workspace bind mounts:** The project directory is mounted at `/workspace` in both the agent and DinD containers, so bind mounts in user `docker-compose.yml` files resolve correctly.
+
+**File exclusions:** Exclusion volumes from the agent are mirrored on the DinD container's `/workspace` mount, so `docker compose` files cannot access excluded secrets.
+
+**Security:** The DinD container runs with `privileged: true`, which is required for Docker-in-Docker. This is contained within the isolated sandbox network — the DinD container has no direct internet access (all traffic routes through the proxy).
+
+Use `--rebuild` after enabling this setting for the first time to install the Docker CLI in the agent image.
 
 ### Environment variables
 

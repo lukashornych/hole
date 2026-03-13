@@ -67,6 +67,7 @@ Options:
                                   to {agent}-network-access-{id}.log in the project directory
   -r, --rebuild               Force rebuild of Docker images before starting
   -u, --unrestricted-network  Disable domain whitelist filtering; allow all network access
+      --with-docker           Enable Docker-in-Docker sidecar for the sandbox
   --                      Separator for agent-specific arguments;
                               everything after -- is passed to the agent CLI
 
@@ -357,7 +358,8 @@ generate_instance_compose() {
   local merged_settings="${4}"
   local debug_mode="${5:-false}"
   local unrestricted_network="${6:-false}"
-  local agent_args=("${@:7}")
+  local with_docker="${7:-false}"
+  local agent_args=("${@:8}")
 
   local compose_file="${HOLE_TMP_DIR}/docker-compose.yml"
 
@@ -457,6 +459,13 @@ generate_instance_compose() {
   local agent_memswap_limit
   agent_memswap_limit=$(echo "${merged_settings}" | jq -r '.container.memorySwapLimit // empty' 2>/dev/null) || true
 
+  # Read Docker-in-Docker setting (from settings or --with-docker flag)
+  local docker_enabled
+  docker_enabled=$(echo "${merged_settings}" | jq -r '.container.docker // empty' 2>/dev/null) || true
+  if [[ "${with_docker}" == "true" ]]; then
+    docker_enabled="true"
+  fi
+
   # Read setup hook script from merged settings
   local setup_script_path
   setup_script_path=$(echo "${merged_settings}" | jq -r '.hooks.setup.script // empty' 2>/dev/null) || true
@@ -487,6 +496,13 @@ generate_instance_compose() {
     agent_env_vars+=("      - ${env_key}=${env_value}")
   done <<< "${env_pairs}"
 
+  # Add Docker-in-Docker env vars for the agent
+  if [[ "${docker_enabled}" == "true" ]]; then
+    agent_env_vars+=("      - DOCKER_HOST=tcp://docker:2375")
+    agent_env_vars+=("      - NO_PROXY=localhost,127.0.0.1,docker")
+    agent_env_vars+=("      - no_proxy=localhost,127.0.0.1,docker")
+  fi
+
   local has_agent_args=false
   if [[ ${#agent_args[@]} -gt 0 ]]; then
     has_agent_args=true
@@ -508,9 +524,14 @@ generate_instance_compose() {
     echo "    build:"
     echo "      context: ${HOLE_TMP_DIR}"
     echo "      dockerfile: ${SCRIPT_DIR}/agents/${agent}/Dockerfile"
-    if [[ -n "${extra_packages}" ]]; then
+    if [[ -n "${extra_packages}" || "${docker_enabled}" == "true" ]]; then
       echo "      args:"
-      echo "        EXTRA_PACKAGES: \"${extra_packages}\""
+      if [[ -n "${extra_packages}" ]]; then
+        echo "        EXTRA_PACKAGES: \"${extra_packages}\""
+      fi
+      if [[ "${docker_enabled}" == "true" ]]; then
+        echo "        DOCKER_ENABLED: \"true\""
+      fi
     fi
     if [[ -n "${agent_mem_limit}" ]]; then
       echo "    mem_limit: ${agent_mem_limit}"
@@ -541,6 +562,42 @@ generate_instance_compose() {
       for v in "${agent_volumes[@]}"; do
         echo "${v}"
       done
+    fi
+    if [[ "${docker_enabled}" == "true" ]]; then
+      echo "    depends_on:"
+      echo "      docker:"
+      echo "        condition: service_healthy"
+    fi
+
+    # Docker-in-Docker sidecar service
+    if [[ "${docker_enabled}" == "true" ]]; then
+      echo "  docker:"
+      echo "    image: docker:dind"
+      echo "    privileged: true"
+      echo "    environment:"
+      echo "      - DOCKER_TLS_CERTDIR="
+      echo "      - HTTP_PROXY=http://proxy:8888"
+      echo "      - HTTPS_PROXY=http://proxy:8888"
+      echo "      - http_proxy=http://proxy:8888"
+      echo "      - https_proxy=http://proxy:8888"
+      echo "      - NO_PROXY=localhost,127.0.0.1"
+      echo "      - no_proxy=localhost,127.0.0.1"
+      echo "    volumes:"
+      echo "      - \${PROJECT_DIR:-.}:/workspace"
+      # Mirror file exclusion volumes on DinD container
+      for v in "${agent_volumes[@]}"; do
+        echo "${v}"
+      done
+      echo "    depends_on:"
+      echo "      proxy:"
+      echo "        condition: service_healthy"
+      echo "    networks:"
+      echo "      - sandbox"
+      echo "    healthcheck:"
+      echo "      test: [\"CMD\", \"docker\", \"info\"]"
+      echo "      interval: 3s"
+      echo "      timeout: 5s"
+      echo "      retries: 10"
     fi
   } > "${compose_file}"
 
@@ -583,7 +640,8 @@ cmd_start() {
   local debug_mode="${7:-false}"
   local rebuild="${8:-false}"
   local unrestricted_network="${9:-false}"
-  shift 9
+  local with_docker="${10:-false}"
+  shift 10
   local agent_args=("$@")
   detect_container_runtime
 
@@ -606,7 +664,7 @@ cmd_start() {
 
   # Generate per-project compose override from merged settings
   local project_compose_file
-  project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}" "${unrestricted_network}" ${agent_args[@]+"${agent_args[@]}"})
+  project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}" "${unrestricted_network}" "${with_docker}" ${agent_args[@]+"${agent_args[@]}"})
   create_compose_cmd "${instance_name}" "${agent}" "${project_compose_file}"
 
   if [[ "${debug_mode}" == true ]]; then
@@ -638,6 +696,17 @@ cmd_start() {
   # Start proxy in detached mode with health check wait
   log_info "Starting proxy..."
   "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} proxy
+
+  # Start DinD sidecar if Docker is enabled
+  local docker_enabled_start
+  docker_enabled_start=$(echo "${merged_settings}" | jq -r '.container.docker // empty' 2>/dev/null) || true
+  if [[ "${with_docker}" == "true" ]]; then
+    docker_enabled_start="true"
+  fi
+  if [[ "${docker_enabled_start}" == "true" ]]; then
+    log_info "Starting Docker-in-Docker sidecar..."
+    "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} docker
+  fi
 
   # Start agent service
   log_info "Starting ${agent} agent..."
@@ -893,6 +962,7 @@ main() {
   local debug_mode=false
   local rebuild=false
   local unrestricted_network=false
+  local with_docker=false
   local positional=()
   local agent_args=()
   local parsing_hole_args=true
@@ -904,6 +974,7 @@ main() {
         -n|--dump-network-access) dump_network_access=true ;;
         -r|--rebuild) rebuild=true ;;
         -u|--unrestricted-network) unrestricted_network=true ;;
+        --with-docker) with_docker=true ;;
         --) parsing_hole_args=false ;;
         *) positional+=("${arg}") ;;
       esac
@@ -959,7 +1030,7 @@ main() {
       exit 1
     fi
 
-    cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" "${rebuild}" "${unrestricted_network}" ${agent_args[@]+"${agent_args[@]}"}
+    cmd_start "${agent}" "${project_dir}" "${project_name}" "${instance_id}" "${instance_name}" "${dump_network_access}" "${debug_mode}" "${rebuild}" "${unrestricted_network}" "${with_docker}" ${agent_args[@]+"${agent_args[@]}"}
     exit 0
   fi
 
