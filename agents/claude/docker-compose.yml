@@ -8,6 +8,7 @@ services:
         UID: "${SANDBOX_UID:-1000}"
         GID: "${SANDBOX_GID:-1000}"
     image: hole-sandbox/agent-claude-${PROJECT_NAME}:latest
+    pull_policy: never # the agent image is built locally
     stdin_open: true
     tty: true
     volumes:
