@@ -22,7 +22,7 @@
           "additionalProperties": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(/|\\$)"
+            "pattern": "^(/|~|\\$)"
           },
           "propertyNames": {
             "minLength": 1
@@ -82,7 +82,7 @@
       "additionalProperties": {
         "type": "string",
         "minLength": 1,
-        "pattern": "^(/|\\$)"
+        "pattern": "^(/|~|\\$)"
       },
       "propertyNames": {
         "minLength": 1

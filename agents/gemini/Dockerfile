@@ -5,6 +5,8 @@ RUN touch /var/mail/ubuntu && chown ubuntu /var/mail/ubuntu && userdel -r ubuntu
 
 ARG UID=1000
 ARG GID=1000
+ARG AGENT_USERNAME=agent
+ARG AGENT_HOME=/home/agent
 
 RUN apt-get update && apt-get install -y \
     curl \
@@ -21,12 +23,12 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Gemini CLI globally (in /usr/local/bin, not /home/agent which is a persistent volume)
+# Install Gemini CLI globally (in /usr/local/bin, not agent home which is a persistent volume)
 RUN npm install -g @google/gemini-cli
 
-RUN groupadd -g "${GID}" agent && \
-    useradd -u "${UID}" -g "${GID}" -m -s /bin/bash agent
-RUN echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent
+RUN groupadd -g "${GID}" "${AGENT_USERNAME}" && \
+    useradd -u "${UID}" -g "${GID}" -m -d "${AGENT_HOME}" -s /bin/bash "${AGENT_USERNAME}"
+RUN echo "${AGENT_USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${AGENT_USERNAME}
 
 USER root
 ARG EXTRA_PACKAGES=""
@@ -50,6 +52,6 @@ RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
       && /tmp/setup-scripts/setup.sh; \
     fi \
     && rm -rf /tmp/setup-scripts
-USER agent
+USER ${AGENT_USERNAME}
 
 CMD ["gemini", "--yolo"]

@@ -7,13 +7,15 @@ services:
       args:
         UID: "${SANDBOX_UID:-1000}"
         GID: "${SANDBOX_GID:-1000}"
+        AGENT_USERNAME: "${SANDBOX_USERNAME:-agent}"
+        AGENT_HOME: "${SANDBOX_HOME:-/home/agent}"
     image: hole-sandbox/agent-claude-${PROJECT_NAME}:latest
     pull_policy: never # the agent image is built locally
     stdin_open: true
     tty: true
     volumes:
       # persistent agent home directory (created by hole.sh, auto-populated from image on first use)
-      - hole-sandbox-agent-home-claude:/home/agent
+      - hole-sandbox-agent-home-claude:${SANDBOX_HOME:-/home/agent}
       # mount project at host absolute path
       - ${PROJECT_DIR:-.}:${PROJECT_DIR:-.}
     working_dir: ${PROJECT_DIR:-.}

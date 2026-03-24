@@ -110,9 +110,9 @@ hole uninstall                # uninstall hole and optionally remove Docker reso
 
 **Requirements:** `curl` or `wget`, `tar`, [`docker`](https://www.docker.com/get-started/) or [`podman`](https://podman.io/docs/installation) (with compose plugin), [`jq`](https://jqlang.github.io/jq/download/), [`jv`](https://github.com/santhosh-tekuri/jsonschema/releases)
 
-**Optional:** `flock` (from `util-linux`) — enables persistent Docker image caching across sandbox restarts when using Docker-in-Docker. Pre-installed on most Linux distributions; on macOS, install via `brew install util-linux`.
+> _Note: `jv` utility documentation mentions installation through golang, you don't have to do that, you can download the binary from their [release page](https://github.com/santhosh-tekuri/jsonschema/releases) and place it in your bin folder you have in your PATH._
 
-> _Note: `jv` utility documentation mentions installation through golang, you don't have to do that, you can download the binary from their [release page](https://github.com/santhosh-tekuri/jsonschema/releases)._
+**Optional:** `flock` (from `util-linux`) — enables persistent Docker image caching across sandbox restarts when using Docker-in-Docker. Pre-installed on most Linux distributions; on macOS, install via `brew install util-linux`.
 
 **Container runtime:** Hole auto-detects Docker or Podman (Docker is preferred when both are available). To override the auto-detection, set the `HOLE_RUNTIME` environment variable:
 
@@ -177,8 +177,8 @@ Add following includes to `~/.hole/settings.json`:
 {
     "files": {
         "include": {
-            "~/.claude/statusline-command.sh": "/home/agent/.claude/statusline-command.sh",
-            "~/.claude/settings.json": "/home/agent/.claude/settings.json"
+            "~/.claude/statusline-command.sh": "~/.claude/statusline-command.sh",
+            "~/.claude/settings.json": "~/.claude/settings.json"
         }
     }
 }
@@ -194,7 +194,7 @@ Add following includes to `~/.hole/settings.json`:
 {
     "files": {
         "include": {
-            "~/.claude/skills": "/home/agent/.claude/skills"
+            "~/.claude/skills": "~/.claude/skills"
         }
     }
 }
@@ -210,7 +210,7 @@ Add following includes to `~/.hole/settings.json`:
 {
     "files": {
         "include": {
-            "~/.claude/settings.json": "/home/agent/.claude/settings.json"
+            "~/.claude/settings.json": "~/.claude/settings.json"
         }
     }
 }
@@ -307,23 +307,21 @@ Undefined variables produce a warning and are left unexpanded.
 
 ### File inclusions
 
-Mount additional host files or directories into the sandbox. Keys are host paths, values are absolute container paths:
+Mount additional host files or directories into the sandbox. Keys are host paths, values are container paths:
 
 ```json
 {
   "files": {
     "include": {
-      "~/.npmrc": "/home/agent/.npmrc",
-      "./shared-config": "/home/agent/shared-config",
+      "~/.npmrc": "~/.npmrc",
+      "./shared-config": "~/shared-config",
       "/home/user/data": "/data"
     }
   }
 }
 ```
 
-Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`). Host paths also support tilde
-expansion (`~/`), relative paths (resolved 
-against the project directory). 
+Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`) and tilde expansion (`~/`). Host paths also support relative paths (resolved against the project directory). Container `~/` expands to the sandbox home directory (which mirrors the host's `$HOME`). 
 
 Non-existent paths are skipped with a warning. Undefined variables produce a warning and are left unexpanded.
 
@@ -480,8 +478,8 @@ Run a custom bash script during the Docker image build to perform system-level s
 
 The script runs as **root** during the image build, after dependency installation. Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
 
-**Important:** The agent home directory (`/home/agent`) is backed by a persistent Docker volume that overrides image contents.
-Do not install anything to `/home/agent` in the setup script — it will be hidden by the volume mount.
+**Important:** The agent home directory (mirrors host's `$HOME`, e.g., `/Users/me` on macOS) is backed by a persistent Docker volume that overrides image contents.
+Do not install anything to the agent home directory in the setup script — it will be hidden by the volume mount.
 
 Use `--rebuild` to force a fresh build if needed.
 
@@ -553,9 +551,9 @@ With that information, create file `~/.m2/agent-toolchains.xml` and set it up:
 {
   "files": {
     "include": {
-      "~/.m2/repository": "/home/agent/.m2/repository",
-      "~/.m2/agent-settings.xml": "/home/agent/.m2/settings.xml",
-      "~/.m2/agent-toolchains.xml": "/home/agent/.m2/toolchains.xml" // optional, only if you use toolchains
+      "~/.m2/repository": "~/.m2/repository",
+      "~/.m2/agent-settings.xml": "~/.m2/settings.xml",
+      "~/.m2/agent-toolchains.xml": "~/.m2/toolchains.xml" // optional, only if you use toolchains
     }
   }
 }

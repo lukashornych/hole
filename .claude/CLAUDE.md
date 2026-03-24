@@ -54,7 +54,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 
 **File access control:**
 - Project directory mounted read-write at the same absolute path as on the host (e.g., `/Users/me/project` on host → `/Users/me/project` in container)
-- Agent home directory (`/home/agent`) backed by a persistent Docker named volume (`hole-sandbox-agent-home-claude`). Credentials, settings, and CLI state survive sandbox teardown.
+- Agent home directory mirrors host's `$HOME` path (e.g., `/Users/me` on macOS, `/home/me` on Linux), backed by a persistent Docker named volume (`hole-sandbox-agent-home-claude`). Credentials, settings, and CLI state survive sandbox teardown.
 - Secret files/folders hidden by mounting /dev/null over them (e.g., .env, .env.local)
 - Exclusions configured via `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project), merged at runtime
 
@@ -98,7 +98,7 @@ Example `~/.hole/settings.json`:
   "files": {
     "exclude": [".env", ".env.local"],
     "include": {
-      "~/.npmrc": "/home/agent/.npmrc"
+      "~/.npmrc": "~/.npmrc"
     }
   },
   "network": {
@@ -155,7 +155,7 @@ Example `.hole/settings.json`:
 {
   "files": {
     "include": {
-      "$PROJECT_PATH/shared": "/home/agent/shared"
+      "$PROJECT_PATH/shared": "~/shared"
     }
   },
   "libraries": {
@@ -172,9 +172,9 @@ Additional host files or directories can be mounted into the sandbox via `files.
 {
   "files": {
     "include": {
-      "./shared-config": "/home/agent/shared-config",
+      "./shared-config": "~/shared-config",
       "/home/user/data": "/data",
-      "~/.npmrc": "/home/agent/.npmrc"
+      "~/.npmrc": "~/.npmrc"
     }
   }
 }
@@ -185,7 +185,7 @@ Additional host files or directories can be mounted into the sandbox via `files.
   - `~/...` → expanded to `$HOME/...`
   - Relative paths → resolved against the project directory
   - Absolute paths → used as-is
-- **Container paths** must start with `/` or `$` (env var reference)
+- **Container paths** support `~/` (expanded to sandbox home), `/` (absolute), or `$` (env var reference)
 - **Non-existent host paths** → warning printed to stderr, entry skipped
 - **Trailing slashes** are stripped from both host and container paths
 - **Merge behavior**: Since `include` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
@@ -207,7 +207,7 @@ Additional directories can be mounted **read-only** into the sandbox via `librar
 ```
 
 - **Host path resolution**: same as `files.include` (`$VAR` / `${VAR}` → env var, `~/...` → `$HOME/...`, relative → project dir, absolute → as-is)
-- **Container paths** must start with `/` or `$` (env var reference)
+- **Container paths** support `~/` (expanded to sandbox home), `/` (absolute), or `$` (env var reference)
 - **Non-existent or non-directory host paths** → warning printed to stderr, entry skipped
 - **Always read-only**: libraries are mounted with `:ro`
 - **Merge behavior**: Since `libraries` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
@@ -330,10 +330,10 @@ A custom bash script can be run during the Docker image build via `hooks.setup.s
 
 ### Agent Home Volume
 
-Each agent type has a persistent Docker named volume for its home directory (`hole-sandbox-agent-home-<agent>`). Lifecycle:
+Each agent type has a persistent Docker named volume for its home directory (`hole-sandbox-agent-home-<agent>`). The home directory path mirrors the host's `$HOME` (e.g., `/Users/me` on macOS, `/home/me` on Linux), and the container username matches the host's `$USER`. Lifecycle:
 
 - **Created** by `hole.sh ensure_agent_volume()` on first `start` for that agent
-- **Auto-populated** by Docker from the image's `/home/agent` contents on first use (CLI binary, `.bashrc`, etc.)
+- **Auto-populated** by Docker from the image's home directory contents on first use (CLI binary, `.bashrc`, etc.)
 - **Survives** sandbox teardown (`docker compose down --rmi local` does not remove named volumes)
 - **Declared `external: true`** in `docker-compose.yml` to prevent accidental removal by `docker compose down -v`
 - **Removed** by `uninstall.sh` during full uninstallation

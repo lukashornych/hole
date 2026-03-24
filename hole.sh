@@ -385,6 +385,10 @@ generate_instance_compose() {
     host_path="${host_path%/}"
     container_path="${container_path%/}"
     container_path=$(expand_env_vars "${container_path}")
+    # Expand tilde in container path using sandbox home
+    if [[ "${container_path}" == "~/"* ]]; then
+      container_path="${SANDBOX_HOME:-/home/agent}/${container_path#\~/}"
+    fi
     # Resolve host path
     host_path=$(resolve_host_path "${host_path}" "${project_dir}")
     # Validate host path exists
@@ -403,6 +407,10 @@ generate_instance_compose() {
     lib_host_path="${lib_host_path%/}"
     lib_container_path="${lib_container_path%/}"
     lib_container_path=$(expand_env_vars "${lib_container_path}")
+    # Expand tilde in container path using sandbox home
+    if [[ "${lib_container_path}" == "~/"* ]]; then
+      lib_container_path="${SANDBOX_HOME:-/home/agent}/${lib_container_path#\~/}"
+    fi
     lib_host_path=$(resolve_host_path "${lib_host_path}" "${project_dir}")
     if [[ ! -d "${lib_host_path}" ]]; then
       log_warn "library '${lib_host_path}' not found or not a directory, skipping"
@@ -524,14 +532,14 @@ generate_instance_compose() {
     echo "    build:"
     echo "      context: ${HOLE_TMP_DIR}"
     echo "      dockerfile: ${SCRIPT_DIR}/agents/${agent}/Dockerfile"
-    if [[ -n "${extra_packages}" || "${docker_enabled}" == "true" ]]; then
-      echo "      args:"
-      if [[ -n "${extra_packages}" ]]; then
-        echo "        EXTRA_PACKAGES: \"${extra_packages}\""
-      fi
-      if [[ "${docker_enabled}" == "true" ]]; then
-        echo "        DOCKER_ENABLED: \"true\""
-      fi
+    echo "      args:"
+    echo "        AGENT_USERNAME: \"${SANDBOX_USERNAME:-agent}\""
+    echo "        AGENT_HOME: \"${SANDBOX_HOME:-/home/agent}\""
+    if [[ -n "${extra_packages}" ]]; then
+      echo "        EXTRA_PACKAGES: \"${extra_packages}\""
+    fi
+    if [[ "${docker_enabled}" == "true" ]]; then
+      echo "        DOCKER_ENABLED: \"true\""
     fi
     if [[ -n "${agent_mem_limit}" ]]; then
       echo "    mem_limit: ${agent_mem_limit}"
@@ -734,6 +742,23 @@ cmd_start() {
   local merged_settings
   merged_settings=$(merge_settings "${GLOBAL_SETTINGS_FILE}" "${project_dir}/.hole/settings.json")
 
+  # Expose runtime variables for docker-compose.yml
+  export PROJECT_NAME="${project_name}"
+  export PROJECT_DIR="${project_dir}"
+  if [ "$(uname -s)" = "Linux" ]; then # only needed on Linux, Docker Desktop (Windows, macOS)/Orbstack should solve the id mismatches automatically
+    local sandbox_uid
+    sandbox_uid=$(id -u)
+    export SANDBOX_UID="${sandbox_uid}"
+    local sandbox_gid
+    sandbox_gid=$(id -g)
+    export SANDBOX_GID="${sandbox_gid}"
+  fi
+  # Export host username and home path for container user creation (all platforms)
+  local sandbox_username="${USER:-agent}"
+  export SANDBOX_USERNAME="${sandbox_username}"
+  local sandbox_home="${HOME:-/home/agent}"
+  export SANDBOX_HOME="${sandbox_home}"
+
   # Generate per-project compose override from merged settings
   local project_compose_file
   project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}" "${unrestricted_network}" "${with_docker}" ${agent_args[@]+"${agent_args[@]}"})
@@ -759,18 +784,6 @@ cmd_start() {
   if [[ "${with_docker}" == "true" || "${docker_enabled_vol}" == "true" ]]; then
     ensure_docker_cache_volume
     seed_docker_instance_volume "${instance_name}"
-  fi
-
-  # Expose runtime variables for docker-compose.yml
-  export PROJECT_NAME="${project_name}"
-  export PROJECT_DIR="${project_dir}"
-  if [ "$(uname -s)" = "Linux" ]; then # only needed on Linux, Docker Desktop (Windows, macOS)/Orbstack should solve the id mismatches automatically
-    local sandbox_uid
-    sandbox_uid=$(id -u)
-    export SANDBOX_UID="${sandbox_uid}"
-    local sandbox_gid
-    sandbox_gid=$(id -g)
-    export SANDBOX_GID="${sandbox_gid}"
   fi
 
   # Start proxy in detached mode with health check wait
