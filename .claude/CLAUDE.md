@@ -53,7 +53,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 - Merge order: default → agent-specific → user-defined (from `settings.json`)
 
 **File access control:**
-- Project directory mounted read-write at /workspace
+- Project directory mounted read-write at the same absolute path as on the host (e.g., `/Users/me/project` on host → `/Users/me/project` in container)
 - Agent home directory (`/home/agent`) backed by a persistent Docker named volume (`hole-sandbox-agent-home-claude`). Credentials, settings, and CLI state survive sandbox teardown.
 - Secret files/folders hidden by mounting /dev/null over them (e.g., .env, .env.local)
 - Exclusions configured via `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project), merged at runtime
@@ -114,8 +114,8 @@ If a project also has `.hole/settings.json` with `"files": { "exclude": [".env",
 ### Secret File/Folder Hiding
 
 Per-project exclusions are configured via `.hole/settings.json` in the project directory. The `files.exclude` array lists paths or glob patterns to hide from the agent. The script auto-detects whether each resolved path is a file or directory and generates the correct Docker volume mount:
-- **Files** → mounted as `/dev/null:/workspace/<path>:ro`
-- **Directories** → mounted as anonymous volume at `/workspace/<path>`
+- **Files** → mounted as `/dev/null:<project_dir>/<path>:ro`
+- **Directories** → mounted as anonymous volume at `<project_dir>/<path>`
 - **Non-existent paths** → warning printed to stderr, entry skipped
 
 Trailing slashes are stripped automatically (e.g., `node_modules/` → `node_modules`).
@@ -155,7 +155,7 @@ Example `.hole/settings.json`:
 {
   "files": {
     "include": {
-      "$PROJECT_PATH/shared": "/workspace/shared"
+      "$PROJECT_PATH/shared": "/home/agent/shared"
     }
   },
   "libraries": {
@@ -172,7 +172,7 @@ Additional host files or directories can be mounted into the sandbox via `files.
 {
   "files": {
     "include": {
-      "./shared-config": "/workspace/shared-config",
+      "./shared-config": "/home/agent/shared-config",
       "/home/user/data": "/data",
       "~/.npmrc": "/home/agent/.npmrc"
     }
@@ -343,7 +343,7 @@ Each agent type has a persistent Docker named volume for its home directory (`ho
 When `container.docker` is `true` in settings, the sandbox includes a `docker:dind` sidecar:
 
 - **Build arg**: `DOCKER_ENABLED` build arg triggers Docker CLI + Compose plugin installation in agent Dockerfiles
-- **Compose override**: `generate_instance_compose()` emits the `docker` service definition with proxy env vars, shared `/workspace` mount, mirrored file exclusion volumes, and a healthcheck (`docker info`)
+- **Compose override**: `generate_instance_compose()` emits the `docker` service definition with proxy env vars, shared project mount (at host absolute path), mirrored file exclusion volumes, and a healthcheck (`docker info`)
 - **Agent connection**: `DOCKER_HOST=tcp://docker:2375` (no TLS — internal network only)
 - **NO_PROXY**: Agent's `NO_PROXY`/`no_proxy` extended with `docker` to prevent Docker CLI TCP traffic from routing through the HTTP proxy
 - **Startup order**: DinD depends on proxy (`service_healthy`), agent depends on DinD (`service_healthy`)

@@ -373,7 +373,7 @@ generate_instance_compose() {
   if [[ -n "${entries}" ]]; then
     while IFS= read -r mount_line; do
       [[ -n "${mount_line}" ]] && agent_volumes+=("${mount_line}")
-    done < <(resolve_file_exclusions "${project_dir}" "/workspace" "${entries}")
+    done < <(resolve_file_exclusions "${project_dir}" "${project_dir}" "${entries}")
   fi
 
   # Read file inclusions from merged settings (host_path -> container_path)
@@ -591,7 +591,7 @@ generate_instance_compose() {
       echo "      - NO_PROXY=localhost,127.0.0.1"
       echo "      - no_proxy=localhost,127.0.0.1"
       echo "    volumes:"
-      echo "      - \${PROJECT_DIR:-.}:/workspace"
+      echo "      - \${PROJECT_DIR:-.}:\${PROJECT_DIR:-.}"
       echo "      - hole-sandbox-docker-data-${instance_name}:/var/lib/docker"
       # Mirror file exclusion volumes on DinD container
       for v in "${agent_volumes[@]}"; do

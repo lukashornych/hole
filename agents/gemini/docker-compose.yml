@@ -14,8 +14,9 @@ services:
     volumes:
       # persistent agent home directory (created by hole.sh, auto-populated from image on first use)
       - hole-sandbox-agent-home-gemini:/home/agent
-      # mount project
-      - ${PROJECT_DIR:-.}:/workspace
+      # mount project at host absolute path
+      - ${PROJECT_DIR:-.}:${PROJECT_DIR:-.}
+    working_dir: ${PROJECT_DIR:-.}
     environment:
       # setup where the inside app should direct network requests
       - HTTP_PROXY=http://proxy:8888

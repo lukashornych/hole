@@ -20,8 +20,6 @@ RUN groupadd -g "${GID}" agent && \
     useradd -u "${UID}" -g "${GID}" -m -s /bin/bash agent
 RUN echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent
 
-WORKDIR /workspace
-
 USER agent
 
 RUN curl -fsSL https://claude.ai/install.sh | bash

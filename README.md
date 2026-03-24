@@ -314,7 +314,7 @@ Mount additional host files or directories into the sandbox. Keys are host paths
   "files": {
     "include": {
       "~/.npmrc": "/home/agent/.npmrc",
-      "./shared-config": "/workspace/shared-config",
+      "./shared-config": "/home/agent/shared-config",
       "/home/user/data": "/data"
     }
   }
@@ -435,9 +435,9 @@ For other registries (GitHub Container Registry, AWS ECR, etc.), add the corresp
 
 **Accessing services:** Containers started inside DinD are reachable from the agent at hostname `docker`, not `localhost`. For example, if you run PostgreSQL on port 5432 inside DinD, connect to `docker:5432` from the agent. When exposing ports in `docker run` or `docker-compose.yml`, bind to all interfaces (e.g., `3307:3306`) rather than localhost (e.g., `127.0.0.1:3307:3306`), because the agent connects to the DinD sidecar over the Docker network, not via loopback.
 
-**Workspace bind mounts:** The project directory is mounted at `/workspace` in both the agent and DinD containers, so bind mounts in user `docker-compose.yml` files resolve correctly.
+**Workspace bind mounts:** The project directory is mounted at the same absolute path as on the host in both the agent and DinD containers, so bind mounts in user `docker-compose.yml` files resolve correctly.
 
-**File exclusions:** Exclusion volumes from the agent are mirrored on the DinD container's `/workspace` mount, so `docker compose` files cannot access excluded secrets.
+**File exclusions:** Exclusion volumes from the agent are mirrored on the DinD container's project mount, so `docker compose` files cannot access excluded secrets.
 
 **Persistent image cache:** Each DinD sidecar gets its own ephemeral instance volume (`hole-sandbox-docker-data-<instance>`), seeded on start from a global cache volume (`hole-sandbox-docker-cache`). On teardown the instance data is synced back to the cache and the instance volume is removed. This means images survive sandbox teardown (via the cache) and do not need to be re-downloaded, while multiple sandboxes (even across different projects) can run simultaneously without conflicts (each has its own `/var/lib/docker`). Images pulled in one project are available to seed any other project. The cache volume is preserved during `hole update` (soft-wipe) and only removed on full `hole uninstall`.
 
