@@ -48,7 +48,7 @@ jobs:
           mkdir -p hole/agents/claude/setup-scripts
           cp agents/claude/Dockerfile             hole/agents/claude/
           cp agents/claude/docker-compose.yml     hole/agents/claude/
-          cp agents/claude/setup-scripts/.gitkeep hole/agents/claude/
+          cp agents/claude/setup-scripts/.gitkeep hole/agents/claude/setup-scripts/
           cp agents/claude/allowed-domains.txt    hole/agents/claude/
           cp agents/claude/command.json           hole/agents/claude/
           mkdir -p hole/agents/gemini
