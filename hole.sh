@@ -758,6 +758,12 @@ cmd_start() {
   export SANDBOX_USERNAME="${sandbox_username}"
   local sandbox_home="${HOME:-/home/agent}"
   export SANDBOX_HOME="${sandbox_home}"
+  # Export trigger to reset docker image cache
+  if [[ "${rebuild}" == true ]]; then
+    local cachebust
+    cachebust="$(date +%s)"
+    export CACHEBUST="${cachebust}"
+  fi
 
   # Generate per-project compose override from merged settings
   local project_compose_file

@@ -1,13 +1,20 @@
 FROM ubuntu:24.04
 
-# removes default ubuntu user whose id we need for the agent user
-RUN touch /var/mail/ubuntu && chown ubuntu /var/mail/ubuntu && userdel -r ubuntu
-
 ARG UID=1000
 ARG GID=1000
 ARG AGENT_USERNAME=agent
 ARG AGENT_HOME=/home/agent
 
+# removes default ubuntu user whose id we need for the agent user
+RUN touch /var/mail/ubuntu && chown ubuntu /var/mail/ubuntu && userdel -r ubuntu
+
+# The rest of the steps CANNOT be cached, we need to rerun the setup script everytime (there may be changes), and download
+# the latest package versions everytime.
+ARG CACHEBUST=1
+
+# Dependencies installaction
+
+## Base dependencies
 RUN apt-get update && apt-get install -y \
     curl \
     git \
@@ -18,23 +25,14 @@ RUN apt-get update && apt-get install -y \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd -g "${GID}" "${AGENT_USERNAME}" && \
-    useradd -u "${UID}" -g "${GID}" -m -d "${AGENT_HOME}" -s /bin/bash "${AGENT_USERNAME}"
-RUN echo "${AGENT_USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${AGENT_USERNAME}
-
-USER ${AGENT_USERNAME}
-
-RUN curl -fsSL https://claude.ai/install.sh | bash
-
-ENV PATH="${AGENT_HOME}/.local/bin:$PATH"
-
-USER root
+## User-defined dependencies
 ARG EXTRA_PACKAGES=""
 RUN if [ -n "$EXTRA_PACKAGES" ]; then \
       apt-get update && apt-get install -y --no-install-recommends $EXTRA_PACKAGES \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 
+## Dependencies to access Docker-in-Docker
 ARG DOCKER_ENABLED=""
 RUN if [ -n "$DOCKER_ENABLED" ]; then \
       curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
@@ -44,12 +42,22 @@ RUN if [ -n "$DOCKER_ENABLED" ]; then \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 
+## User setup hook script
 COPY setup-scripts/ /tmp/setup-scripts/
 RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
       chmod +x /tmp/setup-scripts/setup.sh \
       && /tmp/setup-scripts/setup.sh; \
     fi \
     && rm -rf /tmp/setup-scripts
+
+# Create agent user
+RUN groupadd -g "${GID}" "${AGENT_USERNAME}" && \
+    useradd -u "${UID}" -g "${GID}" -m -d "${AGENT_HOME}" -s /bin/bash "${AGENT_USERNAME}"
+RUN echo "${AGENT_USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${AGENT_USERNAME}
+
+# Agent CLI
 USER ${AGENT_USERNAME}
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="${AGENT_HOME}/.local/bin:$PATH"
 
 CMD ["claude", "--dangerously-skip-permissions"]

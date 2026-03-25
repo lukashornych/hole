@@ -9,6 +9,7 @@ services:
         GID: "${SANDBOX_GID:-1000}"
         AGENT_USERNAME: "${SANDBOX_USERNAME:-agent}"
         AGENT_HOME: "${SANDBOX_HOME:-/home/agent}"
+        CACHEBUST: "${CACHEBUST:-1}"
     image: hole-sandbox/agent-claude-${PROJECT_NAME}:latest
     pull_policy: never # the agent image is built locally
     stdin_open: true
