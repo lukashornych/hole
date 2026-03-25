@@ -82,7 +82,7 @@ remove_container_resources() {
     local volumes
     volumes=$("${CONTAINER_RUNTIME}" volume ls --filter "name=hole-sandbox-" -q) || true
     if [[ "${soft_wipe}" == "true" ]]; then
-        volumes=$(echo "${volumes}" | grep -v "^hole-sandbox-agent-home-\|^hole-sandbox-docker-cache\|^hole-sandbox-docker-data-" || true)
+        volumes=$(echo "${volumes}" | grep -v "^hole-sandbox-agent-home$\|^hole-sandbox-docker-cache\|^hole-sandbox-docker-data-" || true)
     fi
     if [[ -n "${volumes}" ]]; then
         log_info "Removing volumes..."

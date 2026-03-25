@@ -54,7 +54,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 
 **File access control:**
 - Project directory mounted read-write at the same absolute path as on the host (e.g., `/Users/me/project` on host → `/Users/me/project` in container)
-- Agent home directory mirrors host's `$HOME` path (e.g., `/Users/me` on macOS, `/home/me` on Linux), backed by a persistent Docker named volume (`hole-sandbox-agent-home-claude`). Credentials, settings, and CLI state survive sandbox teardown.
+- Agent home directory mirrors host's `$HOME` path (e.g., `/Users/me` on macOS, `/home/me` on Linux), backed by a persistent Docker named volume (`hole-sandbox-agent-home`) shared across all agent types. Credentials, settings, and CLI state survive sandbox teardown.
 - Secret files/folders hidden by mounting /dev/null over them (e.g., .env, .env.local)
 - Exclusions configured via `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project), merged at runtime
 
@@ -330,9 +330,9 @@ A custom bash script can be run during the Docker image build via `hooks.setup.s
 
 ### Agent Home Volume
 
-Each agent type has a persistent Docker named volume for its home directory (`hole-sandbox-agent-home-<agent>`). The home directory path mirrors the host's `$HOME` (e.g., `/Users/me` on macOS, `/home/me` on Linux), and the container username matches the host's `$USER`. Lifecycle:
+All agent types share a single persistent Docker named volume for their home directory (`hole-sandbox-agent-home`). The home directory path mirrors the host's `$HOME` (e.g., `/Users/me` on macOS, `/home/me` on Linux), and the container username matches the host's `$USER`. Lifecycle:
 
-- **Created** by `hole.sh ensure_agent_volume()` on first `start` for that agent
+- **Created** by `hole.sh ensure_agent_volume()` on first `start`
 - **Auto-populated** by Docker from the image's home directory contents on first use (CLI binary, `.bashrc`, etc.)
 - **Survives** sandbox teardown (`docker compose down --rmi local` does not remove named volumes)
 - **Declared `external: true`** in `docker-compose.yml` to prevent accidental removal by `docker compose down -v`

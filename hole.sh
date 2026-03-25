@@ -645,8 +645,7 @@ create_compose_cmd() {
 
 # Ensure the persistent agent home volume exists
 ensure_agent_volume() {
-  local agent="${1}"
-  local volume_name="hole-sandbox-agent-home-${agent}"
+  local volume_name="hole-sandbox-agent-home"
   if ! "${CONTAINER_RUNTIME}" volume inspect "${volume_name}" >/dev/null 2>&1; then
     log_info "Creating persistent volume: ${volume_name}"
     "${CONTAINER_RUNTIME}" volume create "${volume_name}"
@@ -782,7 +781,7 @@ cmd_start() {
   check_for_update
 
   # Ensure persistent agent home volume exists
-  ensure_agent_volume "${agent}"
+  ensure_agent_volume
 
   # Ensure persistent Docker cache volume and seed per-instance volume
   local docker_enabled_vol

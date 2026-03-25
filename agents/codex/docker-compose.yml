@@ -16,7 +16,7 @@ services:
     tty: true
     volumes:
       # persistent agent home directory (created by hole.sh, auto-populated from image on first use)
-      - hole-sandbox-agent-home-codex:${SANDBOX_HOME:-/home/agent}
+      - hole-sandbox-agent-home:${SANDBOX_HOME:-/home/agent}
       # mount project at host absolute path
       - ${PROJECT_DIR:-.}:${PROJECT_DIR:-.}
     working_dir: ${PROJECT_DIR:-.}
@@ -37,5 +37,5 @@ services:
       - sandbox
 
 volumes:
-  hole-sandbox-agent-home-codex:
+  hole-sandbox-agent-home:
     external: true
