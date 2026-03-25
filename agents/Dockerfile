@@ -50,11 +50,15 @@ RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
     fi \
     && rm -rf /tmp/setup-scripts
 
-# Install Codex CLI globally (in /usr/local/bin, not agent home which is a persistent volume)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
-RUN npm install -g @openai/codex
+# Agent CLI installations (root phase — global packages)
+COPY agent-installs/ /tmp/agent-installs/
+RUN for agent_dir in /tmp/agent-installs/*/; do \
+      agent=$(basename "${agent_dir}"); \
+      if [ -f "/tmp/agent-installs/${agent}/install-root.sh" ]; then \
+        chmod +x "/tmp/agent-installs/${agent}/install-root.sh" \
+        && "/tmp/agent-installs/${agent}/install-root.sh"; \
+      fi; \
+    done
 
 # Create agent user
 RUN groupadd -g "${GID}" "${AGENT_USERNAME}" && \
@@ -62,4 +66,17 @@ RUN groupadd -g "${GID}" "${AGENT_USERNAME}" && \
 RUN echo "${AGENT_USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${AGENT_USERNAME}
 USER ${AGENT_USERNAME}
 
-CMD ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+# Agent CLI installations (user phase — user-space tools)
+RUN for agent_dir in /tmp/agent-installs/*/; do \
+      agent=$(basename "${agent_dir}"); \
+      if [ -f "/tmp/agent-installs/${agent}/install-user.sh" ]; then \
+        chmod +x "/tmp/agent-installs/${agent}/install-user.sh" \
+        && "/tmp/agent-installs/${agent}/install-user.sh"; \
+      fi; \
+    done
+ENV PATH="${AGENT_HOME}/.local/bin:$PATH"
+
+# Cleanup
+USER root
+RUN rm -rf /tmp/agent-installs
+USER ${AGENT_USERNAME}

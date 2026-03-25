@@ -57,8 +57,10 @@ hole start claude /path/to/project
 
 The sandbox is created from scratch each time and fully destroyed when you exit the agent CLI. Multiple sandboxes can run simultaneously for the same project.
 
-The entire home directory is mounted as a persistent Docker volume (each agent type has separate volume).
+The entire home directory is mounted as a persistent Docker volume (`hole-sandbox-agent-home`), shared across all agent types.
 This allows for credentials to persist across sandbox instances. On first run, the volume is created automatically.
+
+All enabled agents are installed into a single unified sandbox image. By default, all supported agents (claude, gemini, codex) are installed, so any agent can invoke other agents from within the sandbox. The `agent` parameter only determines the startup command.
 
 ### Flags
 
@@ -390,6 +392,19 @@ Configure container resource limits:
 
 - `memoryLimit` — Docker `mem_limit` (e.g. `"8g"`, `"512m"`)
 - `memorySwapLimit` — Docker `memswap_limit` (e.g. `"8g"`, `"512m"`)
+- `enabledAgents` — array of agent names to install in the sandbox (defaults to all: `["claude", "gemini", "codex"]`)
+
+To install only specific agents (e.g., to reduce image size):
+
+```json
+{
+  "container": {
+    "enabledAgents": ["claude", "gemini"]
+  }
+}
+```
+
+The startup agent must be in the enabled list, otherwise `hole start` will fail with an error.
 
 ### Docker-in-Docker
 

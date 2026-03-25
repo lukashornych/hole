@@ -1,16 +1,15 @@
 services:
-  # Gemini CLI agent
-  gemini:
+  agent:
     build:
       context: .
-      dockerfile: agents/gemini/Dockerfile
+      dockerfile: agents/Dockerfile
       args:
         UID: "${SANDBOX_UID:-1000}"
         GID: "${SANDBOX_GID:-1000}"
         AGENT_USERNAME: "${SANDBOX_USERNAME:-agent}"
         AGENT_HOME: "${SANDBOX_HOME:-/home/agent}"
         CACHEBUST: "${CACHEBUST:-1}"
-    image: hole-sandbox/agent-gemini-${PROJECT_NAME}:latest
+    image: hole-sandbox/agent-${PROJECT_NAME}:latest
     pull_policy: never # the agent image is built locally
     stdin_open: true
     tty: true
@@ -29,8 +28,6 @@ services:
       # do not proxy localhost network requests
       - NO_PROXY=localhost,127.0.0.1
       - no_proxy=localhost,127.0.0.1
-      # disable Gemini's built-in Docker sandbox (Hole provides sandboxing)
-      - GEMINI_SANDBOX=false
     depends_on:
       proxy:
         condition: service_healthy

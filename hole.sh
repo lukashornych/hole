@@ -350,6 +350,20 @@ get_agent_base_command() {
   jq -r '.[]' "${command_file}"
 }
 
+# Get enabled agents from merged settings. Defaults to all valid agents.
+# Args: $1 = merged settings JSON
+# Outputs agent names to stdout, one per line.
+get_enabled_agents() {
+  local merged_settings="${1}"
+  local enabled
+  enabled=$(echo "${merged_settings}" | jq -r '.container.enabledAgents // empty | .[]' 2>/dev/null) || true
+  if [[ -z "${enabled}" ]]; then
+    printf '%s\n' "${VALID_AGENTS[@]}"
+  else
+    echo "${enabled}"
+  fi
+}
+
 # Generate per-project docker-compose override file from merged settings
 generate_instance_compose() {
   local agent="${1}"
@@ -431,17 +445,23 @@ generate_instance_compose() {
     fi
   done <<< "${lib_pairs}"
 
-  # Build merged whitelist: default + agent-specific + user domains
+  # Build merged whitelist: default + all enabled agents' domains + user domains
   local domains
   domains=$(echo "${merged_settings}" | jq -r '.network.domainWhitelist[]? // empty' 2>/dev/null) || true
   # Start with default allowed domains
   cp "${SCRIPT_DIR}/proxy/allowed-domains.txt" "${whitelist_file}"
-  # Append agent-specific domains
-  local agent_whitelist="${SCRIPT_DIR}/agents/${agent}/allowed-domains.txt"
-  if [[ -f "${agent_whitelist}" ]]; then
-    printf '\n' >> "${whitelist_file}"
-    cat "${agent_whitelist}" >> "${whitelist_file}"
-  fi
+  # Append domains from all enabled agents
+  local -a enabled_agents_list=()
+  while IFS= read -r ea; do
+    [[ -n "${ea}" ]] && enabled_agents_list+=("${ea}")
+  done < <(get_enabled_agents "${merged_settings}")
+  for enabled_agent in "${enabled_agents_list[@]}"; do
+    local agent_whitelist="${SCRIPT_DIR}/agents/${enabled_agent}/allowed-domains.txt"
+    if [[ -f "${agent_whitelist}" ]]; then
+      printf '\n' >> "${whitelist_file}"
+      cat "${agent_whitelist}" >> "${whitelist_file}"
+    fi
+  done
   # Append user-defined domains (from settings.json)
   if [[ -n "${domains}" ]]; then
     printf '\n' >> "${whitelist_file}"
@@ -490,10 +510,20 @@ generate_instance_compose() {
 
   # Always create setup-scripts dir in temp (even if empty) so Dockerfile COPY works
   mkdir -p "${HOLE_TMP_DIR}/setup-scripts"
-  cp "${SCRIPT_DIR}/agents/${agent}/setup-scripts/.gitkeep" "${HOLE_TMP_DIR}/setup-scripts/.gitkeep"
+  touch "${HOLE_TMP_DIR}/setup-scripts/.gitkeep"
   if [[ "${has_setup_script}" == true ]]; then
     cp "${setup_script_path}" "${HOLE_TMP_DIR}/setup-scripts/setup.sh"
   fi
+
+  # Copy enabled agents' install scripts to build context
+  mkdir -p "${HOLE_TMP_DIR}/agent-installs"
+  for enabled_agent in "${enabled_agents_list[@]}"; do
+    local agent_src="${SCRIPT_DIR}/agents/${enabled_agent}"
+    local agent_dst="${HOLE_TMP_DIR}/agent-installs/${enabled_agent}"
+    mkdir -p "${agent_dst}"
+    [[ -f "${agent_src}/install-root.sh" ]] && cp "${agent_src}/install-root.sh" "${agent_dst}/"
+    [[ -f "${agent_src}/install-user.sh" ]] && cp "${agent_src}/install-user.sh" "${agent_dst}/"
+  done
 
   # Read environment variables from merged settings
   local env_pairs
@@ -528,10 +558,10 @@ generate_instance_compose() {
         echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
       fi
     fi
-    echo "  ${agent}:"
+    echo "  agent:"
     echo "    build:"
     echo "      context: ${HOLE_TMP_DIR}"
-    echo "      dockerfile: ${SCRIPT_DIR}/agents/${agent}/Dockerfile"
+    echo "      dockerfile: ${SCRIPT_DIR}/agents/Dockerfile"
     echo "      args:"
     echo "        AGENT_USERNAME: \"${SANDBOX_USERNAME:-agent}\""
     echo "        AGENT_HOME: \"${SANDBOX_HOME:-/home/agent}\""
@@ -555,12 +585,15 @@ generate_instance_compose() {
     fi
     if [[ "${debug_mode}" == true ]]; then
       echo "    command: [\"bash\"]"
-    elif [[ "${has_agent_args}" == true ]]; then
+    else
       local -a base_cmd=()
       while IFS= read -r cmd_part; do
         base_cmd+=("${cmd_part}")
       done < <(get_agent_base_command "${agent}")
-      local -a full_cmd=("${base_cmd[@]}" "${agent_args[@]}")
+      local -a full_cmd=("${base_cmd[@]}")
+      if [[ "${has_agent_args}" == true ]]; then
+        full_cmd+=("${agent_args[@]}")
+      fi
       local cmd_str
       cmd_str=$(printf '%s\n' "${full_cmd[@]}" | jq -R . | jq -s -c .)
       echo "    command: ${cmd_str}"
@@ -631,11 +664,10 @@ generate_instance_compose() {
 # Build the docker compose command array, including agent and optional override file
 create_compose_cmd() {
   local instance_name="${1}"
-  local agent="${2}"
-  local project_compose_file="${3}"
+  local project_compose_file="${2}"
 
   local proxy_compose_file="${SCRIPT_DIR}/proxy/docker-compose.yml"
-  local agent_compose_file="${SCRIPT_DIR}/agents/${agent}/docker-compose.yml"
+  local agent_compose_file="${SCRIPT_DIR}/agents/docker-compose.yml"
 
   COMPOSE_CMD=("${CONTAINER_RUNTIME}" compose -p "${instance_name}" -f "${COMPOSE_FILE}" -f "${proxy_compose_file}" -f "${agent_compose_file}")
   if [[ -f "${project_compose_file}" ]]; then
@@ -741,6 +773,18 @@ cmd_start() {
   local merged_settings
   merged_settings=$(merge_settings "${GLOBAL_SETTINGS_FILE}" "${project_dir}/.hole/settings.json")
 
+  # Validate startup agent is in the enabled agents list
+  local agent_is_enabled=false
+  while IFS= read -r ea; do
+    [[ "${ea}" == "${agent}" ]] && agent_is_enabled=true
+  done < <(get_enabled_agents "${merged_settings}")
+  if [[ "${agent_is_enabled}" == false ]]; then
+    log_error "agent '${agent}' is not in the enabled agents list"
+    log_info "Enabled agents: $(get_enabled_agents "${merged_settings}" | tr '\n' ' ')"
+    log_info "Configure enabled agents via container.enabledAgents in settings.json"
+    exit 1
+  fi
+
   # Expose runtime variables for docker-compose.yml
   export PROJECT_NAME="${project_name}"
   export PROJECT_DIR="${project_dir}"
@@ -767,7 +811,7 @@ cmd_start() {
   # Generate per-project compose override from merged settings
   local project_compose_file
   project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}" "${unrestricted_network}" "${with_docker}" ${agent_args[@]+"${agent_args[@]}"})
-  create_compose_cmd "${instance_name}" "${agent}" "${project_compose_file}"
+  create_compose_cmd "${instance_name}" "${project_compose_file}"
 
   if [[ "${debug_mode}" == true ]]; then
     log_warn "Debug mode: opening bash shell instead of agent CLI"
@@ -809,12 +853,12 @@ cmd_start() {
   # Start agent service
   log_info "Starting ${agent} agent..."
   log_line
-  "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} "${agent}"
+  "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} agent
 
   # Attach terminal to the running agent
   log_info "Attaching to ${agent} agent..."
   log_line
-  "${CONTAINER_RUNTIME}" attach "${instance_name}-${agent}-1"
+  "${CONTAINER_RUNTIME}" attach "${instance_name}-agent-1"
 
   # Dump network access log if requested
   if [[ "${dump_network_access}" == true ]]; then
@@ -896,16 +940,14 @@ cmd_destroy() {
     log_info "No networks found"
   fi
 
-  # Remove cached agent images for all agent types
-  for agent in "${VALID_AGENTS[@]}"; do
-    local agent_image="hole-sandbox/agent-${agent}-${project_name}:latest"
-    if "${CONTAINER_RUNTIME}" image inspect "${agent_image}" >/dev/null 2>&1; then
-      log_info "Removing agent image: ${agent_image}"
-      "${CONTAINER_RUNTIME}" rmi "${agent_image}" || log_warn "Failed to remove image ${agent_image}"
-    else
-      log_info "No cached image found for agent '${agent}'"
-    fi
-  done
+  # Remove cached agent image (unified image for all agents)
+  local agent_image="hole-sandbox/agent-${project_name}:latest"
+  if "${CONTAINER_RUNTIME}" image inspect "${agent_image}" >/dev/null 2>&1; then
+    log_info "Removing agent image: ${agent_image}"
+    "${CONTAINER_RUNTIME}" rmi "${agent_image}" || log_warn "Failed to remove image ${agent_image}"
+  else
+    log_info "No cached agent image found"
+  fi
 
   # Remove cached proxy image
   local proxy_image="hole-sandbox/proxy-${project_name}:latest"
