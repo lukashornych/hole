@@ -66,14 +66,23 @@ RUN for agent_dir in /tmp/agent-installs/*/; do \
 RUN groupadd -g "${GID}" "${AGENT_USERNAME}" && \
     useradd -u "${UID}" -g "${GID}" -m -d "${AGENT_HOME}" -s /bin/bash "${AGENT_USERNAME}"
 RUN echo "${AGENT_USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${AGENT_USERNAME}
+
+# Prepare Agent CLI installations (user phase — user-space tools)
+RUN for agent_dir in /tmp/agent-installs/*/; do \
+      agent=$(basename "${agent_dir}"); \
+      if [ -f "/tmp/agent-installs/${agent}/install-user.sh" ]; then \
+        chown "${AGENT_USERNAME}" "/tmp/agent-installs/${agent}/install-user.sh" && \
+        chmod +x "/tmp/agent-installs/${agent}/install-user.sh"; \
+      fi; \
+    done
+
 USER ${AGENT_USERNAME}
 
 # Agent CLI installations (user phase — user-space tools)
 RUN for agent_dir in /tmp/agent-installs/*/; do \
       agent=$(basename "${agent_dir}"); \
       if [ -f "/tmp/agent-installs/${agent}/install-user.sh" ]; then \
-        chmod +x "/tmp/agent-installs/${agent}/install-user.sh" \
-        && "/tmp/agent-installs/${agent}/install-user.sh"; \
+        "/tmp/agent-installs/${agent}/install-user.sh"; \
       fi; \
     done
 ENV PATH="${AGENT_HOME}/.local/bin:$PATH"
