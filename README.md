@@ -341,8 +341,8 @@ Mount additional directories read-only into the sandbox. This is useful for givi
 }
 ```
 
-Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`). Host paths also support tilde
-expansion (`~/`), relative paths (resolved
+Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`) and tilde
+expansion (`~/`). Host paths also support relative paths (resolved
 against the project directory).
 
 Non-existent paths are skipped with a warning. Undefined variables produce a warning and are left unexpanded.
