@@ -59,6 +59,10 @@
         "docker": {
           "type": "boolean"
         },
+        "baseImage": {
+          "type": "string",
+          "minLength": 1
+        },
         "enabledAgents": {
           "type": "array",
           "items": {

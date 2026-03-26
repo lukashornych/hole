@@ -390,6 +390,7 @@ Configure container resource limits:
 }
 ```
 
+- `baseImage` — custom base Docker image for the agent container (defaults to `ubuntu:24.04`). The image must be based on Ubuntu 24.04; other base images may work but are not tested.
 - `memoryLimit` — Docker `mem_limit` (e.g. `"8g"`, `"512m"`)
 - `memorySwapLimit` — Docker `memswap_limit` (e.g. `"8g"`, `"512m"`)
 - `enabledAgents` — array of agent names to install in the sandbox (defaults to all: `["claude", "gemini", "codex"]`)

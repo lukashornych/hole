@@ -494,6 +494,10 @@ generate_instance_compose() {
     docker_enabled="true"
   fi
 
+  # Read custom base image setting
+  local base_image
+  base_image=$(echo "${merged_settings}" | jq -r '.container.baseImage // empty' 2>/dev/null) || true
+
   # Read setup hook script from merged settings
   local setup_script_path
   setup_script_path=$(echo "${merged_settings}" | jq -r '.hooks.setup.script // empty' 2>/dev/null) || true
@@ -567,6 +571,9 @@ generate_instance_compose() {
     echo "        AGENT_HOME: \"${SANDBOX_HOME:-/home/agent}\""
     if [[ -n "${extra_packages}" ]]; then
       echo "        EXTRA_PACKAGES: \"${extra_packages}\""
+    fi
+    if [[ -n "${base_image}" ]]; then
+      echo "        BASE_IMAGE: \"${base_image}\""
     fi
     if [[ "${docker_enabled}" == "true" ]]; then
       echo "        DOCKER_ENABLED: \"true\""

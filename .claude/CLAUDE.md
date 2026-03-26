@@ -295,6 +295,7 @@ Container options can be configured via `container` in `settings.json` (both glo
 
 Supported options are
 
+- `container.baseImage` → custom base Docker image (defaults to `ubuntu:24.04`; must be Ubuntu 24.04-based)
 - `container.memoryLimit` → maps to Docker `mem_limit` (e.g., `"8g"`, `"512m"`, `"2048m"`)
 - `container.memorySwapLimit` → maps to Docker `memswap_limit` (e.g., `"8g"`, `"512m"`, `"2048m"`)
 - `container.enabledAgents` → array of agent names to install in the sandbox (defaults to all: `["claude", "gemini", "codex"]`)
