@@ -350,6 +350,20 @@ get_agent_base_command() {
   jq -r '.[]' "${command_file}"
 }
 
+# Get enabled agents from merged settings. Defaults to all valid agents.
+# Args: $1 = merged settings JSON
+# Outputs agent names to stdout, one per line.
+get_enabled_agents() {
+  local merged_settings="${1}"
+  local enabled
+  enabled=$(echo "${merged_settings}" | jq -r '.container.enabledAgents // empty | .[]' 2>/dev/null) || true
+  if [[ -z "${enabled}" ]]; then
+    printf '%s\n' "${VALID_AGENTS[@]}"
+  else
+    echo "${enabled}"
+  fi
+}
+
 # Generate per-project docker-compose override file from merged settings
 generate_instance_compose() {
   local agent="${1}"
@@ -373,7 +387,7 @@ generate_instance_compose() {
   if [[ -n "${entries}" ]]; then
     while IFS= read -r mount_line; do
       [[ -n "${mount_line}" ]] && agent_volumes+=("${mount_line}")
-    done < <(resolve_file_exclusions "${project_dir}" "/workspace" "${entries}")
+    done < <(resolve_file_exclusions "${project_dir}" "${project_dir}" "${entries}")
   fi
 
   # Read file inclusions from merged settings (host_path -> container_path)
@@ -385,6 +399,10 @@ generate_instance_compose() {
     host_path="${host_path%/}"
     container_path="${container_path%/}"
     container_path=$(expand_env_vars "${container_path}")
+    # Expand tilde in container path using sandbox home
+    if [[ "${container_path}" == "~/"* ]]; then
+      container_path="${SANDBOX_HOME:-/home/agent}/${container_path#\~/}"
+    fi
     # Resolve host path
     host_path=$(resolve_host_path "${host_path}" "${project_dir}")
     # Validate host path exists
@@ -403,6 +421,10 @@ generate_instance_compose() {
     lib_host_path="${lib_host_path%/}"
     lib_container_path="${lib_container_path%/}"
     lib_container_path=$(expand_env_vars "${lib_container_path}")
+    # Expand tilde in container path using sandbox home
+    if [[ "${lib_container_path}" == "~/"* ]]; then
+      lib_container_path="${SANDBOX_HOME:-/home/agent}/${lib_container_path#\~/}"
+    fi
     lib_host_path=$(resolve_host_path "${lib_host_path}" "${project_dir}")
     if [[ ! -d "${lib_host_path}" ]]; then
       log_warn "library '${lib_host_path}' not found or not a directory, skipping"
@@ -423,17 +445,23 @@ generate_instance_compose() {
     fi
   done <<< "${lib_pairs}"
 
-  # Build merged whitelist: default + agent-specific + user domains
+  # Build merged whitelist: default + all enabled agents' domains + user domains
   local domains
   domains=$(echo "${merged_settings}" | jq -r '.network.domainWhitelist[]? // empty' 2>/dev/null) || true
   # Start with default allowed domains
   cp "${SCRIPT_DIR}/proxy/allowed-domains.txt" "${whitelist_file}"
-  # Append agent-specific domains
-  local agent_whitelist="${SCRIPT_DIR}/agents/${agent}/allowed-domains.txt"
-  if [[ -f "${agent_whitelist}" ]]; then
-    printf '\n' >> "${whitelist_file}"
-    cat "${agent_whitelist}" >> "${whitelist_file}"
-  fi
+  # Append domains from all enabled agents
+  local -a enabled_agents_list=()
+  while IFS= read -r ea; do
+    [[ -n "${ea}" ]] && enabled_agents_list+=("${ea}")
+  done < <(get_enabled_agents "${merged_settings}")
+  for enabled_agent in "${enabled_agents_list[@]}"; do
+    local agent_whitelist="${SCRIPT_DIR}/agents/${enabled_agent}/allowed-domains.txt"
+    if [[ -f "${agent_whitelist}" ]]; then
+      printf '\n' >> "${whitelist_file}"
+      cat "${agent_whitelist}" >> "${whitelist_file}"
+    fi
+  done
   # Append user-defined domains (from settings.json)
   if [[ -n "${domains}" ]]; then
     printf '\n' >> "${whitelist_file}"
@@ -466,6 +494,10 @@ generate_instance_compose() {
     docker_enabled="true"
   fi
 
+  # Read custom base image setting
+  local base_image
+  base_image=$(echo "${merged_settings}" | jq -r '.container.baseImage // empty' 2>/dev/null) || true
+
   # Read setup hook script from merged settings
   local setup_script_path
   setup_script_path=$(echo "${merged_settings}" | jq -r '.hooks.setup.script // empty' 2>/dev/null) || true
@@ -482,10 +514,20 @@ generate_instance_compose() {
 
   # Always create setup-scripts dir in temp (even if empty) so Dockerfile COPY works
   mkdir -p "${HOLE_TMP_DIR}/setup-scripts"
-  cp "${SCRIPT_DIR}/agents/${agent}/setup-scripts/.gitkeep" "${HOLE_TMP_DIR}/setup-scripts/.gitkeep"
+  touch "${HOLE_TMP_DIR}/setup-scripts/.gitkeep"
   if [[ "${has_setup_script}" == true ]]; then
     cp "${setup_script_path}" "${HOLE_TMP_DIR}/setup-scripts/setup.sh"
   fi
+
+  # Copy enabled agents' install scripts to build context
+  mkdir -p "${HOLE_TMP_DIR}/agent-installs"
+  for enabled_agent in "${enabled_agents_list[@]}"; do
+    local agent_src="${SCRIPT_DIR}/agents/${enabled_agent}"
+    local agent_dst="${HOLE_TMP_DIR}/agent-installs/${enabled_agent}"
+    mkdir -p "${agent_dst}"
+    [[ -f "${agent_src}/install-root.sh" ]] && cp "${agent_src}/install-root.sh" "${agent_dst}/"
+    [[ -f "${agent_src}/install-user.sh" ]] && cp "${agent_src}/install-user.sh" "${agent_dst}/"
+  done
 
   # Read environment variables from merged settings
   local env_pairs
@@ -520,18 +562,21 @@ generate_instance_compose() {
         echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
       fi
     fi
-    echo "  ${agent}:"
+    echo "  agent:"
     echo "    build:"
     echo "      context: ${HOLE_TMP_DIR}"
-    echo "      dockerfile: ${SCRIPT_DIR}/agents/${agent}/Dockerfile"
-    if [[ -n "${extra_packages}" || "${docker_enabled}" == "true" ]]; then
-      echo "      args:"
-      if [[ -n "${extra_packages}" ]]; then
-        echo "        EXTRA_PACKAGES: \"${extra_packages}\""
-      fi
-      if [[ "${docker_enabled}" == "true" ]]; then
-        echo "        DOCKER_ENABLED: \"true\""
-      fi
+    echo "      dockerfile: ${SCRIPT_DIR}/agents/Dockerfile"
+    echo "      args:"
+    echo "        AGENT_USERNAME: \"${SANDBOX_USERNAME:-agent}\""
+    echo "        AGENT_HOME: \"${SANDBOX_HOME:-/home/agent}\""
+    if [[ -n "${extra_packages}" ]]; then
+      echo "        EXTRA_PACKAGES: \"${extra_packages}\""
+    fi
+    if [[ -n "${base_image}" ]]; then
+      echo "        BASE_IMAGE: \"${base_image}\""
+    fi
+    if [[ "${docker_enabled}" == "true" ]]; then
+      echo "        DOCKER_ENABLED: \"true\""
     fi
     if [[ -n "${agent_mem_limit}" ]]; then
       echo "    mem_limit: ${agent_mem_limit}"
@@ -547,12 +592,15 @@ generate_instance_compose() {
     fi
     if [[ "${debug_mode}" == true ]]; then
       echo "    command: [\"bash\"]"
-    elif [[ "${has_agent_args}" == true ]]; then
+    else
       local -a base_cmd=()
       while IFS= read -r cmd_part; do
         base_cmd+=("${cmd_part}")
       done < <(get_agent_base_command "${agent}")
-      local -a full_cmd=("${base_cmd[@]}" "${agent_args[@]}")
+      local -a full_cmd=("${base_cmd[@]}")
+      if [[ "${has_agent_args}" == true ]]; then
+        full_cmd+=("${agent_args[@]}")
+      fi
       local cmd_str
       cmd_str=$(printf '%s\n' "${full_cmd[@]}" | jq -R . | jq -s -c .)
       echo "    command: ${cmd_str}"
@@ -591,7 +639,7 @@ generate_instance_compose() {
       echo "      - NO_PROXY=localhost,127.0.0.1"
       echo "      - no_proxy=localhost,127.0.0.1"
       echo "    volumes:"
-      echo "      - \${PROJECT_DIR:-.}:/workspace"
+      echo "      - \${PROJECT_DIR:-.}:\${PROJECT_DIR:-.}"
       echo "      - hole-sandbox-docker-data-${instance_name}:/var/lib/docker"
       # Mirror file exclusion volumes on DinD container
       for v in "${agent_volumes[@]}"; do
@@ -623,11 +671,10 @@ generate_instance_compose() {
 # Build the docker compose command array, including agent and optional override file
 create_compose_cmd() {
   local instance_name="${1}"
-  local agent="${2}"
-  local project_compose_file="${3}"
+  local project_compose_file="${2}"
 
   local proxy_compose_file="${SCRIPT_DIR}/proxy/docker-compose.yml"
-  local agent_compose_file="${SCRIPT_DIR}/agents/${agent}/docker-compose.yml"
+  local agent_compose_file="${SCRIPT_DIR}/agents/docker-compose.yml"
 
   COMPOSE_CMD=("${CONTAINER_RUNTIME}" compose -p "${instance_name}" -f "${COMPOSE_FILE}" -f "${proxy_compose_file}" -f "${agent_compose_file}")
   if [[ -f "${project_compose_file}" ]]; then
@@ -637,8 +684,7 @@ create_compose_cmd() {
 
 # Ensure the persistent agent home volume exists
 ensure_agent_volume() {
-  local agent="${1}"
-  local volume_name="hole-sandbox-agent-home-${agent}"
+  local volume_name="hole-sandbox-agent-home"
   if ! "${CONTAINER_RUNTIME}" volume inspect "${volume_name}" >/dev/null 2>&1; then
     log_info "Creating persistent volume: ${volume_name}"
     "${CONTAINER_RUNTIME}" volume create "${volume_name}"
@@ -734,10 +780,45 @@ cmd_start() {
   local merged_settings
   merged_settings=$(merge_settings "${GLOBAL_SETTINGS_FILE}" "${project_dir}/.hole/settings.json")
 
+  # Validate startup agent is in the enabled agents list
+  local agent_is_enabled=false
+  while IFS= read -r ea; do
+    [[ "${ea}" == "${agent}" ]] && agent_is_enabled=true
+  done < <(get_enabled_agents "${merged_settings}")
+  if [[ "${agent_is_enabled}" == false ]]; then
+    log_error "agent '${agent}' is not in the enabled agents list"
+    log_info "Enabled agents: $(get_enabled_agents "${merged_settings}" | tr '\n' ' ')"
+    log_info "Configure enabled agents via container.enabledAgents in settings.json"
+    exit 1
+  fi
+
+  # Expose runtime variables for docker-compose.yml
+  export PROJECT_NAME="${project_name}"
+  export PROJECT_DIR="${project_dir}"
+  if [ "$(uname -s)" = "Linux" ]; then # only needed on Linux, Docker Desktop (Windows, macOS)/Orbstack should solve the id mismatches automatically
+    local sandbox_uid
+    sandbox_uid=$(id -u)
+    export SANDBOX_UID="${sandbox_uid}"
+    local sandbox_gid
+    sandbox_gid=$(id -g)
+    export SANDBOX_GID="${sandbox_gid}"
+  fi
+  # Export host username and home path for container user creation (all platforms)
+  local sandbox_username="${USER:-agent}"
+  export SANDBOX_USERNAME="${sandbox_username}"
+  local sandbox_home="${HOME:-/home/agent}"
+  export SANDBOX_HOME="${sandbox_home}"
+  # Export trigger to reset docker image cache
+  if [[ "${rebuild}" == true ]]; then
+    local cachebust
+    cachebust="$(date +%s)"
+    export CACHEBUST="${cachebust}"
+  fi
+
   # Generate per-project compose override from merged settings
   local project_compose_file
   project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}" "${unrestricted_network}" "${with_docker}" ${agent_args[@]+"${agent_args[@]}"})
-  create_compose_cmd "${instance_name}" "${agent}" "${project_compose_file}"
+  create_compose_cmd "${instance_name}" "${project_compose_file}"
 
   if [[ "${debug_mode}" == true ]]; then
     log_warn "Debug mode: opening bash shell instead of agent CLI"
@@ -751,7 +832,7 @@ cmd_start() {
   check_for_update
 
   # Ensure persistent agent home volume exists
-  ensure_agent_volume "${agent}"
+  ensure_agent_volume
 
   # Ensure persistent Docker cache volume and seed per-instance volume
   local docker_enabled_vol
@@ -759,18 +840,6 @@ cmd_start() {
   if [[ "${with_docker}" == "true" || "${docker_enabled_vol}" == "true" ]]; then
     ensure_docker_cache_volume
     seed_docker_instance_volume "${instance_name}"
-  fi
-
-  # Expose runtime variables for docker-compose.yml
-  export PROJECT_NAME="${project_name}"
-  export PROJECT_DIR="${project_dir}"
-  if [ "$(uname -s)" = "Linux" ]; then # only needed on Linux, Docker Desktop (Windows, macOS)/Orbstack should solve the id mismatches automatically
-    local sandbox_uid
-    sandbox_uid=$(id -u)
-    export SANDBOX_UID="${sandbox_uid}"
-    local sandbox_gid
-    sandbox_gid=$(id -g)
-    export SANDBOX_GID="${sandbox_gid}"
   fi
 
   # Start proxy in detached mode with health check wait
@@ -791,12 +860,12 @@ cmd_start() {
   # Start agent service
   log_info "Starting ${agent} agent..."
   log_line
-  "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} "${agent}"
+  "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} agent
 
   # Attach terminal to the running agent
   log_info "Attaching to ${agent} agent..."
   log_line
-  "${CONTAINER_RUNTIME}" attach "${instance_name}-${agent}-1"
+  "${CONTAINER_RUNTIME}" attach "${instance_name}-agent-1"
 
   # Dump network access log if requested
   if [[ "${dump_network_access}" == true ]]; then
@@ -878,16 +947,14 @@ cmd_destroy() {
     log_info "No networks found"
   fi
 
-  # Remove cached agent images for all agent types
-  for agent in "${VALID_AGENTS[@]}"; do
-    local agent_image="hole-sandbox/agent-${agent}-${project_name}:latest"
-    if "${CONTAINER_RUNTIME}" image inspect "${agent_image}" >/dev/null 2>&1; then
-      log_info "Removing agent image: ${agent_image}"
-      "${CONTAINER_RUNTIME}" rmi "${agent_image}" || log_warn "Failed to remove image ${agent_image}"
-    else
-      log_info "No cached image found for agent '${agent}'"
-    fi
-  done
+  # Remove cached agent image (unified image for all agents)
+  local agent_image="hole-sandbox/agent-${project_name}:latest"
+  if "${CONTAINER_RUNTIME}" image inspect "${agent_image}" >/dev/null 2>&1; then
+    log_info "Removing agent image: ${agent_image}"
+    "${CONTAINER_RUNTIME}" rmi "${agent_image}" || log_warn "Failed to remove image ${agent_image}"
+  else
+    log_info "No cached agent image found"
+  fi
 
   # Remove cached proxy image
   local proxy_image="hole-sandbox/proxy-${project_name}:latest"

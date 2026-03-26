@@ -9,7 +9,7 @@ Hole is a CLI tool for creating and managing sandboxes for AI agents. It provide
 - File access control via Docker volume mounts
 - Isolated execution environment using Docker containers
 
-Currently supports Claude Code agent (with placeholder for Gemini agent).
+Supports Claude Code, Gemini CLI, and Codex CLI agents. All enabled agents are installed into a single unified sandbox image.
 
 ## Code guidelines
 
@@ -41,37 +41,40 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 
 **Two main services:**
 - `proxy`: Tinyproxy-based HTTP/HTTPS proxy that filters requests to allowed domains only (proxy/allowed-domains.txt)
-- `{agent}`: agent container e.g.: Claude Code CLI, running in Ubuntu 24.04 container with workspace access
+- `agent`: Unified agent container (Ubuntu 24.04) with all enabled agent CLIs installed. The startup agent determines the container command.
 
 ### Security Model
 
 **Network isolation:**
 - Agent containers cannot access internet directly
 - All HTTP/HTTPS traffic routed through proxy (via HTTP_PROXY/HTTPS_PROXY env vars)
-- Proxy uses domain whitelist filter with per-agent allowed domains (`agents/<agent>/allowed-domains.txt`)
+- Proxy uses domain whitelist filter merging domains from all enabled agents (`agents/<agent>/allowed-domains.txt`)
 - Default whitelist (`proxy/allowed-domains.txt`) is empty; each agent defines its own domains
-- Merge order: default → agent-specific → user-defined (from `settings.json`)
+- Merge order: default → all enabled agents' domains → user-defined (from `settings.json`)
 
 **File access control:**
-- Project directory mounted read-write at /workspace
-- Agent home directory (`/home/agent`) backed by a persistent Docker named volume (`hole-sandbox-agent-home-claude`). Credentials, settings, and CLI state survive sandbox teardown.
+- Project directory mounted read-write at the same absolute path as on the host (e.g., `/Users/me/project` on host → `/Users/me/project` in container)
+- Agent home directory mirrors host's `$HOME` path (e.g., `/Users/me` on macOS, `/home/me` on Linux), backed by a persistent Docker named volume (`hole-sandbox-agent-home`) shared across all agent types. Credentials, settings, and CLI state survive sandbox teardown.
 - Secret files/folders hidden by mounting /dev/null over them (e.g., .env, .env.local)
 - Exclusions configured via `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project), merged at runtime
 
 **Agent runs as non-root user:**
-- User `agent` created in container (agents/claude/Dockerfile:13)
-- Agent CLI installed in user space (~/.local/bin)
+- User `agent` created in container (agents/Dockerfile)
+- Agent CLIs installed via per-agent install scripts (`agents/<agent>/install-root.sh` or `install-user.sh`)
 
 ## Key Files
 
 - `hole.sh` - CLI tool for managing sandboxes (start command)
-- `docker-compose.yml` - Shared infrastructure (proxy service + networks)
-- `agents/claude/docker-compose.yml` - Claude agent service definition
-- `agents/claude/Dockerfile` - Claude agent image (Ubuntu 24.04 + curl, git, ripgrep, Claude CLI)
+- `docker-compose.yml` - Shared infrastructure (networks)
+- `agents/Dockerfile` - Unified agent image (Ubuntu 24.04 + all enabled agent CLIs)
+- `agents/docker-compose.yml` - Agent service definition (single `agent` service)
+- `agents/<agent>/install-root.sh` - Per-agent root-phase install script (optional)
+- `agents/<agent>/install-user.sh` - Per-agent user-phase install script (optional)
+- `agents/<agent>/command.json` - Per-agent startup command
+- `agents/<agent>/allowed-domains.txt` - Per-agent domain whitelist (regex patterns)
 - `proxy/Dockerfile` - Proxy image (Alpine + tinyproxy)
 - `proxy/tinyproxy.conf` - Proxy configuration (port 8888, filter enabled)
 - `proxy/allowed-domains.txt` - Default domain whitelist (empty; shared base for all agents)
-- `agents/<agent>/allowed-domains.txt` - Per-agent domain whitelist (regex patterns)
 
 ## Development Notes
 
@@ -98,7 +101,7 @@ Example `~/.hole/settings.json`:
   "files": {
     "exclude": [".env", ".env.local"],
     "include": {
-      "~/.npmrc": "/home/agent/.npmrc"
+      "~/.npmrc": "~/.npmrc"
     }
   },
   "network": {
@@ -114,8 +117,8 @@ If a project also has `.hole/settings.json` with `"files": { "exclude": [".env",
 ### Secret File/Folder Hiding
 
 Per-project exclusions are configured via `.hole/settings.json` in the project directory. The `files.exclude` array lists paths or glob patterns to hide from the agent. The script auto-detects whether each resolved path is a file or directory and generates the correct Docker volume mount:
-- **Files** → mounted as `/dev/null:/workspace/<path>:ro`
-- **Directories** → mounted as anonymous volume at `/workspace/<path>`
+- **Files** → mounted as `/dev/null:<project_dir>/<path>:ro`
+- **Directories** → mounted as anonymous volume at `<project_dir>/<path>`
 - **Non-existent paths** → warning printed to stderr, entry skipped
 
 Trailing slashes are stripped automatically (e.g., `node_modules/` → `node_modules`).
@@ -155,7 +158,7 @@ Example `.hole/settings.json`:
 {
   "files": {
     "include": {
-      "$PROJECT_PATH/shared": "/workspace/shared"
+      "$PROJECT_PATH/shared": "~/shared"
     }
   },
   "libraries": {
@@ -172,9 +175,9 @@ Additional host files or directories can be mounted into the sandbox via `files.
 {
   "files": {
     "include": {
-      "./shared-config": "/workspace/shared-config",
+      "./shared-config": "~/shared-config",
       "/home/user/data": "/data",
-      "~/.npmrc": "/home/agent/.npmrc"
+      "~/.npmrc": "~/.npmrc"
     }
   }
 }
@@ -185,7 +188,7 @@ Additional host files or directories can be mounted into the sandbox via `files.
   - `~/...` → expanded to `$HOME/...`
   - Relative paths → resolved against the project directory
   - Absolute paths → used as-is
-- **Container paths** must start with `/` or `$` (env var reference)
+- **Container paths** support `~/` (expanded to sandbox home), `/` (absolute), or `$` (env var reference)
 - **Non-existent host paths** → warning printed to stderr, entry skipped
 - **Trailing slashes** are stripped from both host and container paths
 - **Merge behavior**: Since `include` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
@@ -207,7 +210,7 @@ Additional directories can be mounted **read-only** into the sandbox via `librar
 ```
 
 - **Host path resolution**: same as `files.include` (`$VAR` / `${VAR}` → env var, `~/...` → `$HOME/...`, relative → project dir, absolute → as-is)
-- **Container paths** must start with `/` or `$` (env var reference)
+- **Container paths** support `~/` (expanded to sandbox home), `/` (absolute), or `$` (env var reference)
 - **Non-existent or non-directory host paths** → warning printed to stderr, entry skipped
 - **Always read-only**: libraries are mounted with `:ro`
 - **Merge behavior**: Since `libraries` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
@@ -218,7 +221,7 @@ Additional directories can be mounted **read-only** into the sandbox via `librar
 Per-project domain whitelists are configured via the `network.domainWhitelist` array in `.hole/settings.json`. This allows projects to access additional domains (e.g., npm registry, custom API endpoints) beyond the default allowed domains.
 
 - **Format**: Plain domain names (e.g., `registry.npmjs.org`). Dots are auto-escaped for tinyproxy's regex filter.
-- **Merge strategy**: Domains are merged in order: default (`proxy/allowed-domains.txt`) → agent-specific (`agents/<agent>/allowed-domains.txt`) → user-defined. All are included in the final whitelist.
+- **Merge strategy**: Domains are merged in order: default (`proxy/allowed-domains.txt`) → all enabled agents' domains (`agents/<agent>/allowed-domains.txt` for each enabled agent) → user-defined. All are included in the final whitelist.
 - **Storage**: The merged whitelist file is written to `${TMPDIR:-/tmp}/hole/projects/<project-name>/tinyproxy-domain-whitelist.txt` and bind-mounted into the proxy container.
 - **Cleanup**: The whitelist file is removed when the sandbox is destroyed on exit.
 
@@ -243,7 +246,7 @@ Additional apt packages can be installed via the `dependencies` array in `settin
 
 - **Format**: apt package names (`python3`) or with version pinning (`python3=3.10.6-1~22.04`)
 - **Merge behavior**: Arrays from global and project settings are concatenated and deduplicated (same as other array properties)
-- **Installation**: Packages are passed as the `EXTRA_PACKAGES` Docker build arg and installed during image build via a conditional `RUN` layer in the Dockerfile. They are baked into the per-project cached image (`hole-sandbox/agent-claude-${PROJECT_NAME}:latest`), so subsequent sandbox starts are instant.
+- **Installation**: Packages are passed as the `EXTRA_PACKAGES` Docker build arg and installed during image build via a conditional `RUN` layer in the Dockerfile. They are baked into the per-project cached image (`hole-sandbox/agent-${PROJECT_NAME}:latest`), so subsequent sandbox starts are instant.
 - **Rebuilding**: Dockerfile is automatically rebuild every start
 - **Network**: Since apt runs during `docker build` (with host networking), Ubuntu apt repository domains are **not** added to the sandbox proxy whitelist.
 
@@ -292,8 +295,10 @@ Container options can be configured via `container` in `settings.json` (both glo
 
 Supported options are
 
+- `container.baseImage` → custom base Docker image (defaults to `ubuntu:24.04`; must be Ubuntu 24.04-based)
 - `container.memoryLimit` → maps to Docker `mem_limit` (e.g., `"8g"`, `"512m"`, `"2048m"`)
 - `container.memorySwapLimit` → maps to Docker `memswap_limit` (e.g., `"8g"`, `"512m"`, `"2048m"`)
+- `container.enabledAgents` → array of agent names to install in the sandbox (defaults to all: `["claude", "gemini", "codex"]`)
 
 Example `.hole/settings.json`:
 ```json
@@ -330,10 +335,10 @@ A custom bash script can be run during the Docker image build via `hooks.setup.s
 
 ### Agent Home Volume
 
-Each agent type has a persistent Docker named volume for its home directory (`hole-sandbox-agent-home-<agent>`). Lifecycle:
+All agent types share a single persistent Docker named volume for their home directory (`hole-sandbox-agent-home`). The home directory path mirrors the host's `$HOME` (e.g., `/Users/me` on macOS, `/home/me` on Linux), and the container username matches the host's `$USER`. Lifecycle:
 
-- **Created** by `hole.sh ensure_agent_volume()` on first `start` for that agent
-- **Auto-populated** by Docker from the image's `/home/agent` contents on first use (CLI binary, `.bashrc`, etc.)
+- **Created** by `hole.sh ensure_agent_volume()` on first `start`
+- **Auto-populated** by Docker from the image's home directory contents on first use (CLI binary, `.bashrc`, etc.)
 - **Survives** sandbox teardown (`docker compose down --rmi local` does not remove named volumes)
 - **Declared `external: true`** in `docker-compose.yml` to prevent accidental removal by `docker compose down -v`
 - **Removed** by `uninstall.sh` during full uninstallation
@@ -342,8 +347,8 @@ Each agent type has a persistent Docker named volume for its home directory (`ho
 
 When `container.docker` is `true` in settings, the sandbox includes a `docker:dind` sidecar:
 
-- **Build arg**: `DOCKER_ENABLED` build arg triggers Docker CLI + Compose plugin installation in agent Dockerfiles
-- **Compose override**: `generate_instance_compose()` emits the `docker` service definition with proxy env vars, shared `/workspace` mount, mirrored file exclusion volumes, and a healthcheck (`docker info`)
+- **Build arg**: `DOCKER_ENABLED` build arg triggers Docker CLI + Compose plugin installation in the unified agent Dockerfile
+- **Compose override**: `generate_instance_compose()` emits the `docker` service definition with proxy env vars, shared project mount (at host absolute path), mirrored file exclusion volumes, and a healthcheck (`docker info`)
 - **Agent connection**: `DOCKER_HOST=tcp://docker:2375` (no TLS — internal network only)
 - **NO_PROXY**: Agent's `NO_PROXY`/`no_proxy` extended with `docker` to prevent Docker CLI TCP traffic from routing through the HTTP proxy
 - **Startup order**: DinD depends on proxy (`service_healthy`), agent depends on DinD (`service_healthy`)

@@ -57,8 +57,10 @@ hole start claude /path/to/project
 
 The sandbox is created from scratch each time and fully destroyed when you exit the agent CLI. Multiple sandboxes can run simultaneously for the same project.
 
-The entire home directory is mounted as a persistent Docker volume (each agent type has separate volume).
+The entire home directory is mounted as a persistent Docker volume (`hole-sandbox-agent-home`), shared across all agent types.
 This allows for credentials to persist across sandbox instances. On first run, the volume is created automatically.
+
+All enabled agents are installed into a single unified sandbox image. By default, all supported agents (claude, gemini, codex) are installed, so any agent can invoke other agents from within the sandbox. The `agent` parameter only determines the startup command.
 
 ### Flags
 
@@ -110,9 +112,9 @@ hole uninstall                # uninstall hole and optionally remove Docker reso
 
 **Requirements:** `curl` or `wget`, `tar`, [`docker`](https://www.docker.com/get-started/) or [`podman`](https://podman.io/docs/installation) (with compose plugin), [`jq`](https://jqlang.github.io/jq/download/), [`jv`](https://github.com/santhosh-tekuri/jsonschema/releases)
 
-**Optional:** `flock` (from `util-linux`) — enables persistent Docker image caching across sandbox restarts when using Docker-in-Docker. Pre-installed on most Linux distributions; on macOS, install via `brew install util-linux`.
+> _Note: `jv` utility documentation mentions installation through golang, you don't have to do that, you can download the binary from their [release page](https://github.com/santhosh-tekuri/jsonschema/releases) and place it in your bin folder you have in your PATH._
 
-> _Note: `jv` utility documentation mentions installation through golang, you don't have to do that, you can download the binary from their [release page](https://github.com/santhosh-tekuri/jsonschema/releases)._
+**Optional:** `flock` (from `util-linux`) — enables persistent Docker image caching across sandbox restarts when using Docker-in-Docker. Pre-installed on most Linux distributions; on macOS, install via `brew install util-linux`.
 
 **Container runtime:** Hole auto-detects Docker or Podman (Docker is preferred when both are available). To override the auto-detection, set the `HOLE_RUNTIME` environment variable:
 
@@ -177,8 +179,8 @@ Add following includes to `~/.hole/settings.json`:
 {
     "files": {
         "include": {
-            "~/.claude/statusline-command.sh": "/home/agent/.claude/statusline-command.sh",
-            "~/.claude/settings.json": "/home/agent/.claude/settings.json"
+            "~/.claude/statusline-command.sh": "~/.claude/statusline-command.sh",
+            "~/.claude/settings.json": "~/.claude/settings.json"
         }
     }
 }
@@ -194,7 +196,7 @@ Add following includes to `~/.hole/settings.json`:
 {
     "files": {
         "include": {
-            "~/.claude/skills": "/home/agent/.claude/skills"
+            "~/.claude/skills": "~/.claude/skills"
         }
     }
 }
@@ -210,7 +212,7 @@ Add following includes to `~/.hole/settings.json`:
 {
     "files": {
         "include": {
-            "~/.claude/settings.json": "/home/agent/.claude/settings.json"
+            "~/.claude/settings.json": "~/.claude/settings.json"
         }
     }
 }
@@ -307,23 +309,21 @@ Undefined variables produce a warning and are left unexpanded.
 
 ### File inclusions
 
-Mount additional host files or directories into the sandbox. Keys are host paths, values are absolute container paths:
+Mount additional host files or directories into the sandbox. Keys are host paths, values are container paths:
 
 ```json
 {
   "files": {
     "include": {
-      "~/.npmrc": "/home/agent/.npmrc",
-      "./shared-config": "/workspace/shared-config",
+      "~/.npmrc": "~/.npmrc",
+      "./shared-config": "~/shared-config",
       "/home/user/data": "/data"
     }
   }
 }
 ```
 
-Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`). Host paths also support tilde
-expansion (`~/`), relative paths (resolved 
-against the project directory). 
+Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`) and tilde expansion (`~/`). Host paths also support relative paths (resolved against the project directory). Container `~/` expands to the sandbox home directory (which mirrors the host's `$HOME`). 
 
 Non-existent paths are skipped with a warning. Undefined variables produce a warning and are left unexpanded.
 
@@ -341,8 +341,8 @@ Mount additional directories read-only into the sandbox. This is useful for givi
 }
 ```
 
-Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`). Host paths also support tilde
-expansion (`~/`), relative paths (resolved
+Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`) and tilde
+expansion (`~/`). Host paths also support relative paths (resolved
 against the project directory).
 
 Non-existent paths are skipped with a warning. Undefined variables produce a warning and are left unexpanded.
@@ -390,8 +390,22 @@ Configure container resource limits:
 }
 ```
 
+- `baseImage` — custom base Docker image for the agent container (defaults to `ubuntu:24.04`). The image must be based on Ubuntu 24.04; other base images may work but are not tested.
 - `memoryLimit` — Docker `mem_limit` (e.g. `"8g"`, `"512m"`)
 - `memorySwapLimit` — Docker `memswap_limit` (e.g. `"8g"`, `"512m"`)
+- `enabledAgents` — array of agent names to install in the sandbox (defaults to all: `["claude", "gemini", "codex"]`)
+
+To install only specific agents (e.g., to reduce image size):
+
+```json
+{
+  "container": {
+    "enabledAgents": ["claude", "gemini"]
+  }
+}
+```
+
+The startup agent must be in the enabled list, otherwise `hole start` will fail with an error.
 
 ### Docker-in-Docker
 
@@ -435,9 +449,9 @@ For other registries (GitHub Container Registry, AWS ECR, etc.), add the corresp
 
 **Accessing services:** Containers started inside DinD are reachable from the agent at hostname `docker`, not `localhost`. For example, if you run PostgreSQL on port 5432 inside DinD, connect to `docker:5432` from the agent. When exposing ports in `docker run` or `docker-compose.yml`, bind to all interfaces (e.g., `3307:3306`) rather than localhost (e.g., `127.0.0.1:3307:3306`), because the agent connects to the DinD sidecar over the Docker network, not via loopback.
 
-**Workspace bind mounts:** The project directory is mounted at `/workspace` in both the agent and DinD containers, so bind mounts in user `docker-compose.yml` files resolve correctly.
+**Workspace bind mounts:** The project directory is mounted at the same absolute path as on the host in both the agent and DinD containers, so bind mounts in user `docker-compose.yml` files resolve correctly.
 
-**File exclusions:** Exclusion volumes from the agent are mirrored on the DinD container's `/workspace` mount, so `docker compose` files cannot access excluded secrets.
+**File exclusions:** Exclusion volumes from the agent are mirrored on the DinD container's project mount, so `docker compose` files cannot access excluded secrets.
 
 **Persistent image cache:** Each DinD sidecar gets its own ephemeral instance volume (`hole-sandbox-docker-data-<instance>`), seeded on start from a global cache volume (`hole-sandbox-docker-cache`). On teardown the instance data is synced back to the cache and the instance volume is removed. This means images survive sandbox teardown (via the cache) and do not need to be re-downloaded, while multiple sandboxes (even across different projects) can run simultaneously without conflicts (each has its own `/var/lib/docker`). Images pulled in one project are available to seed any other project. The cache volume is preserved during `hole update` (soft-wipe) and only removed on full `hole uninstall`.
 
@@ -480,8 +494,8 @@ Run a custom bash script during the Docker image build to perform system-level s
 
 The script runs as **root** during the image build, after dependency installation. Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
 
-**Important:** The agent home directory (`/home/agent`) is backed by a persistent Docker volume that overrides image contents.
-Do not install anything to `/home/agent` in the setup script — it will be hidden by the volume mount.
+**Important:** The agent home directory (mirrors host's `$HOME`, e.g., `/Users/me` on macOS) is backed by a persistent Docker volume that overrides image contents.
+Do not install anything to the agent home directory in the setup script — it will be hidden by the volume mount.
 
 Use `--rebuild` to force a fresh build if needed.
 
@@ -553,9 +567,9 @@ With that information, create file `~/.m2/agent-toolchains.xml` and set it up:
 {
   "files": {
     "include": {
-      "~/.m2/repository": "/home/agent/.m2/repository",
-      "~/.m2/agent-settings.xml": "/home/agent/.m2/settings.xml",
-      "~/.m2/agent-toolchains.xml": "/home/agent/.m2/toolchains.xml" // optional, only if you use toolchains
+      "~/.m2/repository": "~/.m2/repository",
+      "~/.m2/agent-settings.xml": "~/.m2/settings.xml",
+      "~/.m2/agent-toolchains.xml": "~/.m2/toolchains.xml" // optional, only if you use toolchains
     }
   }
 }

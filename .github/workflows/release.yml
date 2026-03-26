@@ -44,27 +44,21 @@ jobs:
           cp hole.sh                          hole/
           cp docker-compose.yml               hole/
           cp uninstall.sh                     hole/
+          mkdir -p hole/agents
+          cp agents/Dockerfile                    hole/agents/
+          cp agents/docker-compose.yml            hole/agents/
           mkdir -p hole/agents/claude
-          mkdir -p hole/agents/claude/setup-scripts
-          cp agents/claude/Dockerfile             hole/agents/claude/
-          cp agents/claude/docker-compose.yml     hole/agents/claude/
-          cp agents/claude/setup-scripts/.gitkeep hole/agents/claude/
+          cp agents/claude/install-user.sh        hole/agents/claude/
           cp agents/claude/allowed-domains.txt    hole/agents/claude/
           cp agents/claude/command.json           hole/agents/claude/
           mkdir -p hole/agents/gemini
-          mkdir -p hole/agents/gemini/setup-scripts
-          cp agents/gemini/Dockerfile             hole/agents/gemini/
-          cp agents/gemini/docker-compose.yml     hole/agents/gemini/
-          cp agents/gemini/setup-scripts/.gitkeep hole/agents/gemini/setup-scripts/
+          cp agents/gemini/install-root.sh        hole/agents/gemini/
           cp agents/gemini/allowed-domains.txt    hole/agents/gemini/
           cp agents/gemini/command.json           hole/agents/gemini/
           mkdir -p hole/agents/codex
-          mkdir -p hole/agents/codex/setup-scripts
-          cp agents/codex/Dockerfile             hole/agents/codex/
-          cp agents/codex/docker-compose.yml     hole/agents/codex/
-          cp agents/codex/setup-scripts/.gitkeep hole/agents/codex/setup-scripts/
+          cp agents/codex/install-root.sh         hole/agents/codex/
           cp agents/codex/allowed-domains.txt     hole/agents/codex/
-          cp agents/codex/command.json           hole/agents/codex/
+          cp agents/codex/command.json            hole/agents/codex/
           mkdir -p hole/proxy
           cp proxy/Dockerfile                 hole/proxy/
           cp proxy/docker-compose.yml         hole/proxy/

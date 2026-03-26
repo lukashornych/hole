@@ -22,7 +22,7 @@
           "additionalProperties": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(/|\\$)"
+            "pattern": "^(/|~|\\$)"
           },
           "propertyNames": {
             "minLength": 1
@@ -58,6 +58,18 @@
         },
         "docker": {
           "type": "boolean"
+        },
+        "baseImage": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enabledAgents": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["claude", "gemini", "codex"]
+          },
+          "uniqueItems": true
         }
       }
     },
@@ -82,7 +94,7 @@
       "additionalProperties": {
         "type": "string",
         "minLength": 1,
-        "pattern": "^(/|\\$)"
+        "pattern": "^(/|~|\\$)"
       },
       "propertyNames": {
         "minLength": 1
