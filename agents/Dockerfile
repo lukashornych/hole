@@ -44,14 +44,6 @@ RUN if [ -n "$DOCKER_ENABLED" ]; then \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 
-## User setup hook script
-COPY setup-scripts/ /tmp/setup-scripts/
-RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
-      chmod +x /tmp/setup-scripts/setup.sh \
-      && /tmp/setup-scripts/setup.sh; \
-    fi \
-    && rm -rf /tmp/setup-scripts
-
 # Agent CLI installations (root phase — global packages)
 COPY agent-installs/ /tmp/agent-installs/
 RUN for agent_dir in /tmp/agent-installs/*/; do \
@@ -76,6 +68,14 @@ RUN for agent_dir in /tmp/agent-installs/*/; do \
       fi; \
     done
 
+## Prepare user setup hook script
+COPY setup-scripts/ /tmp/setup-scripts/
+RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
+      chown "${AGENT_USERNAME}" /tmp/setup-scripts/setup.sh && \
+      chmod +x /tmp/setup-scripts/setup.sh; \
+    fi \
+    && rm -rf /tmp/setup-scripts
+
 USER ${AGENT_USERNAME}
 
 # Agent CLI installations (user phase — user-space tools)
@@ -87,7 +87,16 @@ RUN for agent_dir in /tmp/agent-installs/*/; do \
     done
 ENV PATH="${AGENT_HOME}/.local/bin:$PATH"
 
+## User setup hook script
+COPY setup-scripts/ /tmp/setup-scripts/
+RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
+      /tmp/setup-scripts/setup.sh; \
+    fi
+
 # Cleanup
 USER root
+
 RUN rm -rf /tmp/agent-installs
+RUN rm -rf /tmp/setup-scripts
+
 USER ${AGENT_USERNAME}

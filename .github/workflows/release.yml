@@ -52,11 +52,11 @@ jobs:
           cp agents/claude/allowed-domains.txt    hole/agents/claude/
           cp agents/claude/command.json           hole/agents/claude/
           mkdir -p hole/agents/gemini
-          cp agents/gemini/install-root.sh        hole/agents/gemini/
+          cp agents/gemini/install-user.sh        hole/agents/gemini/
           cp agents/gemini/allowed-domains.txt    hole/agents/gemini/
           cp agents/gemini/command.json           hole/agents/gemini/
           mkdir -p hole/agents/codex
-          cp agents/codex/install-root.sh         hole/agents/codex/
+          cp agents/codex/install-user.sh         hole/agents/codex/
           cp agents/codex/allowed-domains.txt     hole/agents/codex/
           cp agents/codex/command.json            hole/agents/codex/
           mkdir -p hole/proxy
