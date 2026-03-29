@@ -287,7 +287,7 @@ Custom environment variables can be defined via `environment` in `settings.json`
 ```
 
 - **Merge behavior**: Since `environment` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
-- Variables are injected into the agent container's `environment` section in the compose override
+- Variables are injected into the agent container's `environment` section in the compose override. When Docker-in-Docker is enabled, they are also passed to the DinD sidecar container.
 
 ### Container Settings
 

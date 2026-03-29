@@ -21,6 +21,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     jq \
+    nano \
+    vi \
     ripgrep \
     ca-certificates \
     gnupg \
@@ -35,14 +37,11 @@ RUN if [ -n "$EXTRA_PACKAGES" ]; then \
     fi
 
 ## Dependencies to access Docker-in-Docker
-ARG DOCKER_ENABLED=""
-RUN if [ -n "$DOCKER_ENABLED" ]; then \
-      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
       && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list \
       && apt-get update \
       && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
-      && rm -rf /var/lib/apt/lists/*; \
-    fi
+      && rm -rf /var/lib/apt/lists/*;
 
 # Agent CLI installations (root phase — global packages)
 COPY agent-installs/ /tmp/agent-installs/

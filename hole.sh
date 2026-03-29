@@ -537,6 +537,7 @@ generate_instance_compose() {
     [[ -z "${env_key}" ]] && continue
     agent_env_vars+=("      - ${env_key}=${env_value}")
   done <<< "${env_pairs}"
+  local -a user_env_vars=("${agent_env_vars[@]}")
 
   # Add Docker-in-Docker env vars for the agent
   if [[ "${docker_enabled}" == "true" ]]; then
@@ -574,9 +575,6 @@ generate_instance_compose() {
     fi
     if [[ -n "${base_image}" ]]; then
       echo "        BASE_IMAGE: \"${base_image}\""
-    fi
-    if [[ "${docker_enabled}" == "true" ]]; then
-      echo "        DOCKER_ENABLED: \"true\""
     fi
     if [[ -n "${agent_mem_limit}" ]]; then
       echo "    mem_limit: ${agent_mem_limit}"
@@ -638,6 +636,9 @@ generate_instance_compose() {
       echo "      - https_proxy=http://proxy:8888"
       echo "      - NO_PROXY=localhost,127.0.0.1"
       echo "      - no_proxy=localhost,127.0.0.1"
+      for e in "${user_env_vars[@]}"; do
+        echo "${e}"
+      done
       echo "    volumes:"
       echo "      - \${PROJECT_DIR:-.}:\${PROJECT_DIR:-.}"
       echo "      - hole-sandbox-docker-data-${instance_name}:/var/lib/docker"

@@ -472,7 +472,7 @@ Define custom environment variables for the agent container:
 }
 ```
 
-Variables are set in the agent container at startup. Since `environment` is an object, global and project settings are deep-merged — unique keys from both are combined, and if both define the same key, the project value wins.
+Variables are set in the agent container at startup. When Docker-in-Docker is enabled, these variables are also passed to the DinD sidecar container. Since `environment` is an object, global and project settings are deep-merged — unique keys from both are combined, and if both define the same key, the project value wins.
 
 ### Hooks
 
@@ -492,7 +492,7 @@ Run a custom bash script during the Docker image build to perform system-level s
 }
 ```
 
-The script runs as **root** during the image build, after dependency installation. Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
+The script runs as the agent user during the image build, after dependency installation. Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
 
 **Important:** The agent home directory (mirrors host's `$HOME`, e.g., `/Users/me` on macOS) is backed by a persistent Docker volume that overrides image contents.
 Do not install anything to the agent home directory in the setup script — it will be hidden by the volume mount.
