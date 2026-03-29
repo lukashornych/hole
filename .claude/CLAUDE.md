@@ -197,14 +197,17 @@ Each entry becomes a bind mount in the agent container: `{resolved_host_path}:{c
 
 ### Libraries
 
-Additional directories can be mounted **read-only** into the sandbox via `libraries` in `settings.json` (both global and per-project). This is an object where keys are host paths and values are absolute container paths:
+Additional directories can be mounted into the sandbox via `libraries` in `settings.json` (both global and per-project). This is an object where keys are host paths and values are either a container path string (read-only) or an object with `path` and optional `readwrite` flag:
 
 ```json
 {
   "libraries": {
     "~/repos/shared-utils": "/libs/shared-utils",
     "/opt/company/sdk": "/libs/company-sdk",
-    "./sibling-project": "/libs/sibling"
+    "./sibling-project": {
+      "path": "/libs/sibling",
+      "readwrite": true
+    }
   }
 }
 ```
@@ -212,7 +215,7 @@ Additional directories can be mounted **read-only** into the sandbox via `librar
 - **Host path resolution**: same as `files.include` (`$VAR` / `${VAR}` → env var, `~/...` → `$HOME/...`, relative → project dir, absolute → as-is)
 - **Container paths** support `~/` (expanded to sandbox home), `/` (absolute), or `$` (env var reference)
 - **Non-existent or non-directory host paths** → warning printed to stderr, entry skipped
-- **Always read-only**: libraries are mounted with `:ro`
+- **Read-only by default**: libraries are mounted with `:ro` unless `"readwrite": true` is set
 - **Merge behavior**: Since `libraries` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
 - **Per-library exclusions**: If a library has its own `.hole/settings.json`, its `files.exclude` entries are resolved against the library source directory and mounted scoped to the library's container mount point. Other settings in the library's `.hole/settings.json` are ignored.
 

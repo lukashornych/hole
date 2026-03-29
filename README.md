@@ -329,14 +329,17 @@ Non-existent paths are skipped with a warning. Undefined variables produce a war
 
 ### Libraries
 
-Mount additional directories read-only into the sandbox. This is useful for giving the agent access to shared libraries, SDKs, or sibling projects as reference material. Keys are host paths, values are absolute container paths:
+Mount additional directories into the sandbox. By default, libraries are mounted **read-only**. This is useful for giving the agent access to shared libraries, SDKs, or sibling projects as reference material. Keys are host paths, values are either a container path string (read-only) or an object with `path` and optional `readwrite` flag:
 
 ```json
 {
   "libraries": {
     "~/repos/shared-utils": "/libs/shared-utils",
     "/opt/company/sdk": "/libs/company-sdk",
-    "./sibling-project": "/libs/sibling"
+    "./sibling-project": {
+      "path": "/libs/sibling",
+      "readwrite": true
+    }
   }
 }
 ```
@@ -347,7 +350,7 @@ against the project directory).
 
 Non-existent paths are skipped with a warning. Undefined variables produce a warning and are left unexpanded.
 
-Libraries are always mounted **read-only**.
+Libraries are mounted **read-only** by default. Set `"readwrite": true` to mount a library with write access.
 
 If a library has its own `.hole/settings.json`, its `files.exclude` entries are applied scoped to that library's mount point (not mixed with the main project's exclusions). Other settings in the library's `.hole/settings.json` are ignored.
 

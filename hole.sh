@@ -413,10 +413,15 @@ generate_instance_compose() {
     agent_volumes+=("      - ${host_path}:${container_path}")
   done <<< "${include_pairs}"
 
-  # Process libraries: mount read-only + apply per-library file exclusions
+  # Process libraries: mount read-only (default) or read-write + apply per-library file exclusions
   local lib_pairs
-  lib_pairs=$(echo "${merged_settings}" | jq -r '.libraries // {} | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null) || true
-  while IFS=$'\t' read -r lib_host_path lib_container_path; do
+  lib_pairs=$(echo "${merged_settings}" | jq -r '
+    .libraries // {} | to_entries[] |
+    if (.value | type) == "string" then "\(.key)\t\(.value)\tfalse"
+    else "\(.key)\t\(.value.path)\t\(.value.readwrite // false)"
+    end
+  ' 2>/dev/null) || true
+  while IFS=$'\t' read -r lib_host_path lib_container_path lib_readwrite; do
     [[ -z "${lib_host_path}" ]] && continue
     lib_host_path="${lib_host_path%/}"
     lib_container_path="${lib_container_path%/}"
@@ -430,7 +435,11 @@ generate_instance_compose() {
       log_warn "library '${lib_host_path}' not found or not a directory, skipping"
       continue
     fi
-    agent_volumes+=("      - ${lib_host_path}:${lib_container_path}:ro")
+    if [[ "${lib_readwrite}" == "true" ]]; then
+      agent_volumes+=("      - ${lib_host_path}:${lib_container_path}")
+    else
+      agent_volumes+=("      - ${lib_host_path}:${lib_container_path}:ro")
+    fi
     # Apply library's own .hole/settings.json file exclusions (scoped to library mount)
     local lib_settings_file="${lib_host_path}/.hole/settings.json"
     if [[ -f "${lib_settings_file}" ]]; then
