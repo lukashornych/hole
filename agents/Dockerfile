@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y \
     git \
     jq \
     nano \
-    vi \
+    vim \
     ripgrep \
     ca-certificates \
     gnupg \
