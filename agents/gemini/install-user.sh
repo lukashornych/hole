@@ -12,5 +12,6 @@ fi
 . "${NVM_DIR}/nvm.sh"
 
 nvm install 22
+nvm use 22
 
 npm install -g @google/gemini-cli

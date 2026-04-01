@@ -521,6 +521,10 @@ generate_instance_compose() {
     fi
   fi
 
+  # Copy entrypoint.sh to build context
+  mkdir -p "${HOLE_TMP_DIR}"
+  cp "${SCRIPT_DIR}/agents/entrypoint.sh" "${HOLE_TMP_DIR}/entrypoint.sh"
+
   # Always create setup-scripts dir in temp (even if empty) so Dockerfile COPY works
   mkdir -p "${HOLE_TMP_DIR}/setup-scripts"
   touch "${HOLE_TMP_DIR}/setup-scripts/.gitkeep"
@@ -692,15 +696,6 @@ create_compose_cmd() {
   fi
 }
 
-# Ensure the persistent agent home volume exists
-ensure_agent_volume() {
-  local volume_name="hole-sandbox-agent-home"
-  if ! "${CONTAINER_RUNTIME}" volume inspect "${volume_name}" >/dev/null 2>&1; then
-    log_info "Creating persistent volume: ${volume_name}"
-    "${CONTAINER_RUNTIME}" volume create "${volume_name}"
-  fi
-}
-
 # Ensure the persistent Docker cache volume exists (seed for per-instance DinD volumes)
 ensure_docker_cache_volume() {
   local volume_name="hole-sandbox-docker-cache"
@@ -820,6 +815,8 @@ cmd_start() {
   export SANDBOX_HOME="${sandbox_home}"
   # Export trigger to reset docker image cache
   if [[ "${rebuild}" == true ]]; then
+    export SANDBOX_REBUILD="true"
+
     local cachebust
     cachebust="$(date +%s)"
     export CACHEBUST="${cachebust}"
@@ -840,9 +837,6 @@ cmd_start() {
   log_line
 
   check_for_update
-
-  # Ensure persistent agent home volume exists
-  ensure_agent_volume
 
   # Ensure persistent Docker cache volume and seed per-instance volume
   local docker_enabled_vol

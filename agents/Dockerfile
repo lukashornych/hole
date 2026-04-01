@@ -72,30 +72,35 @@ COPY setup-scripts/ /tmp/setup-scripts/
 RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
       chown "${AGENT_USERNAME}" /tmp/setup-scripts/setup.sh && \
       chmod +x /tmp/setup-scripts/setup.sh; \
-    fi \
-    && rm -rf /tmp/setup-scripts
+    fi
 
 USER ${AGENT_USERNAME}
 
-# Agent CLI installations (user phase — user-space tools)
+# Execute Agent CLI installations (user phase — user-space tools)
 RUN for agent_dir in /tmp/agent-installs/*/; do \
       agent=$(basename "${agent_dir}"); \
       if [ -f "/tmp/agent-installs/${agent}/install-user.sh" ]; then \
         "/tmp/agent-installs/${agent}/install-user.sh"; \
       fi; \
     done
-ENV PATH="${AGENT_HOME}/.local/bin:$PATH"
 
-## User setup hook script
-COPY setup-scripts/ /tmp/setup-scripts/
+## Execute User setup hook script
 RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
       /tmp/setup-scripts/setup.sh; \
     fi
 
-# Cleanup
 USER root
 
+# Cleanup install scripts
 RUN rm -rf /tmp/agent-installs
 RUN rm -rf /tmp/setup-scripts
 
+# Prepare entrypoint script
+COPY entrypoint.sh /tmp/entrypoint.sh
+RUN chmod +x /tmp/entrypoint.sh
+
 USER ${AGENT_USERNAME}
+
+ENV PATH="${AGENT_HOME}/.local/bin:$PATH"
+
+ENTRYPOINT ["/tmp/entrypoint.sh"]

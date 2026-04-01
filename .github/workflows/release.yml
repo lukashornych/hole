@@ -47,6 +47,7 @@ jobs:
           mkdir -p hole/agents
           cp agents/Dockerfile                    hole/agents/
           cp agents/docker-compose.yml            hole/agents/
+          cp agents/entrypoint.sh                hole/agents/
           mkdir -p hole/agents/claude
           cp agents/claude/install-user.sh        hole/agents/claude/
           cp agents/claude/allowed-domains.txt    hole/agents/claude/

@@ -57,9 +57,6 @@ hole start claude /path/to/project
 
 The sandbox is created from scratch each time and fully destroyed when you exit the agent CLI. Multiple sandboxes can run simultaneously for the same project.
 
-The entire home directory is mounted as a persistent Docker volume (`hole-sandbox-agent-home`), shared across all agent types.
-This allows for credentials to persist across sandbox instances. On first run, the volume is created automatically.
-
 All enabled agents are installed into a single unified sandbox image. By default, all supported agents (claude, gemini, codex) are installed, so any agent can invoke other agents from within the sandbox. The `agent` parameter only determines the startup command.
 
 ### Flags
@@ -169,6 +166,15 @@ hole start claude .
 hole start claude /path/to/project
 ```
 
+#### Authentication
+
+The preferred authentication method is an API key. You can obtain one using Claude website or by running
+```shell
+claude setup-token
+```
+
+Pass the obtained token as env. variable to the Hole [`settings.json`](#environment-variables) file under variable name `ANTHROPIC_AUTH_TOKEN`.
+
 #### Example configurations
 
 ##### Passing custom status line script
@@ -245,7 +251,12 @@ hole start gemini .
 hole start gemini /path/to/project
 ```
 
-> **Note:** there is an issue with initial login where it freezes the agent after a successful login. To work around this,
+#### Authentication
+
+The preferred authentication method is an API key. You can obtain one using Google AI Studio.
+Pass the obtained token as env. variable to the Hole [`settings.json`](#environment-variables) file under variable name `GEMINI_API_KEY`.
+
+> **Note:** there is an issue with initial login when using OAuth method where it freezes the agent after a successful login. To work around this,
 > start the agent normally and login, then in another terminal in same project run `hole destroy {project path}`. Then
 > you can start the agent again, and you should be logged in.
 
@@ -258,6 +269,11 @@ hole start codex .
 # or
 hole start codex /path/to/project
 ```
+
+#### Authentication
+
+The preferred authentication method is an API key. You can obtain one using Codex website.
+Pass the obtained token as env. variable to the Hole [`settings.json`](#environment-variables) file.
 
 ## Configuration
 
