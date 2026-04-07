@@ -77,6 +77,7 @@ RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
 USER ${AGENT_USERNAME}
 
 # Execute Agent CLI installations (user phase — user-space tools)
+ENV HOME=${AGENT_HOME}
 RUN for agent_dir in /tmp/agent-installs/*/; do \
       agent=$(basename "${agent_dir}"); \
       if [ -f "/tmp/agent-installs/${agent}/install-user.sh" ]; then \
