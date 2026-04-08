@@ -37,6 +37,14 @@
         "domainWhitelist": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 }
+        },
+        "hostGatewayDomains": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$"
+          }
         }
       }
     },

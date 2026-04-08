@@ -60,6 +60,11 @@ jobs:
           cp agents/codex/install-user.sh         hole/agents/codex/
           cp agents/codex/allowed-domains.txt     hole/agents/codex/
           cp agents/codex/command.json            hole/agents/codex/
+          mkdir -p hole/dns
+          cp dns/Dockerfile                  hole/dns/
+          cp dns/docker-compose.yml          hole/dns/
+          cp dns/Corefile                    hole/dns/
+          cp dns/entrypoint.sh              hole/dns/
           mkdir -p hole/proxy
           cp proxy/Dockerfile                 hole/proxy/
           cp proxy/docker-compose.yml         hole/proxy/

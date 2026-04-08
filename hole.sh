@@ -216,6 +216,25 @@ generate_instance_id() {
   LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6; echo
 }
 
+# Find the first available /24 subnet index in the 172.28.{1-254}.0/24 range
+# by inspecting all existing Docker networks.
+find_available_subnet_index() {
+  local used_subnets
+  used_subnets=$("${CONTAINER_RUNTIME}" network ls -q 2>/dev/null \
+    | xargs -r "${CONTAINER_RUNTIME}" network inspect --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null) || true
+
+  local index
+  for index in $(seq 1 254); do
+    if [[ "${used_subnets}" != *"172.28.${index}.0/24"* ]]; then
+      echo "${index}"
+      return 0
+    fi
+  done
+
+  log_error "No available subnet found (all 254 slots in 172.28.x.0/24 are in use)"
+  exit 1
+}
+
 # Check if a string contains glob metacharacters (*, ?, [)
 has_glob_chars() {
   [[ "${1}" == *[\*\?\[]* ]]
@@ -373,12 +392,14 @@ generate_instance_compose() {
   local debug_mode="${5:-false}"
   local unrestricted_network="${6:-false}"
   local with_docker="${7:-false}"
-  local agent_args=("${@:8}")
+  local subnet="${8}"
+  local dns_ip="${9}"
+  local agent_args=("${@:10}")
 
   local compose_file="${HOLE_TMP_DIR}/docker-compose.yml"
 
   local agent_volumes=()
-  local has_custom_domains=false
+  # Whitelist is always generated (default + agent-specific + user + host-gateway domains)
   local whitelist_file="${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt"
 
   # Read exclusions from merged settings and resolve to volume mounts
@@ -454,7 +475,15 @@ generate_instance_compose() {
     fi
   done <<< "${lib_pairs}"
 
-  # Build merged whitelist: default + all enabled agents' domains + user domains
+  # Read host gateway domains early (needed for both whitelist and Corefile)
+  local host_gateway_domains
+  host_gateway_domains=$(echo "${merged_settings}" | jq -r '.network.hostGatewayDomains[]? // empty' 2>/dev/null) || true
+  local has_host_gateway_domains=false
+  if [[ -n "${host_gateway_domains}" ]]; then
+    has_host_gateway_domains=true
+  fi
+
+  # Build merged whitelist: default + all enabled agents' domains + user domains + host gateway domains
   local domains
   domains=$(echo "${merged_settings}" | jq -r '.network.domainWhitelist[]? // empty' 2>/dev/null) || true
   # Start with default allowed domains
@@ -480,7 +509,62 @@ generate_instance_compose() {
       echo "${domain//./\\.}" >> "${whitelist_file}"
     done <<< "${domains}"
   fi
-  has_custom_domains=true
+  # Append host gateway domains (auto-whitelisted so proxy allows traffic to them)
+  if [[ "${has_host_gateway_domains}" == true ]]; then
+    printf '\n' >> "${whitelist_file}"
+    echo "# Host gateway domains" >> "${whitelist_file}"
+    while IFS= read -r domain; do
+      [[ -z "${domain}" ]] && continue
+      echo "${domain//./\\.}" >> "${whitelist_file}"
+    done <<< "${host_gateway_domains}"
+  fi
+
+  # Build CoreDNS Corefile: custom domain blocks + catch-all forward
+  local corefile="${HOLE_TMP_DIR}/Corefile"
+
+  if [[ "${has_host_gateway_domains}" == true ]]; then
+    # Validate domain names before generating Corefile
+    while IFS= read -r domain; do
+      [[ -z "${domain}" ]] && continue
+      if [[ ! "${domain}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]]; then
+        log_error "Invalid hostGatewayDomains entry: '${domain}' — must be a valid domain name (no ports, spaces, or special characters)"
+        exit 1
+      fi
+      if [[ "${domain}" == "localhost" || "${domain}" == "127.0.0.1" ]]; then
+        log_warn "hostGatewayDomains entry '${domain}' is in the agent's NO_PROXY list and will bypass the proxy, preventing host access. Use a different domain name instead."
+      fi
+    done <<< "${host_gateway_domains}"
+    {
+      while IFS= read -r domain; do
+        [[ -z "${domain}" ]] && continue
+        cat <<BLOCK
+${domain}:53 {
+    template IN A ${domain} {
+        answer "{{ .Name }} 60 IN A {HOST_GATEWAY_IP}"
+    }
+    template IN AAAA {
+        rcode NOERROR
+    }
+    log
+    errors
+}
+
+BLOCK
+      done <<< "${host_gateway_domains}"
+      cat <<BLOCK
+.:53 {
+    forward . 127.0.0.11
+    log
+    errors
+}
+BLOCK
+    } > "${corefile}"
+  else
+    cp "${SCRIPT_DIR}/dns/Corefile" "${corefile}"
+  fi
+
+  # Copy dns entrypoint to build context
+  cp "${SCRIPT_DIR}/dns/entrypoint.sh" "${HOLE_TMP_DIR}/dns-entrypoint.sh"
 
   # Read dependencies from merged settings (installed at build time via EXTRA_PACKAGES arg)
   local deps
@@ -566,17 +650,35 @@ generate_instance_compose() {
 
   {
     echo "services:"
-    if [[ "${has_custom_domains}" == true || "${unrestricted_network}" == true ]]; then
-      echo "  proxy:"
-      echo "    volumes:"
-      if [[ "${unrestricted_network}" == true ]]; then
-        echo "      - ${SCRIPT_DIR}/proxy/tinyproxy-unrestricted.conf:/etc/tinyproxy/tinyproxy.conf:ro"
-      fi
-      if [[ "${has_custom_domains}" == true ]]; then
-        echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
-      fi
+    echo "  proxy:"
+    echo "    dns:"
+    echo "      - ${dns_ip}"
+    echo "      - 127.0.0.11"
+    echo "    volumes:"
+    if [[ "${unrestricted_network}" == true ]]; then
+      echo "      - ${SCRIPT_DIR}/proxy/tinyproxy-unrestricted.conf:/etc/tinyproxy/tinyproxy.conf:ro"
     fi
+    echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
+    if [[ "${has_host_gateway_domains}" == true ]]; then
+      echo "    extra_hosts:"
+      while IFS= read -r domain; do
+        [[ -z "${domain}" ]] && continue
+        echo "      - \"${domain}:host-gateway\""
+      done <<< "${host_gateway_domains}"
+    fi
+    echo "  dns:"
+    echo "    build:"
+    echo "      context: ${HOLE_TMP_DIR}"
+    echo "      dockerfile: ${SCRIPT_DIR}/dns/Dockerfile"
+    echo "    volumes:"
+    echo "      - ${HOLE_TMP_DIR}/Corefile:/etc/coredns/Corefile.template:ro"
+    echo "    networks:"
+    echo "      sandbox:"
+    echo "        ipv4_address: ${dns_ip}"
     echo "  agent:"
+    echo "    dns:"
+    echo "      - ${dns_ip}"
+    echo "      - 127.0.0.11"
     echo "    build:"
     echo "      context: ${HOLE_TMP_DIR}"
     echo "      dockerfile: ${SCRIPT_DIR}/agents/Dockerfile"
@@ -664,6 +766,9 @@ generate_instance_compose() {
       echo "        condition: service_healthy"
       echo "    networks:"
       echo "      - sandbox"
+      echo "    dns:"
+      echo "      - ${dns_ip}"
+      echo "      - 127.0.0.11"
       echo "    healthcheck:"
       echo "      test: [\"CMD\", \"docker\", \"info\"]"
       echo "      interval: 3s"
@@ -677,6 +782,13 @@ generate_instance_compose() {
       echo "  hole-sandbox-docker-data-${instance_name}:"
       echo "    external: true"
     fi
+
+    # Top-level networks: per-instance sandbox subnet
+    echo "networks:"
+    echo "  sandbox:"
+    echo "    ipam:"
+    echo "      config:"
+    echo "        - subnet: ${subnet}"
   } > "${compose_file}"
 
   echo "${compose_file}"
@@ -688,9 +800,10 @@ create_compose_cmd() {
   local project_compose_file="${2}"
 
   local proxy_compose_file="${SCRIPT_DIR}/proxy/docker-compose.yml"
+  local dns_compose_file="${SCRIPT_DIR}/dns/docker-compose.yml"
   local agent_compose_file="${SCRIPT_DIR}/agents/docker-compose.yml"
 
-  COMPOSE_CMD=("${CONTAINER_RUNTIME}" compose -p "${instance_name}" -f "${COMPOSE_FILE}" -f "${proxy_compose_file}" -f "${agent_compose_file}")
+  COMPOSE_CMD=("${CONTAINER_RUNTIME}" compose -p "${instance_name}" -f "${COMPOSE_FILE}" -f "${proxy_compose_file}" -f "${dns_compose_file}" -f "${agent_compose_file}")
   if [[ -f "${project_compose_file}" ]]; then
     COMPOSE_CMD+=(-f "${project_compose_file}")
   fi
@@ -822,11 +935,6 @@ cmd_start() {
     export CACHEBUST="${cachebust}"
   fi
 
-  # Generate per-project compose override from merged settings
-  local project_compose_file
-  project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}" "${unrestricted_network}" "${with_docker}" ${agent_args[@]+"${agent_args[@]}"})
-  create_compose_cmd "${instance_name}" "${project_compose_file}"
-
   if [[ "${debug_mode}" == true ]]; then
     log_warn "Debug mode: opening bash shell instead of agent CLI"
     log_line
@@ -845,6 +953,30 @@ cmd_start() {
     ensure_docker_cache_volume
     seed_docker_instance_volume "${instance_name}"
   fi
+
+  # Allocate a unique subnet, generate compose, and start DNS under lock
+  # to prevent parallel sandboxes from picking the same subnet.
+  local subnet_lock_file="${TMPDIR:-/tmp}/hole-subnet-alloc.lock"
+  exec 9>"${subnet_lock_file}"
+  flock -w 30 9 || { log_error "Could not acquire subnet allocation lock"; exit 1; }
+
+  local subnet_index
+  subnet_index=$(find_available_subnet_index)
+  local subnet="172.28.${subnet_index}.0/24"
+  local dns_ip="172.28.${subnet_index}.53"
+
+  # Generate per-project compose override from merged settings
+  local project_compose_file
+  project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}" "${unrestricted_network}" "${with_docker}" "${subnet}" "${dns_ip}" ${agent_args[@]+"${agent_args[@]}"})
+  create_compose_cmd "${instance_name}" "${project_compose_file}"
+
+  # Start DNS service first (creates the sandbox network, securing our subnet)
+  log_info "Starting DNS..."
+  "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} dns
+
+  # Release subnet lock — network is created, subnet is secured
+  flock -u 9
+  exec 9>&-
 
   # Start proxy in detached mode with health check wait
   log_info "Starting proxy..."
@@ -967,6 +1099,15 @@ cmd_destroy() {
     "${CONTAINER_RUNTIME}" rmi "${proxy_image}" || log_warn "Failed to remove image ${proxy_image}"
   else
     log_info "No cached proxy image found"
+  fi
+
+  # Remove cached dns image
+  local dns_image="hole-sandbox/dns-${project_name}:latest"
+  if "${CONTAINER_RUNTIME}" image inspect "${dns_image}" >/dev/null 2>&1; then
+    log_info "Removing DNS image: ${dns_image}"
+    "${CONTAINER_RUNTIME}" rmi "${dns_image}" || log_warn "Failed to remove image ${dns_image}"
+  else
+    log_info "No cached DNS image found"
   fi
 
   # Remove orphaned Docker instance volumes for this project

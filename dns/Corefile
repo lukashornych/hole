@@ -1,0 +1,5 @@
+.:53 {
+    forward . 127.0.0.11
+    log
+    errors
+}

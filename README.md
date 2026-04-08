@@ -33,6 +33,7 @@ Table of contents:
   - [File inclusions](#file-inclusions)
   - [Libraries](#libraries)
   - [Domain whitelist](#domain-whitelist)
+  - [Host gateway domains](#host-gateway-domains)
   - [Dependencies](#dependencies)
   - [Container settings](#container-settings)
   - [Docker-in-Docker](#docker-in-docker)
@@ -383,6 +384,24 @@ By default, agents can only reach domains required for their operation (e.g. `ap
 ```
 
 Use plain domain names — dots are auto-escaped for the proxy filter. After changing the whitelist, restart the sandbox (changes take effect on next `hole start`).
+
+### Host gateway domains
+
+Allow the agent to reach services running on the Docker host by domain name. Configured domains resolve to the host gateway IP via a CoreDNS container inside the sandbox:
+
+```json
+{
+  "network": {
+    "hostGatewayDomains": ["myapp.local", "api.internal.dev"]
+  }
+}
+```
+
+CoreDNS uses zone-based matching, so a domain like `example.com` automatically matches `example.com` and all its subdomains (e.g., `foo.example.com`, `bar.baz.example.com`).
+
+Configured domains are automatically added to the proxy's domain whitelist, so HTTP/HTTPS requests to these domains are allowed through the proxy without needing to add them to `domainWhitelist` separately.
+
+Changes take effect on next `hole start`.
 
 ### Dependencies
 

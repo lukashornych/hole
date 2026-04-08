@@ -39,8 +39,9 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 - `sandbox` network: Internal network (no direct internet access) where agents run
 - `internet` network: Bridge network that only the proxy can access
 
-**Two main services:**
+**Three main services:**
 - `proxy`: Tinyproxy-based HTTP/HTTPS proxy that filters requests to allowed domains only (proxy/allowed-domains.txt)
+- `dns`: CoreDNS-based DNS server that resolves user-configured domains to the Docker host gateway (for accessing host-local services)
 - `agent`: Unified agent container (Ubuntu 24.04) with all enabled agent CLIs installed. The startup agent determines the container command.
 
 ### Security Model
@@ -75,6 +76,10 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 - `proxy/Dockerfile` - Proxy image (Alpine + tinyproxy)
 - `proxy/tinyproxy.conf` - Proxy configuration (port 8888, filter enabled)
 - `proxy/allowed-domains.txt` - Default domain whitelist (empty; shared base for all agents)
+- `dns/Dockerfile` - DNS image (Alpine + CoreDNS)
+- `dns/docker-compose.yml` - DNS service definition
+- `dns/Corefile` - Default CoreDNS configuration (forward-only)
+- `dns/entrypoint.sh` - DNS entrypoint (resolves host-gateway IP, generates final Corefile)
 
 ## Development Notes
 

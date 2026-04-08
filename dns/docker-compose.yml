@@ -1,0 +1,21 @@
+services:
+
+  # DNS server to resolve user-configured domains to the Docker host gateway
+  #   Should be started for every agent
+  dns:
+    build:
+      context: .
+      dockerfile: dns/Dockerfile
+    image: hole-sandbox/dns-${PROJECT_NAME}:latest
+    pull_policy: never # the dns image is built locally
+    volumes:
+      - ./dns/Corefile:/etc/coredns/Corefile.template:ro
+    networks:
+      internet:
+      sandbox: {}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 53"]
+      interval: 2s
+      timeout: 2s
+      retries: 5
