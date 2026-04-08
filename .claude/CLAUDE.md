@@ -39,8 +39,9 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 - `sandbox` network: Internal network (no direct internet access) where agents run
 - `internet` network: Bridge network that only the proxy can access
 
-**Two main services:**
+**Three main services:**
 - `proxy`: Tinyproxy-based HTTP/HTTPS proxy that filters requests to allowed domains only (proxy/allowed-domains.txt)
+- `dns`: CoreDNS-based DNS server that resolves user-configured domains to the Docker host gateway (for accessing host-local services)
 - `agent`: Unified agent container (Ubuntu 24.04) with all enabled agent CLIs installed. The startup agent determines the container command.
 
 ### Security Model
@@ -54,7 +55,7 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 
 **File access control:**
 - Project directory mounted read-write at the same absolute path as on the host (e.g., `/Users/me/project` on host → `/Users/me/project` in container)
-- Agent home directory mirrors host's `$HOME` path (e.g., `/Users/me` on macOS, `/home/me` on Linux), backed by a persistent Docker named volume (`hole-sandbox-agent-home`) shared across all agent types. Credentials, settings, and CLI state survive sandbox teardown.
+- Agent home directory mirrors host's `$HOME` path (e.g., `/Users/me` on macOS, `/home/me` on Linux).
 - Secret files/folders hidden by mounting /dev/null over them (e.g., .env, .env.local)
 - Exclusions configured via `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project), merged at runtime
 
@@ -75,6 +76,10 @@ The project uses Docker Compose to orchestrate a multi-container sandbox environ
 - `proxy/Dockerfile` - Proxy image (Alpine + tinyproxy)
 - `proxy/tinyproxy.conf` - Proxy configuration (port 8888, filter enabled)
 - `proxy/allowed-domains.txt` - Default domain whitelist (empty; shared base for all agents)
+- `dns/Dockerfile` - DNS image (Alpine + CoreDNS)
+- `dns/docker-compose.yml` - DNS service definition
+- `dns/Corefile` - Default CoreDNS configuration (forward-only)
+- `dns/entrypoint.sh` - DNS entrypoint (resolves host-gateway IP, generates final Corefile)
 
 ## Development Notes
 
@@ -197,14 +202,17 @@ Each entry becomes a bind mount in the agent container: `{resolved_host_path}:{c
 
 ### Libraries
 
-Additional directories can be mounted **read-only** into the sandbox via `libraries` in `settings.json` (both global and per-project). This is an object where keys are host paths and values are absolute container paths:
+Additional directories can be mounted into the sandbox via `libraries` in `settings.json` (both global and per-project). This is an object where keys are host paths and values are either a container path string (read-only) or an object with `path` and optional `readwrite` flag:
 
 ```json
 {
   "libraries": {
     "~/repos/shared-utils": "/libs/shared-utils",
     "/opt/company/sdk": "/libs/company-sdk",
-    "./sibling-project": "/libs/sibling"
+    "./sibling-project": {
+      "path": "/libs/sibling",
+      "readwrite": true
+    }
   }
 }
 ```
@@ -212,7 +220,7 @@ Additional directories can be mounted **read-only** into the sandbox via `librar
 - **Host path resolution**: same as `files.include` (`$VAR` / `${VAR}` → env var, `~/...` → `$HOME/...`, relative → project dir, absolute → as-is)
 - **Container paths** support `~/` (expanded to sandbox home), `/` (absolute), or `$` (env var reference)
 - **Non-existent or non-directory host paths** → warning printed to stderr, entry skipped
-- **Always read-only**: libraries are mounted with `:ro`
+- **Read-only by default**: libraries are mounted with `:ro` unless `"readwrite": true` is set
 - **Merge behavior**: Since `libraries` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
 - **Per-library exclusions**: If a library has its own `.hole/settings.json`, its `files.exclude` entries are resolved against the library source directory and mounted scoped to the library's container mount point. Other settings in the library's `.hole/settings.json` are ignored.
 
@@ -287,7 +295,7 @@ Custom environment variables can be defined via `environment` in `settings.json`
 ```
 
 - **Merge behavior**: Since `environment` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
-- Variables are injected into the agent container's `environment` section in the compose override
+- Variables are injected into the agent container's `environment` section in the compose override. When Docker-in-Docker is enabled, they are also passed to the DinD sidecar container.
 
 ### Container Settings
 

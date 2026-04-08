@@ -37,6 +37,14 @@
         "domainWhitelist": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 }
+        },
+        "hostGatewayDomains": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$"
+          }
         }
       }
     },
@@ -92,9 +100,28 @@
     "libraries": {
       "type": "object",
       "additionalProperties": {
-        "type": "string",
-        "minLength": 1,
-        "pattern": "^(/|~|\\$)"
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(/|~|\\$)"
+          },
+          {
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(/|~|\\$)"
+              },
+              "readwrite": {
+                "type": "boolean"
+              }
+            }
+          }
+        ]
       },
       "propertyNames": {
         "minLength": 1

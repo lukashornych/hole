@@ -47,18 +47,24 @@ jobs:
           mkdir -p hole/agents
           cp agents/Dockerfile                    hole/agents/
           cp agents/docker-compose.yml            hole/agents/
+          cp agents/entrypoint.sh                hole/agents/
           mkdir -p hole/agents/claude
           cp agents/claude/install-user.sh        hole/agents/claude/
           cp agents/claude/allowed-domains.txt    hole/agents/claude/
           cp agents/claude/command.json           hole/agents/claude/
           mkdir -p hole/agents/gemini
-          cp agents/gemini/install-root.sh        hole/agents/gemini/
+          cp agents/gemini/install-user.sh        hole/agents/gemini/
           cp agents/gemini/allowed-domains.txt    hole/agents/gemini/
           cp agents/gemini/command.json           hole/agents/gemini/
           mkdir -p hole/agents/codex
-          cp agents/codex/install-root.sh         hole/agents/codex/
+          cp agents/codex/install-user.sh         hole/agents/codex/
           cp agents/codex/allowed-domains.txt     hole/agents/codex/
           cp agents/codex/command.json            hole/agents/codex/
+          mkdir -p hole/dns
+          cp dns/Dockerfile                  hole/dns/
+          cp dns/docker-compose.yml          hole/dns/
+          cp dns/Corefile                    hole/dns/
+          cp dns/entrypoint.sh              hole/dns/
           mkdir -p hole/proxy
           cp proxy/Dockerfile                 hole/proxy/
           cp proxy/docker-compose.yml         hole/proxy/

@@ -33,6 +33,7 @@ Table of contents:
   - [File inclusions](#file-inclusions)
   - [Libraries](#libraries)
   - [Domain whitelist](#domain-whitelist)
+  - [Host gateway domains](#host-gateway-domains)
   - [Dependencies](#dependencies)
   - [Container settings](#container-settings)
   - [Docker-in-Docker](#docker-in-docker)
@@ -56,9 +57,6 @@ hole start claude /path/to/project
 ```
 
 The sandbox is created from scratch each time and fully destroyed when you exit the agent CLI. Multiple sandboxes can run simultaneously for the same project.
-
-The entire home directory is mounted as a persistent Docker volume (`hole-sandbox-agent-home`), shared across all agent types.
-This allows for credentials to persist across sandbox instances. On first run, the volume is created automatically.
 
 All enabled agents are installed into a single unified sandbox image. By default, all supported agents (claude, gemini, codex) are installed, so any agent can invoke other agents from within the sandbox. The `agent` parameter only determines the startup command.
 
@@ -169,6 +167,15 @@ hole start claude .
 hole start claude /path/to/project
 ```
 
+#### Authentication
+
+The preferred authentication method is an API key. You can obtain one using Claude website or by running
+```shell
+claude setup-token
+```
+
+Pass the obtained token as env. variable to the Hole [`settings.json`](#environment-variables) file under variable name `ANTHROPIC_AUTH_TOKEN`.
+
 #### Example configurations
 
 ##### Passing custom status line script
@@ -245,7 +252,12 @@ hole start gemini .
 hole start gemini /path/to/project
 ```
 
-> **Note:** there is an issue with initial login where it freezes the agent after a successful login. To work around this,
+#### Authentication
+
+The preferred authentication method is an API key. You can obtain one using Google AI Studio.
+Pass the obtained token as env. variable to the Hole [`settings.json`](#environment-variables) file under variable name `GEMINI_API_KEY`.
+
+> **Note:** there is an issue with initial login when using OAuth method where it freezes the agent after a successful login. To work around this,
 > start the agent normally and login, then in another terminal in same project run `hole destroy {project path}`. Then
 > you can start the agent again, and you should be logged in.
 
@@ -258,6 +270,11 @@ hole start codex .
 # or
 hole start codex /path/to/project
 ```
+
+#### Authentication
+
+The preferred authentication method is an API key. You can obtain one using Codex website.
+Pass the obtained token as env. variable to the Hole [`settings.json`](#environment-variables) file.
 
 ## Configuration
 
@@ -329,14 +346,17 @@ Non-existent paths are skipped with a warning. Undefined variables produce a war
 
 ### Libraries
 
-Mount additional directories read-only into the sandbox. This is useful for giving the agent access to shared libraries, SDKs, or sibling projects as reference material. Keys are host paths, values are absolute container paths:
+Mount additional directories into the sandbox. By default, libraries are mounted **read-only**. This is useful for giving the agent access to shared libraries, SDKs, or sibling projects as reference material. Keys are host paths, values are either a container path string (read-only) or an object with `path` and optional `readwrite` flag:
 
 ```json
 {
   "libraries": {
     "~/repos/shared-utils": "/libs/shared-utils",
     "/opt/company/sdk": "/libs/company-sdk",
-    "./sibling-project": "/libs/sibling"
+    "./sibling-project": {
+      "path": "/libs/sibling",
+      "readwrite": true
+    }
   }
 }
 ```
@@ -347,7 +367,7 @@ against the project directory).
 
 Non-existent paths are skipped with a warning. Undefined variables produce a warning and are left unexpanded.
 
-Libraries are always mounted **read-only**.
+Libraries are mounted **read-only** by default. Set `"readwrite": true` to mount a library with write access.
 
 If a library has its own `.hole/settings.json`, its `files.exclude` entries are applied scoped to that library's mount point (not mixed with the main project's exclusions). Other settings in the library's `.hole/settings.json` are ignored.
 
@@ -364,6 +384,24 @@ By default, agents can only reach domains required for their operation (e.g. `ap
 ```
 
 Use plain domain names — dots are auto-escaped for the proxy filter. After changing the whitelist, restart the sandbox (changes take effect on next `hole start`).
+
+### Host gateway domains
+
+Allow the agent to reach services running on the Docker host by domain name. Configured domains resolve to the host gateway IP via a CoreDNS container inside the sandbox:
+
+```json
+{
+  "network": {
+    "hostGatewayDomains": ["myapp.local", "api.internal.dev"]
+  }
+}
+```
+
+CoreDNS uses zone-based matching, so a domain like `example.com` automatically matches `example.com` and all its subdomains (e.g., `foo.example.com`, `bar.baz.example.com`).
+
+Configured domains are automatically added to the proxy's domain whitelist, so HTTP/HTTPS requests to these domains are allowed through the proxy without needing to add them to `domainWhitelist` separately.
+
+Changes take effect on next `hole start`.
 
 ### Dependencies
 
@@ -472,7 +510,7 @@ Define custom environment variables for the agent container:
 }
 ```
 
-Variables are set in the agent container at startup. Since `environment` is an object, global and project settings are deep-merged — unique keys from both are combined, and if both define the same key, the project value wins.
+Variables are set in the agent container at startup. When Docker-in-Docker is enabled, these variables are also passed to the DinD sidecar container. Since `environment` is an object, global and project settings are deep-merged — unique keys from both are combined, and if both define the same key, the project value wins.
 
 ### Hooks
 
@@ -492,7 +530,7 @@ Run a custom bash script during the Docker image build to perform system-level s
 }
 ```
 
-The script runs as **root** during the image build, after dependency installation. Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
+The script runs as the agent user during the image build, after dependency installation. Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
 
 **Important:** The agent home directory (mirrors host's `$HOME`, e.g., `/Users/me` on macOS) is backed by a persistent Docker volume that overrides image contents.
 Do not install anything to the agent home directory in the setup script — it will be hidden by the volume mount.
