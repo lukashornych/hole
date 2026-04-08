@@ -216,23 +216,45 @@ generate_instance_id() {
   LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6; echo
 }
 
-# Find the first available /24 subnet index in the 172.28.{1-254}.0/24 range
-# by inspecting all existing Docker networks.
-find_available_subnet_index() {
-  local used_subnets
-  used_subnets=$("${CONTAINER_RUNTIME}" network ls -q 2>/dev/null \
-    | xargs -r "${CONTAINER_RUNTIME}" network inspect --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null) || true
+# Create an internal Docker network with a user-configured subnet (ipv4_address requires it).
+# Docker's IPAM picks a free subnet via a temporary probe network, then we re-create with
+# that subnet set explicitly. Prints the allocated CIDR (e.g. "172.19.0.0/16").
+# If a stale network with the same name exists (from a previous failed run), removes it first.
+create_sandbox_network() {
+  local network_name="${1}"
 
-  local index
-  for index in $(seq 1 254); do
-    if [[ "${used_subnets}" != *"172.28.${index}.0/24"* ]]; then
-      echo "${index}"
-      return 0
-    fi
-  done
+  if "${CONTAINER_RUNTIME}" network inspect "${network_name}" >/dev/null 2>&1; then
+    log_warn "Removing stale network: ${network_name}"
+    "${CONTAINER_RUNTIME}" network rm "${network_name}" >/dev/null 2>&1 || true
+  fi
 
-  log_error "No available subnet found (all 254 slots in 172.28.x.0/24 are in use)"
-  exit 1
+  # Create a temporary network so Docker's IPAM picks a free subnet
+  local probe_name="${network_name}_probe"
+  "${CONTAINER_RUNTIME}" network create --internal "${probe_name}" >/dev/null
+
+  local subnet
+  subnet=$("${CONTAINER_RUNTIME}" network inspect --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' "${probe_name}")
+
+  # Remove the probe immediately
+  "${CONTAINER_RUNTIME}" network rm "${probe_name}" >/dev/null 2>&1 || true
+
+  if [[ -z "${subnet}" ]]; then
+    log_error "Failed to determine a free subnet"
+    exit 1
+  fi
+
+  # Re-create with the explicit --subnet so that ipv4_address assignments work
+  "${CONTAINER_RUNTIME}" network create --internal --subnet "${subnet}" "${network_name}" >/dev/null
+
+  echo "${subnet}"
+}
+
+# Compute a fixed DNS server IP from an allocated subnet CIDR.
+# Sets the last octet to 53 (e.g. "172.19.0.0/16" → "172.19.0.53").
+compute_dns_ip_from_subnet() {
+  local subnet="${1}"
+  local base_ip="${subnet%%/*}"
+  echo "${base_ip%.*}.53"
 }
 
 # Check if a string contains glob metacharacters (*, ?, [)
@@ -783,12 +805,11 @@ BLOCK
       echo "    external: true"
     fi
 
-    # Top-level networks: per-instance sandbox subnet
+    # Top-level networks: use the pre-created sandbox network
     echo "networks:"
     echo "  sandbox:"
-    echo "    ipam:"
-    echo "      config:"
-    echo "        - subnet: ${subnet}"
+    echo "    external: true"
+    echo "    name: ${instance_name}_sandbox"
   } > "${compose_file}"
 
   echo "${compose_file}"
@@ -954,29 +975,25 @@ cmd_start() {
     seed_docker_instance_volume "${instance_name}"
   fi
 
-  # Allocate a unique subnet, generate compose, and start DNS under lock
-  # to prevent parallel sandboxes from picking the same subnet.
-  local subnet_lock_file="${TMPDIR:-/tmp}/hole-subnet-alloc.lock"
-  exec 9>"${subnet_lock_file}"
-  flock -w 30 9 || { log_error "Could not acquire subnet allocation lock"; exit 1; }
+  # Pre-create the sandbox network — Docker picks a free subnet automatically.
+  local sandbox_network_name="${instance_name}_sandbox"
+  log_info "Creating sandbox network..."
+  local subnet
+  subnet=$(create_sandbox_network "${sandbox_network_name}")
+  local dns_ip
+  dns_ip=$(compute_dns_ip_from_subnet "${subnet}")
 
-  local subnet_index
-  subnet_index=$(find_available_subnet_index)
-  local subnet="172.28.${subnet_index}.0/24"
-  local dns_ip="172.28.${subnet_index}.53"
+  # Extend EXIT trap to also clean up the pre-created network
+  trap "rm -rf '${HOLE_TMP_DIR}'; ${CONTAINER_RUNTIME} network rm '${sandbox_network_name}' >/dev/null 2>&1 || true" EXIT
 
   # Generate per-project compose override from merged settings
   local project_compose_file
   project_compose_file=$(generate_instance_compose "${agent}" "${project_dir}" "${instance_name}" "${merged_settings}" "${debug_mode}" "${unrestricted_network}" "${with_docker}" "${subnet}" "${dns_ip}" ${agent_args[@]+"${agent_args[@]}"})
   create_compose_cmd "${instance_name}" "${project_compose_file}"
 
-  # Start DNS service first (creates the sandbox network, securing our subnet)
+  # Start DNS service first
   log_info "Starting DNS..."
   "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} dns
-
-  # Release subnet lock — network is created, subnet is secured
-  flock -u 9
-  exec 9>&-
 
   # Start proxy in detached mode with health check wait
   log_info "Starting proxy..."
@@ -1032,6 +1049,9 @@ cmd_start() {
 
   # Destroy the sandbox after user exits
   "${COMPOSE_CMD[@]}" down --remove-orphans
+
+  # Remove the pre-created sandbox network (compose down does not remove external networks)
+  "${CONTAINER_RUNTIME}" network rm "${instance_name}_sandbox" >/dev/null 2>&1 || true
 
   # Sync Docker instance volume back to cache and remove it
   if [[ "${with_docker}" == "true" || "${docker_enabled_vol}" == "true" ]]; then
