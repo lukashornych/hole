@@ -10,6 +10,8 @@ services:
     pull_policy: never # the dns image is built locally
     volumes:
       - ./dns/Corefile:/etc/coredns/Corefile.template:ro
+    extra_hosts:
+      - "host.internal:host-gateway"
     networks:
       internet:
       sandbox: {}

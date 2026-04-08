@@ -542,8 +542,8 @@ ${domain}:53 {
     template IN A ${domain} {
         answer "{{ .Name }} 60 IN A {HOST_GATEWAY_IP}"
     }
-    template IN AAAA {
-        rcode NOERROR
+    template IN AAAA ${domain} {
+      rcode NOERROR
     }
     log
     errors
