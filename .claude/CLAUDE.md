@@ -152,7 +152,7 @@ Example `.hole/settings.json`:
 
 ### Environment Variable Expansion
 
-All path settings (`files.include`, `files.exclude`, `libraries`, `hooks.setup.script`) support environment variable expansion. Both `$VAR` and `${VAR}` syntax are supported.
+All path settings (`files.include`, `files.exclude`, `libraries`, `hooks.setup.script`, `hooks.prestart`) support environment variable expansion. Both `$VAR` and `${VAR}` syntax are supported.
 
 - **Expansion order**: env vars → tilde (`~/`) → relative path resolution
 - **Undefined variables**: produce a `log_warn` and are left unexpanded
@@ -339,6 +339,32 @@ A custom bash script can be run during the Docker image build via `hooks.setup.s
 - **Runs as root** during `docker build`, before switching to the `agent` user
 - **Script changes trigger image rebuild** (Docker layer caching based on content)
 - **Merge behavior**: Scalar value, so project setting overrides global
+- **Non-existent script path** → warning logged to stderr, skipped
+
+### Prestart Hook Scripts
+
+Custom bash scripts can be run every time the sandbox starts via `hooks.prestart` in `settings.json` (both global and per-project). Unlike the setup hook (which runs during Docker build), prestart scripts run at container startup in the agent's `entrypoint.sh`, in the fully configured environment with proxy, DNS, and env vars available.
+
+```json
+{
+  "hooks": {
+    "prestart": [
+      { "script": ".hole/prestart.sh" },
+      { "script": "~/shared-prestart.sh" }
+    ]
+  }
+}
+```
+
+- **Config type**: Array of `{script: ""}` objects (merged between global and project: concatenated + deduplicated, global first)
+- **Path resolution** (same as other settings):
+  - `~/...` → expanded to `$HOME/...`
+  - Relative paths → resolved against the project directory
+  - Absolute paths → used as-is
+- **Runs as agent user** at container startup, before the agent CLI launches
+- **Execution order**: Scripts run in array order (global first, then project)
+- **Implementation**: Scripts are copied to `${HOLE_TMP_DIR}/prestart-scripts/` with numbered prefixes (`001-name.sh`, `002-name.sh`), volume-mounted read-only at `/tmp/prestart-scripts/`, and iterated in sorted order by `entrypoint.sh`
+- **Failure behavior**: A failing script (non-zero exit) aborts sandbox startup (`set -euo pipefail`)
 - **Non-existent script path** → warning logged to stderr, skipped
 
 ### Agent Home Volume

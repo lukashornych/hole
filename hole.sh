@@ -627,6 +627,38 @@ BLOCK
     fi
   fi
 
+  # Read prestart hook scripts from merged settings
+  local prestart_scripts
+  prestart_scripts=$(echo "${merged_settings}" | jq -r '.hooks.prestart[]?.script // empty' 2>/dev/null) || true
+  local has_prestart_scripts=false
+
+  mkdir -p "${HOLE_TMP_DIR}/prestart-scripts"
+  touch "${HOLE_TMP_DIR}/prestart-scripts/.gitkeep"
+
+  if [[ -n "${prestart_scripts}" ]]; then
+    local prestart_index=0
+    while IFS= read -r prestart_script_path; do
+      [[ -z "${prestart_script_path}" ]] && continue
+      prestart_script_path=$(resolve_host_path "${prestart_script_path}" "${project_dir}")
+      if [[ -f "${prestart_script_path}" ]]; then
+        prestart_index=$((prestart_index + 1))
+        local prestart_basename
+        prestart_basename=$(basename "${prestart_script_path}")
+        local prestart_dest
+        prestart_dest=$(printf "%03d-%s" "${prestart_index}" "${prestart_basename}")
+        cp "${prestart_script_path}" "${HOLE_TMP_DIR}/prestart-scripts/${prestart_dest}"
+        chmod +x "${HOLE_TMP_DIR}/prestart-scripts/${prestart_dest}"
+        has_prestart_scripts=true
+      else
+        log_warn "prestart hook script '${prestart_script_path}' not found, skipping"
+      fi
+    done <<< "${prestart_scripts}"
+  fi
+
+  if [[ "${has_prestart_scripts}" == true ]]; then
+    agent_volumes+=("      - ${HOLE_TMP_DIR}/prestart-scripts:/tmp/prestart-scripts:ro")
+  fi
+
   # Copy entrypoint.sh to build context
   mkdir -p "${HOLE_TMP_DIR}"
   cp "${SCRIPT_DIR}/agents/entrypoint.sh" "${HOLE_TMP_DIR}/entrypoint.sh"

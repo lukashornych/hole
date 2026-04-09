@@ -38,6 +38,8 @@ Table of contents:
   - [Container settings](#container-settings)
   - [Docker-in-Docker](#docker-in-docker)
   - [Hooks](#hooks)
+    - [Setup hook](#setup-hook)
+    - [Prestart hook](#prestart-hook)
   - [Configuration examples](#configuration-examples)
 
 ## Usage
@@ -536,6 +538,27 @@ The script runs as the agent user during the image build, after dependency insta
 Do not install anything to the agent home directory in the setup script — it will be hidden by the volume mount.
 
 Use `--rebuild` to force a fresh build if needed.
+
+#### Prestart hook
+
+Run custom bash scripts every time the sandbox starts, before the agent CLI launches:
+
+```json
+{
+  "hooks": {
+    "prestart": [
+      { "script": ".hole/prestart.sh" },
+      { "script": "~/shared-prestart.sh" }
+    ]
+  }
+}
+```
+
+Unlike the [setup hook](#setup-hook) (which runs during the Docker image build), prestart scripts run at container startup in the fully configured agent environment with all environment variables, proxy settings, and network access available. This makes them suitable for runtime initialization tasks such as starting background services, seeding databases, or configuring tools that depend on runtime state.
+
+Scripts are executed in array order (global settings first, then project settings). Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
+
+If a prestart script exits with a non-zero status, the sandbox startup is aborted and the error is reported.
 
 ### Configuration examples
 
