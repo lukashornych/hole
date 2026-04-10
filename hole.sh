@@ -986,6 +986,15 @@ cmd_start() {
     local cachebust
     cachebust="$(date +%s)"
     export CACHEBUST="${cachebust}"
+
+    # Remove old project images to prevent dangling images after rebuild
+    log_info "Removing old images before rebuild..."
+    for svc in agent proxy dns; do
+      local img="hole-sandbox/${svc}-${project_name}:latest"
+      if "${CONTAINER_RUNTIME}" image inspect "${img}" >/dev/null 2>&1; then
+        "${CONTAINER_RUNTIME}" rmi "${img}" >/dev/null 2>&1 || true
+      fi
+    done
   fi
 
   if [[ "${debug_mode}" == true ]]; then
