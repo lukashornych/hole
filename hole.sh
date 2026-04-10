@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Constants
 SCRIPT_DIR="$(cd "$(dirname "${0}")" && pwd)"
-COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
+BASE_COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 HOLE_TMP_DIR="" # set later in cmd_start
 GLOBAL_SETTINGS_FILE="${HOME}/.hole/settings.json"
 GITHUB_REPO="lukashornych/hole"
@@ -705,12 +705,17 @@ BLOCK
   {
     echo "services:"
     echo "  proxy:"
+    echo "    build:"
+    echo "      context: ${SCRIPT_DIR}"
+    echo "      dockerfile: ${SCRIPT_DIR}/proxy/Dockerfile"
     echo "    dns:"
     echo "      - ${dns_ip}"
     echo "      - 127.0.0.11"
     echo "    volumes:"
     if [[ "${unrestricted_network}" == true ]]; then
       echo "      - ${SCRIPT_DIR}/proxy/tinyproxy-unrestricted.conf:/etc/tinyproxy/tinyproxy.conf:ro"
+    else
+      echo "      - ${SCRIPT_DIR}/proxy/tinyproxy.conf:/etc/tinyproxy/tinyproxy.conf:ro"
     fi
     echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
     if [[ "${has_host_gateway_domains}" == true ]]; then
@@ -856,7 +861,7 @@ create_compose_cmd() {
   local dns_compose_file="${SCRIPT_DIR}/dns/docker-compose.yml"
   local agent_compose_file="${SCRIPT_DIR}/agents/docker-compose.yml"
 
-  COMPOSE_CMD=("${CONTAINER_RUNTIME}" compose -p "${instance_name}" -f "${COMPOSE_FILE}" -f "${proxy_compose_file}" -f "${dns_compose_file}" -f "${agent_compose_file}")
+  COMPOSE_CMD=("${CONTAINER_RUNTIME}" compose -p "${instance_name}" --project-directory "${SCRIPT_DIR}" -f "${BASE_COMPOSE_FILE}" -f "${proxy_compose_file}" -f "${dns_compose_file}" -f "${agent_compose_file}")
   if [[ -f "${project_compose_file}" ]]; then
     COMPOSE_CMD+=(-f "${project_compose_file}")
   fi
