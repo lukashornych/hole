@@ -171,61 +171,35 @@ hole start claude /path/to/project
 
 #### Authentication
 
-The preferred authentication method is an API key. You can obtain one using Claude website or by running
-```shell
-claude setup-token
+You can authenticate with any available method. However, to keep authenticated across sandboxes instance, you need to 
+add following [include](#file-inclusions) to `settings.json` file:
+
+```json
+{
+  "files": {
+    "include": {
+      "~/.claude": "~/.claude"
+    }
+  }
+}
 ```
 
-Pass the obtained token as env. variable to the Hole [`settings.json`](#environment-variables) file under variable name `ANTHROPIC_AUTH_TOKEN`.
+This will keep in sync your Claude settings between sandboxes and your host system. If you want to also run Claude on host
+directly different settings, you can mount the sandbox's `~/.claude` folder to any host folder, for example:
+
+```json
+{
+  "files": {
+    "include": {
+      "~/hole/agents/claude": "~/.claude"
+    }
+  }
+}
+```
+
+The **important** part is to make sure the host folder is present on the host system before starting the sandbox.
 
 #### Example configurations
-
-##### Passing custom status line script
-
-Add following includes to `~/.hole/settings.json`:
-
-```json
-{
-    "files": {
-        "include": {
-            "~/.claude/statusline-command.sh": "~/.claude/statusline-command.sh",
-            "~/.claude/settings.json": "~/.claude/settings.json"
-        }
-    }
-}
-```
-
-This can of course change slightly based on how your status line script is named. Also, make sure the script is executable on your host system.
-
-##### Passing global skills
-
-Add following includes to `~/.hole/settings.json`:
-
-```json
-{
-    "files": {
-        "include": {
-            "~/.claude/skills": "~/.claude/skills"
-        }
-    }
-}
-```
-
-This will make sure you don't lose your global skils if you uninstall Hole.
-
-##### Passing Claude settings.json
-
-Add following includes to `~/.hole/settings.json`:
-
-```json
-{
-    "files": {
-        "include": {
-            "~/.claude/settings.json": "~/.claude/settings.json"
-        }
-    }
-}
-```
 
 ##### Adding marketplaces
 
@@ -256,12 +230,33 @@ hole start gemini /path/to/project
 
 #### Authentication
 
-The preferred authentication method is an API key. You can obtain one using Google AI Studio.
-Pass the obtained token as env. variable to the Hole [`settings.json`](#environment-variables) file under variable name `GEMINI_API_KEY`.
+You can authenticate with any available method. However, to keep authenticated across sandboxes instance, you need to
+add following [include](#file-inclusions) to `settings.json` file:
 
-> **Note:** there is an issue with initial login when using OAuth method where it freezes the agent after a successful login. To work around this,
-> start the agent normally and login, then in another terminal in same project run `hole destroy {project path}`. Then
-> you can start the agent again, and you should be logged in.
+```json
+{
+  "files": {
+    "include": {
+      "~/.gemini": "~/.gemini"
+    }
+  }
+}
+```
+
+This will keep in sync your Gemini settings between sandboxes and your host system. If you want to also run Claude on host
+directly different settings, you can mount the sandbox's `~/.gemini` folder to any host folder, for example:
+
+```json
+{
+  "files": {
+    "include": {
+      "~/hole/agents/gemini": "~/.gemini"
+    }
+  }
+}
+```
+
+The **important** part is to make sure the host folder is present on the host system before starting the sandbox.
 
 ### Codex CLI
 
@@ -275,8 +270,33 @@ hole start codex /path/to/project
 
 #### Authentication
 
-The preferred authentication method is an API key. You can obtain one using Codex website.
-Pass the obtained token as env. variable to the Hole [`settings.json`](#environment-variables) file.
+You can authenticate with any available method. However, to keep authenticated across sandboxes instance, you need to
+add following [include](#file-inclusions) to `settings.json` file:
+
+```json
+{
+  "files": {
+    "include": {
+      "~/.codex": "~/.codex"
+    }
+  }
+}
+```
+
+This will keep in sync your Codex settings between sandboxes and your host system. If you want to also run Claude on host
+directly different settings, you can mount the sandbox's `~/.codex` folder to any host folder, for example:
+
+```json
+{
+  "files": {
+    "include": {
+      "~/hole/agents/codex": "~/.codex"
+    }
+  }
+}
+```
+
+The **important** part is to make sure the host folder is present on the host system before starting the sandbox.
 
 ## Configuration
 
