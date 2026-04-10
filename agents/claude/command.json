@@ -1,1 +1,1 @@
-["claude", "--dangerously-skip-permissions"]
+["claude", "--permission-mode", "plan", "--allow-dangerously-skip-permissions"]
