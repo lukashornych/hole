@@ -9,7 +9,6 @@ services:
     image: hole-sandbox/proxy-${PROJECT_NAME}:latest
     pull_policy: never # the proxy image is built locally
     volumes:
-      - ./proxy/tinyproxy.conf:/etc/tinyproxy/tinyproxy.conf:ro
       - ./proxy/allowed-domains.txt:/etc/tinyproxy/allowed-domains.txt:ro
     networks:
       - sandbox

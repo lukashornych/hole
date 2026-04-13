@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Constants
 SCRIPT_DIR="$(cd "$(dirname "${0}")" && pwd)"
-COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
+BASE_COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 HOLE_TMP_DIR="" # set later in cmd_start
 GLOBAL_SETTINGS_FILE="${HOME}/.hole/settings.json"
 GITHUB_REPO="lukashornych/hole"
@@ -627,6 +627,38 @@ BLOCK
     fi
   fi
 
+  # Read prestart hook scripts from merged settings
+  local prestart_scripts
+  prestart_scripts=$(echo "${merged_settings}" | jq -r '.hooks.prestart[]?.script // empty' 2>/dev/null) || true
+  local has_prestart_scripts=false
+
+  mkdir -p "${HOLE_TMP_DIR}/prestart-scripts"
+  touch "${HOLE_TMP_DIR}/prestart-scripts/.gitkeep"
+
+  if [[ -n "${prestart_scripts}" ]]; then
+    local prestart_index=0
+    while IFS= read -r prestart_script_path; do
+      [[ -z "${prestart_script_path}" ]] && continue
+      prestart_script_path=$(resolve_host_path "${prestart_script_path}" "${project_dir}")
+      if [[ -f "${prestart_script_path}" ]]; then
+        prestart_index=$((prestart_index + 1))
+        local prestart_basename
+        prestart_basename=$(basename "${prestart_script_path}")
+        local prestart_dest
+        prestart_dest=$(printf "%03d-%s" "${prestart_index}" "${prestart_basename}")
+        cp "${prestart_script_path}" "${HOLE_TMP_DIR}/prestart-scripts/${prestart_dest}"
+        chmod +x "${HOLE_TMP_DIR}/prestart-scripts/${prestart_dest}"
+        has_prestart_scripts=true
+      else
+        log_warn "prestart hook script '${prestart_script_path}' not found, skipping"
+      fi
+    done <<< "${prestart_scripts}"
+  fi
+
+  if [[ "${has_prestart_scripts}" == true ]]; then
+    agent_volumes+=("      - ${HOLE_TMP_DIR}/prestart-scripts:/tmp/prestart-scripts:ro")
+  fi
+
   # Copy entrypoint.sh to build context
   mkdir -p "${HOLE_TMP_DIR}"
   cp "${SCRIPT_DIR}/agents/entrypoint.sh" "${HOLE_TMP_DIR}/entrypoint.sh"
@@ -673,12 +705,17 @@ BLOCK
   {
     echo "services:"
     echo "  proxy:"
+    echo "    build:"
+    echo "      context: ${SCRIPT_DIR}"
+    echo "      dockerfile: ${SCRIPT_DIR}/proxy/Dockerfile"
     echo "    dns:"
     echo "      - ${dns_ip}"
     echo "      - 127.0.0.11"
     echo "    volumes:"
     if [[ "${unrestricted_network}" == true ]]; then
       echo "      - ${SCRIPT_DIR}/proxy/tinyproxy-unrestricted.conf:/etc/tinyproxy/tinyproxy.conf:ro"
+    else
+      echo "      - ${SCRIPT_DIR}/proxy/tinyproxy.conf:/etc/tinyproxy/tinyproxy.conf:ro"
     fi
     echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
     if [[ "${has_host_gateway_domains}" == true ]]; then
@@ -824,7 +861,7 @@ create_compose_cmd() {
   local dns_compose_file="${SCRIPT_DIR}/dns/docker-compose.yml"
   local agent_compose_file="${SCRIPT_DIR}/agents/docker-compose.yml"
 
-  COMPOSE_CMD=("${CONTAINER_RUNTIME}" compose -p "${instance_name}" -f "${COMPOSE_FILE}" -f "${proxy_compose_file}" -f "${dns_compose_file}" -f "${agent_compose_file}")
+  COMPOSE_CMD=("${CONTAINER_RUNTIME}" compose -p "${instance_name}" --project-directory "${SCRIPT_DIR}" -f "${BASE_COMPOSE_FILE}" -f "${proxy_compose_file}" -f "${dns_compose_file}" -f "${agent_compose_file}")
   if [[ -f "${project_compose_file}" ]]; then
     COMPOSE_CMD+=(-f "${project_compose_file}")
   fi
@@ -954,6 +991,15 @@ cmd_start() {
     local cachebust
     cachebust="$(date +%s)"
     export CACHEBUST="${cachebust}"
+
+    # Remove old project images to prevent dangling images after rebuild
+    log_info "Removing old images before rebuild..."
+    for svc in agent proxy dns; do
+      local img="hole-sandbox/${svc}-${project_name}:latest"
+      if "${CONTAINER_RUNTIME}" image inspect "${img}" >/dev/null 2>&1; then
+        "${CONTAINER_RUNTIME}" rmi "${img}" >/dev/null 2>&1 || true
+      fi
+    done
   fi
 
   if [[ "${debug_mode}" == true ]]; then
