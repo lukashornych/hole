@@ -21,8 +21,7 @@
           "type": "object",
           "additionalProperties": {
             "type": "string",
-            "minLength": 1,
-            "pattern": "^(/|~|\\$)"
+            "minLength": 1
           },
           "propertyNames": {
             "minLength": 1

@@ -362,7 +362,7 @@ Mount additional host files or directories into the sandbox. Keys are host paths
 }
 ```
 
-Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`) and tilde expansion (`~/`). Host paths also support relative paths (resolved against the project directory). Container `~/` expands to the sandbox home directory (which mirrors the host's `$HOME`). 
+Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), and relative paths (resolved against the project directory). Container `~/` expands to the sandbox home directory (which mirrors the host's `$HOME`).
 
 Non-existent paths are skipped with a warning. Undefined variables produce a warning and are left unexpanded.
 

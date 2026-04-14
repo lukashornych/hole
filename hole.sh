@@ -452,9 +452,11 @@ generate_instance_compose() {
     host_path="${host_path%/}"
     container_path="${container_path%/}"
     container_path=$(expand_env_vars "${container_path}")
-    # Expand tilde in container path using sandbox home
+    # Expand tilde in container path using sandbox home, resolve relative paths against project dir
     if [[ "${container_path}" == "~/"* ]]; then
       container_path="${SANDBOX_HOME:-/home/agent}/${container_path#\~/}"
+    elif [[ "${container_path}" != /* ]]; then
+      container_path="${project_dir}/${container_path}"
     fi
     # Resolve host path
     host_path=$(resolve_host_path "${host_path}" "${project_dir}")

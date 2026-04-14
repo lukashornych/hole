@@ -193,7 +193,11 @@ Additional host files or directories can be mounted into the sandbox via `files.
   - `~/...` → expanded to `$HOME/...`
   - Relative paths → resolved against the project directory
   - Absolute paths → used as-is
-- **Container paths** support `~/` (expanded to sandbox home), `/` (absolute), or `$` (env var reference)
+- **Container path resolution:**
+  - `~/...` → expanded to sandbox home
+  - `/...` → absolute, used as-is
+  - `$VAR` / `${VAR}` → expanded from environment variables
+  - Relative paths → resolved against the project directory (same path inside sandbox)
 - **Non-existent host paths** → warning printed to stderr, entry skipped
 - **Trailing slashes** are stripped from both host and container paths
 - **Merge behavior**: Since `include` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins
