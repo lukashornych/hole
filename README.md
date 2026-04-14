@@ -99,7 +99,8 @@ Note: `--debug` and agent arguments cannot be used together.
 ### Other commands
 
 ```sh
-hole destroy {project path}   # remove all project-related Docker resources including cached agent and proxy images
+hole destroy                  # remove ALL Hole Docker resources (containers, images, networks, volumes)
+hole destroy {project path}   # remove project-related Docker resources including cached agent and proxy images
 hole help                     # show usage information
 hole version                  # print installed version
 hole update                   # update to the latest release

@@ -59,7 +59,7 @@ Usage: hole {command} {agent} {path} [options]
 
 Commands:
   start     Create a sandbox, attach to the agent CLI, and destroy on exit
-  destroy   Remove all cached or orphaned Docker resources for a project
+  destroy   Remove Docker resources for a project, or all resources if no path given
   update    Update hole to the latest release
   uninstall Uninstall hole and optionally remove Docker resources
   help      Show this help message
@@ -91,8 +91,9 @@ Examples:
   hole start claude . --dump-network-access
   hole start claude . -- -p "explain this function"
   hole start claude . --rebuild -- --output-format stream-json
-  hole destroy .
-  hole destroy /path/to/project
+  hole destroy                            # destroy ALL Hole Docker resources
+  hole destroy .                          # destroy resources for current project
+  hole destroy /path/to/project           # destroy resources for specific project
 
 The sandbox is destroyed when you exit the agent CLI.
 EOF
@@ -1235,6 +1236,57 @@ cmd_destroy() {
   log_info "Cached resources destroyed. Shared agent home volumes were preserved."
 }
 
+# Destroy-all command: remove ALL cached Docker resources across all projects
+cmd_destroy_all() {
+  log_info "Destroying all Hole Docker resources..."
+  log_line
+  detect_container_runtime
+
+  # Stop and remove all containers with name prefix "hole-sandbox-"
+  local containers
+  containers=$("${CONTAINER_RUNTIME}" ps -aq --filter "name=hole-sandbox-") || true
+  if [[ -n "${containers}" ]]; then
+    log_info "Stopping and removing containers..."
+    "${CONTAINER_RUNTIME}" stop ${containers} 2>/dev/null || true
+    "${CONTAINER_RUNTIME}" rm -f ${containers} || log_warn "Failed to remove some containers"
+  else
+    log_info "No containers found"
+  fi
+
+  # Remove all images matching "hole-sandbox/*"
+  local images
+  images=$("${CONTAINER_RUNTIME}" images --filter "reference=hole-sandbox/*" -q) || true
+  if [[ -n "${images}" ]]; then
+    log_info "Removing images..."
+    "${CONTAINER_RUNTIME}" rmi ${images} || log_warn "Failed to remove some images"
+  else
+    log_info "No images found"
+  fi
+
+  # Remove all networks matching "hole-sandbox-"
+  local networks
+  networks=$("${CONTAINER_RUNTIME}" network ls --filter "name=hole-sandbox-" -q) || true
+  if [[ -n "${networks}" ]]; then
+    log_info "Removing networks..."
+    "${CONTAINER_RUNTIME}" network rm ${networks} || log_warn "Failed to remove some networks"
+  else
+    log_info "No networks found"
+  fi
+
+  # Remove all volumes matching "hole-sandbox-"
+  local volumes
+  volumes=$("${CONTAINER_RUNTIME}" volume ls --filter "name=hole-sandbox-" -q) || true
+  if [[ -n "${volumes}" ]]; then
+    log_info "Removing volumes..."
+    "${CONTAINER_RUNTIME}" volume rm ${volumes} || log_warn "Failed to remove some volumes"
+  else
+    log_info "No volumes found"
+  fi
+
+  log_line
+  log_info "All Hole Docker resources destroyed."
+}
+
 # Print installed version
 cmd_version() {
   local version_file="${SCRIPT_DIR}/version"
@@ -1425,6 +1477,10 @@ main() {
   fi
   if [[ "${command}" == "help" ]] || [[ -z "${command}" ]]; then
     show_help
+    exit 0
+  fi
+  if [[ "${command}" == "destroy" && -z "${agent}" ]]; then
+    cmd_destroy_all
     exit 0
   fi
 
