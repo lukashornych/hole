@@ -12,6 +12,16 @@ GITHUB_INSTALL_SCRIPT="https://raw.githubusercontent.com/${GITHUB_REPO}/main/ins
 VALID_AGENTS=("claude" "gemini" "codex")
 VALID_COMMANDS=("start" "destroy" "help" "version" "update" "uninstall")
 
+# Cleanup state (set during cmd_start, read by _cleanup_sandbox)
+_CLEANUP_SERVICES_STARTED="false"
+_CLEANUP_INSTANCE_NAME=""
+_CLEANUP_WITH_DOCKER="false"
+_CLEANUP_DOCKER_ENABLED_VOL=""
+_CLEANUP_DUMP_NETWORK_ACCESS="false"
+_CLEANUP_PROJECT_DIR=""
+_CLEANUP_AGENT=""
+_CLEANUP_INSTANCE_ID=""
+
 # Import the logging library
 source "${SCRIPT_DIR}/logger.sh"
 # Import utility functions
@@ -923,6 +933,70 @@ sync_and_remove_docker_instance_volume() {
   "${CONTAINER_RUNTIME}" volume rm "${instance_vol}" >/dev/null 2>&1 || true
 }
 
+# Cleanup handler called by EXIT trap. Idempotent — safe to call multiple times.
+# Phases run in order: network log dump → compose down → network rm → docker sync → tmp dir removal.
+_cleanup_sandbox() {
+  # Phase 1: network log dump (best-effort, before compose down stops proxy)
+  if [[ "${_CLEANUP_SERVICES_STARTED}" == "true" && "${_CLEANUP_DUMP_NETWORK_ACCESS}" == "true" ]]; then
+    local log_dir="${_CLEANUP_PROJECT_DIR}/.hole/logs"
+    mkdir -p "${log_dir}" 2>/dev/null || true
+    local log_file="${log_dir}/network-access-${_CLEANUP_AGENT}-${_CLEANUP_INSTANCE_ID}.log"
+    local proxy_container="${_CLEANUP_INSTANCE_NAME}-proxy-1"
+    local tmp_proxy_log
+    tmp_proxy_log="$(mktemp "${TMPDIR:-/tmp}/hole-sandbox-proxy-log.XXXXXX" 2>/dev/null)" || true
+
+    if [[ -n "${tmp_proxy_log}" ]]; then
+      # Stop proxy gracefully so tinyproxy exit() flushes stdio buffers to log file
+      "${CONTAINER_RUNTIME}" stop "${proxy_container}" >/dev/null 2>&1 || true
+
+      # Copy the log file from the stopped container and extract domains
+      if "${CONTAINER_RUNTIME}" cp "${proxy_container}:/var/log/tinyproxy/tinyproxy.log" "${tmp_proxy_log}" 2>/dev/null; then
+        grep -oE 'Established connection to host "[a-zA-Z0-9._-]+"|Proxying refused on filtered (url|domain) "[^"]+"' "${tmp_proxy_log}" | \
+          sed 's/Established connection to host "/ALLOWED /; s/Proxying refused on filtered [a-z]* "/DENIED /; s/"$//' | \
+          sort -u > "${log_file}" || true
+        log_line
+        log_info "Network access log written to: ${log_file}"
+      else
+        log_line
+        log_warn "Could not retrieve proxy log from container"
+      fi
+
+      rm -f "${tmp_proxy_log}"
+    fi
+  fi
+
+  # Phase 2: compose down (before tmp dir removal — compose files live there)
+  if [[ "${_CLEANUP_SERVICES_STARTED}" == "true" && ${#COMPOSE_CMD[@]} -gt 0 ]]; then
+    "${COMPOSE_CMD[@]}" down --remove-orphans 2>/dev/null || true
+  fi
+
+  # Phase 3: remove external sandbox network (compose down does not remove external networks)
+  if [[ -n "${_CLEANUP_INSTANCE_NAME}" ]]; then
+    "${CONTAINER_RUNTIME}" network rm "${_CLEANUP_INSTANCE_NAME}_sandbox" >/dev/null 2>&1 || true
+  fi
+
+  # Phase 4: sync Docker instance volume back to cache and remove it
+  if [[ "${_CLEANUP_SERVICES_STARTED}" == "true" ]] && \
+     [[ "${_CLEANUP_WITH_DOCKER}" == "true" || "${_CLEANUP_DOCKER_ENABLED_VOL}" == "true" ]]; then
+    log_info "Syncing Docker data to cache..."
+    sync_and_remove_docker_instance_volume "${_CLEANUP_INSTANCE_NAME}" 2>/dev/null || true
+  fi
+
+  # Phase 5: remove temp directory (must be last)
+  if [[ -n "${HOLE_TMP_DIR}" ]]; then
+    rm -rf "${HOLE_TMP_DIR}"
+  fi
+
+  if [[ "${_CLEANUP_SERVICES_STARTED}" == "true" ]]; then
+    log_line
+    log_info "Exited ${_CLEANUP_AGENT} CLI. Sandbox destroyed."
+  fi
+
+  # Prevent double cleanup
+  _CLEANUP_SERVICES_STARTED="false"
+  _CLEANUP_INSTANCE_NAME=""
+}
+
 # Start command: create/start sandbox and attach to agent CLI
 cmd_start() {
   local agent="${1}"
@@ -945,8 +1019,8 @@ cmd_start() {
   fi
 
   HOLE_TMP_DIR="$(mktemp -d)"
-  # clean up temp folder after the script exits
-  trap "rm -rf '${HOLE_TMP_DIR}'" EXIT
+  # Register unified cleanup handler (covers all exit paths including signals)
+  trap '_cleanup_sandbox' EXIT
 
   # Validate settings files if present
   validate_settings "${GLOBAL_SETTINGS_FILE}" "global settings (~/.hole/settings.json)"
@@ -1029,8 +1103,8 @@ cmd_start() {
   local dns_ip
   dns_ip=$(compute_dns_ip_from_subnet "${subnet}")
 
-  # Extend EXIT trap to also clean up the pre-created network
-  trap "rm -rf '${HOLE_TMP_DIR}'; ${CONTAINER_RUNTIME} network rm '${sandbox_network_name}' >/dev/null 2>&1 || true" EXIT
+  # Register instance name so EXIT trap can clean up the network even if startup fails below
+  _CLEANUP_INSTANCE_NAME="${instance_name}"
 
   # Generate per-project compose override from merged settings
   local project_compose_file
@@ -1061,52 +1135,21 @@ cmd_start() {
   log_line
   "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} agent
 
+  # Set cleanup state so the EXIT trap can run full teardown
+  _CLEANUP_SERVICES_STARTED="true"
+  _CLEANUP_WITH_DOCKER="${with_docker}"
+  _CLEANUP_DOCKER_ENABLED_VOL="${docker_enabled_vol}"
+  _CLEANUP_DUMP_NETWORK_ACCESS="${dump_network_access}"
+  _CLEANUP_PROJECT_DIR="${project_dir}"
+  _CLEANUP_AGENT="${agent}"
+  _CLEANUP_INSTANCE_ID="${instance_id}"
+
   # Attach terminal to the running agent
   log_info "Attaching to ${agent} agent..."
   log_line
-  "${CONTAINER_RUNTIME}" attach "${instance_name}-agent-1"
+  "${CONTAINER_RUNTIME}" attach "${instance_name}-agent-1" || true
 
-  # Dump network access log if requested
-  if [[ "${dump_network_access}" == true ]]; then
-    local log_dir="${project_dir}/.hole/logs"
-    mkdir -p "${log_dir}"
-    local log_file="${log_dir}/network-access-${agent}-${instance_id}.log"
-    local proxy_container="${instance_name}-proxy-1"
-    local tmp_proxy_log
-    tmp_proxy_log="$(mktemp "${TMPDIR:-/tmp}/hole-sandbox-proxy-log.XXXXXX")"
-
-    # Stop proxy gracefully so tinyproxy exit() flushes stdio buffers to log file
-    "${CONTAINER_RUNTIME}" stop "${proxy_container}" >/dev/null 2>&1 || true
-
-    # Copy the log file from the stopped container and extract domains
-    if "${CONTAINER_RUNTIME}" cp "${proxy_container}:/var/log/tinyproxy/tinyproxy.log" "${tmp_proxy_log}" 2>/dev/null; then
-      grep -oE 'Established connection to host "[a-zA-Z0-9._-]+"|Proxying refused on filtered (url|domain) "[^"]+"' "${tmp_proxy_log}" | \
-        sed 's/Established connection to host "/ALLOWED /; s/Proxying refused on filtered [a-z]* "/DENIED /; s/"$//' | \
-        sort -u > "${log_file}" || true
-      log_line
-      log_info "Network access log written to: ${log_file}"
-    else
-      log_line
-      log_warn "Could not retrieve proxy log from container"
-    fi
-
-    rm -f "${tmp_proxy_log}"
-  fi
-
-  # Destroy the sandbox after user exits
-  "${COMPOSE_CMD[@]}" down --remove-orphans
-
-  # Remove the pre-created sandbox network (compose down does not remove external networks)
-  "${CONTAINER_RUNTIME}" network rm "${instance_name}_sandbox" >/dev/null 2>&1 || true
-
-  # Sync Docker instance volume back to cache and remove it
-  if [[ "${with_docker}" == "true" || "${docker_enabled_vol}" == "true" ]]; then
-    log_info "Syncing Docker data to cache..."
-    sync_and_remove_docker_instance_volume "${instance_name}"
-  fi
-
-  log_line
-  log_info "Exited ${agent} CLI. Sandbox destroyed."
+  # Cleanup is handled by the EXIT trap (_cleanup_sandbox)
 }
 
 # Destroy command: remove all cached Docker resources for a project
