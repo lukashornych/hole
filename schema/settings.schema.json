@@ -107,6 +107,34 @@
             },
             "required": ["script"]
           }
+        },
+        "setupHost": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "script": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["script"]
+          }
+        },
+        "cleanupHost": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "script": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["script"]
+          }
         }
       }
     },

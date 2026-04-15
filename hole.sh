@@ -21,6 +21,8 @@ _CLEANUP_DUMP_NETWORK_ACCESS="false"
 _CLEANUP_PROJECT_DIR=""
 _CLEANUP_AGENT=""
 _CLEANUP_INSTANCE_ID=""
+_CLEANUP_MERGED_SETTINGS=""
+_CLEANUP_HOST_DONE="false"
 
 # Import the logging library
 source "${SCRIPT_DIR}/logger.sh"
@@ -330,6 +332,60 @@ resolve_host_path() {
   else
     echo "${raw_path}"
   fi
+}
+
+# Execute hooks.setupHost scripts on the host, in array order, before any Docker work.
+# Scripts run as the current user with the shell environment plus Hole's exported vars.
+# Failure (non-zero exit) aborts sandbox startup via set -e; the EXIT trap still runs cleanupHost.
+run_setup_host_hooks() {
+  local merged_settings="${1}"
+  local project_dir="${2}"
+
+  local scripts
+  scripts=$(echo "${merged_settings}" | jq -r '.hooks.setupHost[]?.script // empty' 2>/dev/null) || true
+  [[ -z "${scripts}" ]] && return 0
+
+  while IFS= read -r raw_path; do
+    [[ -z "${raw_path}" ]] && continue
+    local resolved
+    resolved=$(resolve_host_path "${raw_path}" "${project_dir}")
+    if [[ ! -f "${resolved}" ]]; then
+      log_warn "setupHost hook script '${resolved}' not found, skipping"
+      continue
+    fi
+    log_info "Running setupHost hook: $(basename "${resolved}")..."
+    bash "${resolved}"
+  done <<< "${scripts}"
+}
+
+# Execute hooks.cleanupHost scripts on the host, in array order, during the EXIT trap.
+# A failing script is logged as a warning and does NOT abort subsequent cleanup work.
+# Idempotent via _CLEANUP_HOST_DONE so trap re-entry does not re-run hooks.
+run_cleanup_host_hooks() {
+  [[ "${_CLEANUP_HOST_DONE}" == "true" ]] && return 0
+  _CLEANUP_HOST_DONE="true"
+
+  local merged_settings="${_CLEANUP_MERGED_SETTINGS}"
+  local project_dir="${_CLEANUP_PROJECT_DIR}"
+  [[ -z "${merged_settings}" ]] && return 0
+
+  local scripts
+  scripts=$(echo "${merged_settings}" | jq -r '.hooks.cleanupHost[]?.script // empty' 2>/dev/null) || true
+  [[ -z "${scripts}" ]] && return 0
+
+  while IFS= read -r raw_path; do
+    [[ -z "${raw_path}" ]] && continue
+    local resolved
+    resolved=$(resolve_host_path "${raw_path}" "${project_dir}")
+    if [[ ! -f "${resolved}" ]]; then
+      log_warn "cleanupHost hook script '${resolved}' not found, skipping"
+      continue
+    fi
+    log_info "Running cleanupHost hook: $(basename "${resolved}")..."
+    if ! bash "${resolved}"; then
+      log_warn "cleanupHost hook '$(basename "${resolved}")' exited non-zero; continuing teardown"
+    fi
+  done <<< "${scripts}"
 }
 
 # Resolve file exclusion entries (literal paths + globs) and output volume mount lines.
@@ -943,7 +999,7 @@ sync_and_remove_docker_instance_volume() {
 }
 
 # Cleanup handler called by EXIT trap. Idempotent — safe to call multiple times.
-# Phases run in order: network log dump → compose down → network rm → docker sync → tmp dir removal.
+# Phases run in order: network log dump → compose down → network rm → docker sync → cleanupHost → tmp dir removal.
 _cleanup_sandbox() {
   # Phase 1: network log dump (best-effort, before compose down stops proxy)
   if [[ "${_CLEANUP_SERVICES_STARTED}" == "true" && "${_CLEANUP_DUMP_NETWORK_ACCESS}" == "true" ]]; then
@@ -991,7 +1047,10 @@ _cleanup_sandbox() {
     sync_and_remove_docker_instance_volume "${_CLEANUP_INSTANCE_NAME}" 2>/dev/null || true
   fi
 
-  # Phase 5: remove temp directory (must be last)
+  # Phase 5: run cleanupHost hooks on the host (after Docker teardown, before tmp dir removal)
+  run_cleanup_host_hooks
+
+  # Phase 6: remove temp directory (must be last)
   if [[ -n "${HOLE_TMP_DIR}" ]]; then
     rm -rf "${HOLE_TMP_DIR}"
   fi
@@ -1004,6 +1063,8 @@ _cleanup_sandbox() {
   # Prevent double cleanup
   _CLEANUP_SERVICES_STARTED="false"
   _CLEANUP_INSTANCE_NAME=""
+  _CLEANUP_MERGED_SETTINGS=""
+  _CLEANUP_HOST_DONE="false"
 }
 
 # Start command: create/start sandbox and attach to agent CLI
@@ -1038,6 +1099,11 @@ cmd_start() {
   # Merge global and project settings
   local merged_settings
   merged_settings=$(merge_settings "${GLOBAL_SETTINGS_FILE}" "${project_dir}/.hole/settings.json")
+
+  # Expose state to the EXIT trap as early as possible so cleanupHost runs
+  # even if setupHost itself aborts startup.
+  _CLEANUP_MERGED_SETTINGS="${merged_settings}"
+  _CLEANUP_PROJECT_DIR="${project_dir}"
 
   # Validate startup agent is in the enabled agents list
   local agent_is_enabled=false
@@ -1103,6 +1169,9 @@ cmd_start() {
     ensure_docker_cache_volume
     seed_docker_instance_volume "${instance_name}"
   fi
+
+  # Run hooks.setupHost on the host before any Docker work
+  run_setup_host_hooks "${merged_settings}" "${project_dir}"
 
   # Pre-create the sandbox network — Docker picks a free subnet automatically.
   local sandbox_network_name="${instance_name}_sandbox"

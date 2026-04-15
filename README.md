@@ -539,6 +539,27 @@ Variables are set in the agent container at startup. When Docker-in-Docker is en
 
 Hooks allow you to inject some logic into sandbox lifecycle.
 
+#### Set up host hook
+
+Run custom bash scripts on the **host** system every time the sandbox starts, before any Docker containers are created. This is useful for bringing up external services the sandbox will connect to (local databases, mock APIs, tunnels, etc.).
+
+```json
+{
+  "hooks": {
+    "setupHost": [
+      { "script": ".hole/start-local-db.sh" },
+      { "script": "~/shared/start-mock-api.sh" }
+    ]
+  }
+}
+```
+
+Unlike the [setup hook](#setup-hook) (image build, inside container) and the [prestart hook](#prestart-hook) (runtime, inside container), setupHost scripts run **on the host** as the user who invoked `hole`, with full access to the host shell environment. Hole exports `PROJECT_NAME`, `PROJECT_DIR`, `SANDBOX_USERNAME`, and `SANDBOX_HOME` before the hook runs, so scripts can key off the active project.
+
+Scripts execute in array order (global settings first, then project settings). Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
+
+If a setupHost script exits with a non-zero status, the sandbox startup is aborted before any Docker resources are created. The [clean up host hook](#clean-up-host-hook) **still runs** on this failure path, so any services already started by earlier scripts get a chance to shut down.
+
 #### Setup hook
 
 Run a custom bash script during the Docker image build to perform system-level setup (install packages, configure locales, add apt repositories, etc.):
@@ -580,6 +601,27 @@ Unlike the [setup hook](#setup-hook) (which runs during the Docker image build),
 Scripts are executed in array order (global settings first, then project settings). Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
 
 If a prestart script exits with a non-zero status, the sandbox startup is aborted and the error is reported.
+
+#### Clean up host hook
+
+Run custom bash scripts on the **host** system every time the sandbox exits — including normal exit, Ctrl-C, and error/abort paths. Use this to tear down whatever [setupHost](#set-up-host-hook) started.
+
+```json
+{
+  "hooks": {
+    "cleanupHost": [
+      { "script": ".hole/stop-local-db.sh" },
+      { "script": "~/shared/stop-mock-api.sh" }
+    ]
+  }
+}
+```
+
+Cleanup scripts run **after** the sandbox is fully torn down (containers stopped, network removed, Docker cache synced) and before Hole's temporary files are deleted. They receive the same exported environment (`PROJECT_NAME`, `PROJECT_DIR`, `SANDBOX_USERNAME`, `SANDBOX_HOME`) as setupHost.
+
+Scripts execute in array order (global settings first, then project settings). Path resolution, merge semantics, and the "non-existent path → warn and skip" behavior are identical to [setupHost](#set-up-host-hook).
+
+Unlike setupHost, a cleanupHost script that exits with a non-zero status does **not** abort teardown — the error is logged and subsequent cleanup scripts still run. This guarantees that a single flaky script cannot leak external resources or strand temporary files.
 
 ### Configuration examples
 
