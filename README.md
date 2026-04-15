@@ -327,7 +327,7 @@ Hide files and directories from the agent:
 }
 ```
 
-Files are mounted as `/dev/null` and directories as empty anonymous volumes inside the container. Non-existent paths are skipped with a warning.
+Files are mounted as `/dev/null` and directories are overlaid with empty host directories (bind-mounted from the sandbox's temporary directory and discarded on exit). Non-existent paths are skipped with a warning.
 
 Paths support environment variable expansion (`$VAR`, `${VAR}`) and glob patterns are supported for matching multiple paths at once:
 

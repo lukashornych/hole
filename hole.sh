@@ -382,7 +382,13 @@ resolve_file_exclusions() {
     if [[ -f "${full_path}" ]]; then
       echo "      - /dev/null:${mount_point}/${resolved}:ro"
     elif [[ -d "${full_path}" ]]; then
-      echo "      - ${mount_point}/${resolved}"
+      # Bind-mount an empty host directory under HOLE_TMP_DIR over the target.
+      # Avoids anonymous Docker volumes, which `compose down` does not remove
+      # without `-v`. HOLE_TMP_DIR is wiped by _cleanup_sandbox on exit, so
+      # no additional cleanup is needed.
+      local empty_dir="${HOLE_TMP_DIR}/excluded-dirs${mount_point}/${resolved}"
+      mkdir -p "${empty_dir}"
+      echo "      - ${empty_dir}:${mount_point}/${resolved}"
     else
       log_warn "excluded path '${resolved}' not found in ${source_dir}, skipping"
     fi

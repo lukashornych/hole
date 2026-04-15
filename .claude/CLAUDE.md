@@ -123,7 +123,7 @@ If a project also has `.hole/settings.json` with `"files": { "exclude": [".env",
 
 Per-project exclusions are configured via `.hole/settings.json` in the project directory. The `files.exclude` array lists paths or glob patterns to hide from the agent. The script auto-detects whether each resolved path is a file or directory and generates the correct Docker volume mount:
 - **Files** → mounted as `/dev/null:<project_dir>/<path>:ro`
-- **Directories** → mounted as anonymous volume at `<project_dir>/<path>`
+- **Directories** → an empty host directory under `${HOLE_TMP_DIR}/excluded-dirs/...` is created and bind-mounted over `<project_dir>/<path>`. Wiped when the sandbox exits along with the rest of `HOLE_TMP_DIR`, so no Docker volumes leak.
 - **Non-existent paths** → warning printed to stderr, entry skipped
 
 Trailing slashes are stripped automatically (e.g., `node_modules/` → `node_modules`).
