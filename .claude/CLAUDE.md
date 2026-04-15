@@ -123,7 +123,7 @@ If a project also has `.hole/settings.json` with `"files": { "exclude": [".env",
 
 Per-project exclusions are configured via `.hole/settings.json` in the project directory. The `files.exclude` array lists paths or glob patterns to hide from the agent. The script auto-detects whether each resolved path is a file or directory and generates the correct Docker volume mount:
 - **Files** → mounted as `/dev/null:<project_dir>/<path>:ro`
-- **Directories** → mounted as anonymous volume at `<project_dir>/<path>`
+- **Directories** → an empty host directory under `${HOLE_TMP_DIR}/excluded-dirs/...` is created and bind-mounted over `<project_dir>/<path>`. Wiped when the sandbox exits along with the rest of `HOLE_TMP_DIR`, so no Docker volumes leak.
 - **Non-existent paths** → warning printed to stderr, entry skipped
 
 Trailing slashes are stripped automatically (e.g., `node_modules/` → `node_modules`).
@@ -193,7 +193,11 @@ Additional host files or directories can be mounted into the sandbox via `files.
   - `~/...` → expanded to `$HOME/...`
   - Relative paths → resolved against the project directory
   - Absolute paths → used as-is
-- **Container paths** support `~/` (expanded to sandbox home), `/` (absolute), or `$` (env var reference)
+- **Container path resolution:**
+  - `~/...` → expanded to sandbox home
+  - `/...` → absolute, used as-is
+  - `$VAR` / `${VAR}` → expanded from environment variables
+  - Relative paths → resolved against the project directory (same path inside sandbox)
 - **Non-existent host paths** → warning printed to stderr, entry skipped
 - **Trailing slashes** are stripped from both host and container paths
 - **Merge behavior**: Since `include` is an object, `deep_merge` handles it correctly — unique keys from both global and project are combined; if both define the same key, project wins

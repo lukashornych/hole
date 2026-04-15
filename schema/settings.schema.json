@@ -21,8 +21,7 @@
           "type": "object",
           "additionalProperties": {
             "type": "string",
-            "minLength": 1,
-            "pattern": "^(/|~|\\$)"
+            "minLength": 1
           },
           "propertyNames": {
             "minLength": 1
@@ -96,6 +95,34 @@
           }
         },
         "prestart": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "script": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["script"]
+          }
+        },
+        "setupHost": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "script": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["script"]
+          }
+        },
+        "cleanupHost": {
           "type": "array",
           "items": {
             "type": "object",

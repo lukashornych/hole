@@ -12,6 +12,18 @@ GITHUB_INSTALL_SCRIPT="https://raw.githubusercontent.com/${GITHUB_REPO}/main/ins
 VALID_AGENTS=("claude" "gemini" "codex")
 VALID_COMMANDS=("start" "destroy" "help" "version" "update" "uninstall")
 
+# Cleanup state (set during cmd_start, read by _cleanup_sandbox)
+_CLEANUP_SERVICES_STARTED="false"
+_CLEANUP_INSTANCE_NAME=""
+_CLEANUP_WITH_DOCKER="false"
+_CLEANUP_DOCKER_ENABLED_VOL=""
+_CLEANUP_DUMP_NETWORK_ACCESS="false"
+_CLEANUP_PROJECT_DIR=""
+_CLEANUP_AGENT=""
+_CLEANUP_INSTANCE_ID=""
+_CLEANUP_MERGED_SETTINGS=""
+_CLEANUP_HOST_DONE="false"
+
 # Import the logging library
 source "${SCRIPT_DIR}/logger.sh"
 # Import utility functions
@@ -49,7 +61,7 @@ Usage: hole {command} {agent} {path} [options]
 
 Commands:
   start     Create a sandbox, attach to the agent CLI, and destroy on exit
-  destroy   Remove all cached or orphaned Docker resources for a project
+  destroy   Remove Docker resources for a project, or all resources if no path given
   update    Update hole to the latest release
   uninstall Uninstall hole and optionally remove Docker resources
   help      Show this help message
@@ -81,8 +93,9 @@ Examples:
   hole start claude . --dump-network-access
   hole start claude . -- -p "explain this function"
   hole start claude . --rebuild -- --output-format stream-json
-  hole destroy .
-  hole destroy /path/to/project
+  hole destroy                            # destroy ALL Hole Docker resources
+  hole destroy .                          # destroy resources for current project
+  hole destroy /path/to/project           # destroy resources for specific project
 
 The sandbox is destroyed when you exit the agent CLI.
 EOF
@@ -321,6 +334,60 @@ resolve_host_path() {
   fi
 }
 
+# Execute hooks.setupHost scripts on the host, in array order, before any Docker work.
+# Scripts run as the current user with the shell environment plus Hole's exported vars.
+# Failure (non-zero exit) aborts sandbox startup via set -e; the EXIT trap still runs cleanupHost.
+run_setup_host_hooks() {
+  local merged_settings="${1}"
+  local project_dir="${2}"
+
+  local scripts
+  scripts=$(echo "${merged_settings}" | jq -r '.hooks.setupHost[]?.script // empty' 2>/dev/null) || true
+  [[ -z "${scripts}" ]] && return 0
+
+  while IFS= read -r raw_path; do
+    [[ -z "${raw_path}" ]] && continue
+    local resolved
+    resolved=$(resolve_host_path "${raw_path}" "${project_dir}")
+    if [[ ! -f "${resolved}" ]]; then
+      log_warn "setupHost hook script '${resolved}' not found, skipping"
+      continue
+    fi
+    log_info "Running setupHost hook: $(basename "${resolved}")..."
+    bash "${resolved}"
+  done <<< "${scripts}"
+}
+
+# Execute hooks.cleanupHost scripts on the host, in array order, during the EXIT trap.
+# A failing script is logged as a warning and does NOT abort subsequent cleanup work.
+# Idempotent via _CLEANUP_HOST_DONE so trap re-entry does not re-run hooks.
+run_cleanup_host_hooks() {
+  [[ "${_CLEANUP_HOST_DONE}" == "true" ]] && return 0
+  _CLEANUP_HOST_DONE="true"
+
+  local merged_settings="${_CLEANUP_MERGED_SETTINGS}"
+  local project_dir="${_CLEANUP_PROJECT_DIR}"
+  [[ -z "${merged_settings}" ]] && return 0
+
+  local scripts
+  scripts=$(echo "${merged_settings}" | jq -r '.hooks.cleanupHost[]?.script // empty' 2>/dev/null) || true
+  [[ -z "${scripts}" ]] && return 0
+
+  while IFS= read -r raw_path; do
+    [[ -z "${raw_path}" ]] && continue
+    local resolved
+    resolved=$(resolve_host_path "${raw_path}" "${project_dir}")
+    if [[ ! -f "${resolved}" ]]; then
+      log_warn "cleanupHost hook script '${resolved}' not found, skipping"
+      continue
+    fi
+    log_info "Running cleanupHost hook: $(basename "${resolved}")..."
+    if ! bash "${resolved}"; then
+      log_warn "cleanupHost hook '$(basename "${resolved}")' exited non-zero; continuing teardown"
+    fi
+  done <<< "${scripts}"
+}
+
 # Resolve file exclusion entries (literal paths + globs) and output volume mount lines.
 # Args: $1 = source directory, $2 = mount point prefix, $3 = newline-separated entries
 # Outputs volume mount lines to stdout, one per line.
@@ -371,7 +438,13 @@ resolve_file_exclusions() {
     if [[ -f "${full_path}" ]]; then
       echo "      - /dev/null:${mount_point}/${resolved}:ro"
     elif [[ -d "${full_path}" ]]; then
-      echo "      - ${mount_point}/${resolved}"
+      # Bind-mount an empty host directory under HOLE_TMP_DIR over the target.
+      # Avoids anonymous Docker volumes, which `compose down` does not remove
+      # without `-v`. HOLE_TMP_DIR is wiped by _cleanup_sandbox on exit, so
+      # no additional cleanup is needed.
+      local empty_dir="${HOLE_TMP_DIR}/excluded-dirs${mount_point}/${resolved}"
+      mkdir -p "${empty_dir}"
+      echo "      - ${empty_dir}:${mount_point}/${resolved}"
     else
       log_warn "excluded path '${resolved}' not found in ${source_dir}, skipping"
     fi
@@ -442,9 +515,11 @@ generate_instance_compose() {
     host_path="${host_path%/}"
     container_path="${container_path%/}"
     container_path=$(expand_env_vars "${container_path}")
-    # Expand tilde in container path using sandbox home
+    # Expand tilde in container path using sandbox home, resolve relative paths against project dir
     if [[ "${container_path}" == "~/"* ]]; then
       container_path="${SANDBOX_HOME:-/home/agent}/${container_path#\~/}"
+    elif [[ "${container_path}" != /* ]]; then
+      container_path="${project_dir}/${container_path}"
     fi
     # Resolve host path
     host_path=$(resolve_host_path "${host_path}" "${project_dir}")
@@ -923,6 +998,75 @@ sync_and_remove_docker_instance_volume() {
   "${CONTAINER_RUNTIME}" volume rm "${instance_vol}" >/dev/null 2>&1 || true
 }
 
+# Cleanup handler called by EXIT trap. Idempotent — safe to call multiple times.
+# Phases run in order: network log dump → compose down → network rm → docker sync → cleanupHost → tmp dir removal.
+_cleanup_sandbox() {
+  # Phase 1: network log dump (best-effort, before compose down stops proxy)
+  if [[ "${_CLEANUP_SERVICES_STARTED}" == "true" && "${_CLEANUP_DUMP_NETWORK_ACCESS}" == "true" ]]; then
+    local log_dir="${_CLEANUP_PROJECT_DIR}/.hole/logs"
+    mkdir -p "${log_dir}" 2>/dev/null || true
+    local log_file="${log_dir}/network-access-${_CLEANUP_AGENT}-${_CLEANUP_INSTANCE_ID}.log"
+    local proxy_container="${_CLEANUP_INSTANCE_NAME}-proxy-1"
+    local tmp_proxy_log
+    tmp_proxy_log="$(mktemp "${TMPDIR:-/tmp}/hole-sandbox-proxy-log.XXXXXX" 2>/dev/null)" || true
+
+    if [[ -n "${tmp_proxy_log}" ]]; then
+      # Stop proxy gracefully so tinyproxy exit() flushes stdio buffers to log file
+      "${CONTAINER_RUNTIME}" stop "${proxy_container}" >/dev/null 2>&1 || true
+
+      # Copy the log file from the stopped container and extract domains
+      if "${CONTAINER_RUNTIME}" cp "${proxy_container}:/var/log/tinyproxy/tinyproxy.log" "${tmp_proxy_log}" 2>/dev/null; then
+        grep -oE 'Established connection to host "[a-zA-Z0-9._-]+"|Proxying refused on filtered (url|domain) "[^"]+"' "${tmp_proxy_log}" | \
+          sed 's/Established connection to host "/ALLOWED /; s/Proxying refused on filtered [a-z]* "/DENIED /; s/"$//' | \
+          sort -u > "${log_file}" || true
+        log_line
+        log_info "Network access log written to: ${log_file}"
+      else
+        log_line
+        log_warn "Could not retrieve proxy log from container"
+      fi
+
+      rm -f "${tmp_proxy_log}"
+    fi
+  fi
+
+  # Phase 2: compose down (before tmp dir removal — compose files live there)
+  if [[ "${_CLEANUP_SERVICES_STARTED}" == "true" && ${#COMPOSE_CMD[@]} -gt 0 ]]; then
+    "${COMPOSE_CMD[@]}" down --remove-orphans 2>/dev/null || true
+  fi
+
+  # Phase 3: remove external sandbox network (compose down does not remove external networks)
+  if [[ -n "${_CLEANUP_INSTANCE_NAME}" ]]; then
+    "${CONTAINER_RUNTIME}" network rm "${_CLEANUP_INSTANCE_NAME}_sandbox" >/dev/null 2>&1 || true
+  fi
+
+  # Phase 4: sync Docker instance volume back to cache and remove it
+  if [[ "${_CLEANUP_SERVICES_STARTED}" == "true" ]] && \
+     [[ "${_CLEANUP_WITH_DOCKER}" == "true" || "${_CLEANUP_DOCKER_ENABLED_VOL}" == "true" ]]; then
+    log_info "Syncing Docker data to cache..."
+    sync_and_remove_docker_instance_volume "${_CLEANUP_INSTANCE_NAME}" 2>/dev/null || true
+  fi
+
+  # Phase 5: run cleanupHost hooks on the host (after Docker teardown, before tmp dir removal)
+  run_cleanup_host_hooks
+
+  # Phase 6: remove temp directory (must be last)
+  if [[ -n "${HOLE_TMP_DIR}" ]]; then
+    rm -rf "${HOLE_TMP_DIR}"
+  fi
+
+  if [[ "${_CLEANUP_SERVICES_STARTED}" == "true" ]]; then
+    log_line
+    log_info "Exited ${_CLEANUP_AGENT} CLI. Sandbox destroyed."
+  fi
+
+  # Prevent double cleanup
+  _CLEANUP_SERVICES_STARTED="false"
+  _CLEANUP_INSTANCE_NAME=""
+  _CLEANUP_MERGED_SETTINGS=""
+  _CLEANUP_HOST_DONE="false"
+}
+
 # Start command: create/start sandbox and attach to agent CLI
 cmd_start() {
   local agent="${1}"
@@ -945,8 +1089,8 @@ cmd_start() {
   fi
 
   HOLE_TMP_DIR="$(mktemp -d)"
-  # clean up temp folder after the script exits
-  trap "rm -rf '${HOLE_TMP_DIR}'" EXIT
+  # Register unified cleanup handler (covers all exit paths including signals)
+  trap '_cleanup_sandbox' EXIT
 
   # Validate settings files if present
   validate_settings "${GLOBAL_SETTINGS_FILE}" "global settings (~/.hole/settings.json)"
@@ -955,6 +1099,11 @@ cmd_start() {
   # Merge global and project settings
   local merged_settings
   merged_settings=$(merge_settings "${GLOBAL_SETTINGS_FILE}" "${project_dir}/.hole/settings.json")
+
+  # Expose state to the EXIT trap as early as possible so cleanupHost runs
+  # even if setupHost itself aborts startup.
+  _CLEANUP_MERGED_SETTINGS="${merged_settings}"
+  _CLEANUP_PROJECT_DIR="${project_dir}"
 
   # Validate startup agent is in the enabled agents list
   local agent_is_enabled=false
@@ -1021,6 +1170,9 @@ cmd_start() {
     seed_docker_instance_volume "${instance_name}"
   fi
 
+  # Run hooks.setupHost on the host before any Docker work
+  run_setup_host_hooks "${merged_settings}" "${project_dir}"
+
   # Pre-create the sandbox network — Docker picks a free subnet automatically.
   local sandbox_network_name="${instance_name}_sandbox"
   log_info "Creating sandbox network..."
@@ -1029,8 +1181,8 @@ cmd_start() {
   local dns_ip
   dns_ip=$(compute_dns_ip_from_subnet "${subnet}")
 
-  # Extend EXIT trap to also clean up the pre-created network
-  trap "rm -rf '${HOLE_TMP_DIR}'; ${CONTAINER_RUNTIME} network rm '${sandbox_network_name}' >/dev/null 2>&1 || true" EXIT
+  # Register instance name so EXIT trap can clean up the network even if startup fails below
+  _CLEANUP_INSTANCE_NAME="${instance_name}"
 
   # Generate per-project compose override from merged settings
   local project_compose_file
@@ -1061,52 +1213,21 @@ cmd_start() {
   log_line
   "${COMPOSE_CMD[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} agent
 
+  # Set cleanup state so the EXIT trap can run full teardown
+  _CLEANUP_SERVICES_STARTED="true"
+  _CLEANUP_WITH_DOCKER="${with_docker}"
+  _CLEANUP_DOCKER_ENABLED_VOL="${docker_enabled_vol}"
+  _CLEANUP_DUMP_NETWORK_ACCESS="${dump_network_access}"
+  _CLEANUP_PROJECT_DIR="${project_dir}"
+  _CLEANUP_AGENT="${agent}"
+  _CLEANUP_INSTANCE_ID="${instance_id}"
+
   # Attach terminal to the running agent
   log_info "Attaching to ${agent} agent..."
   log_line
-  "${CONTAINER_RUNTIME}" attach "${instance_name}-agent-1"
+  "${CONTAINER_RUNTIME}" attach "${instance_name}-agent-1" || true
 
-  # Dump network access log if requested
-  if [[ "${dump_network_access}" == true ]]; then
-    local log_dir="${project_dir}/.hole/logs"
-    mkdir -p "${log_dir}"
-    local log_file="${log_dir}/network-access-${agent}-${instance_id}.log"
-    local proxy_container="${instance_name}-proxy-1"
-    local tmp_proxy_log
-    tmp_proxy_log="$(mktemp "${TMPDIR:-/tmp}/hole-sandbox-proxy-log.XXXXXX")"
-
-    # Stop proxy gracefully so tinyproxy exit() flushes stdio buffers to log file
-    "${CONTAINER_RUNTIME}" stop "${proxy_container}" >/dev/null 2>&1 || true
-
-    # Copy the log file from the stopped container and extract domains
-    if "${CONTAINER_RUNTIME}" cp "${proxy_container}:/var/log/tinyproxy/tinyproxy.log" "${tmp_proxy_log}" 2>/dev/null; then
-      grep -oE 'Established connection to host "[a-zA-Z0-9._-]+"|Proxying refused on filtered (url|domain) "[^"]+"' "${tmp_proxy_log}" | \
-        sed 's/Established connection to host "/ALLOWED /; s/Proxying refused on filtered [a-z]* "/DENIED /; s/"$//' | \
-        sort -u > "${log_file}" || true
-      log_line
-      log_info "Network access log written to: ${log_file}"
-    else
-      log_line
-      log_warn "Could not retrieve proxy log from container"
-    fi
-
-    rm -f "${tmp_proxy_log}"
-  fi
-
-  # Destroy the sandbox after user exits
-  "${COMPOSE_CMD[@]}" down --remove-orphans
-
-  # Remove the pre-created sandbox network (compose down does not remove external networks)
-  "${CONTAINER_RUNTIME}" network rm "${instance_name}_sandbox" >/dev/null 2>&1 || true
-
-  # Sync Docker instance volume back to cache and remove it
-  if [[ "${with_docker}" == "true" || "${docker_enabled_vol}" == "true" ]]; then
-    log_info "Syncing Docker data to cache..."
-    sync_and_remove_docker_instance_volume "${instance_name}"
-  fi
-
-  log_line
-  log_info "Exited ${agent} CLI. Sandbox destroyed."
+  # Cleanup is handled by the EXIT trap (_cleanup_sandbox)
 }
 
 # Destroy command: remove all cached Docker resources for a project
@@ -1188,6 +1309,57 @@ cmd_destroy() {
 
   log_line
   log_info "Cached resources destroyed. Shared agent home volumes were preserved."
+}
+
+# Destroy-all command: remove ALL cached Docker resources across all projects
+cmd_destroy_all() {
+  log_info "Destroying all Hole Docker resources..."
+  log_line
+  detect_container_runtime
+
+  # Stop and remove all containers with name prefix "hole-sandbox-"
+  local containers
+  containers=$("${CONTAINER_RUNTIME}" ps -aq --filter "name=hole-sandbox-") || true
+  if [[ -n "${containers}" ]]; then
+    log_info "Stopping and removing containers..."
+    "${CONTAINER_RUNTIME}" stop ${containers} 2>/dev/null || true
+    "${CONTAINER_RUNTIME}" rm -f ${containers} || log_warn "Failed to remove some containers"
+  else
+    log_info "No containers found"
+  fi
+
+  # Remove all images matching "hole-sandbox/*"
+  local images
+  images=$("${CONTAINER_RUNTIME}" images --filter "reference=hole-sandbox/*" -q) || true
+  if [[ -n "${images}" ]]; then
+    log_info "Removing images..."
+    "${CONTAINER_RUNTIME}" rmi ${images} || log_warn "Failed to remove some images"
+  else
+    log_info "No images found"
+  fi
+
+  # Remove all networks matching "hole-sandbox-"
+  local networks
+  networks=$("${CONTAINER_RUNTIME}" network ls --filter "name=hole-sandbox-" -q) || true
+  if [[ -n "${networks}" ]]; then
+    log_info "Removing networks..."
+    "${CONTAINER_RUNTIME}" network rm ${networks} || log_warn "Failed to remove some networks"
+  else
+    log_info "No networks found"
+  fi
+
+  # Remove all volumes matching "hole-sandbox-"
+  local volumes
+  volumes=$("${CONTAINER_RUNTIME}" volume ls --filter "name=hole-sandbox-" -q) || true
+  if [[ -n "${volumes}" ]]; then
+    log_info "Removing volumes..."
+    "${CONTAINER_RUNTIME}" volume rm ${volumes} || log_warn "Failed to remove some volumes"
+  else
+    log_info "No volumes found"
+  fi
+
+  log_line
+  log_info "All Hole Docker resources destroyed."
 }
 
 # Print installed version
@@ -1380,6 +1552,10 @@ main() {
   fi
   if [[ "${command}" == "help" ]] || [[ -z "${command}" ]]; then
     show_help
+    exit 0
+  fi
+  if [[ "${command}" == "destroy" && -z "${agent}" ]]; then
+    cmd_destroy_all
     exit 0
   fi
 

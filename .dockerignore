@@ -1,0 +1,30 @@
+# Only the proxy service builds from the project root as its context.
+# Everything listed here is excluded from the build context sent to the Docker daemon.
+# The agent and dns Dockerfiles use a curated temp directory as context and are unaffected.
+
+.git
+.github
+.gitignore
+.gitattributes
+
+.claude
+.idea
+.vscode
+.DS_Store
+
+*.md
+*.log
+droast-issues.txt
+
+# Source for unrelated services (proxy Dockerfile does not COPY from the context)
+agents/
+dns/
+docs/
+img/
+test/
+tests/
+
+# Scratch / dependency caches that might appear locally
+node_modules/
+.venv/
+__pycache__/

@@ -1,5 +1,11 @@
 FROM alpine:3.19
 
+# Fail the RUN below if any command in a pipe fails (e.g. curl 404 upstream)
+SHELL ["/bin/sh", "-o", "pipefail", "-c"]
+
+EXPOSE 53/udp
+EXPOSE 53/tcp
+
 ARG COREDNS_VERSION=1.12.1
 
 RUN apk add --no-cache netcat-openbsd curl \
