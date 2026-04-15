@@ -2,6 +2,9 @@ ARG BASE_IMAGE=ubuntu:24.04
 
 FROM ${BASE_IMAGE}
 
+# Use bash with pipefail so any failed command in a pipe aborts the build
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 ARG UID=1000
 ARG GID=1000
 ARG AGENT_USERNAME=agent
@@ -17,7 +20,7 @@ ARG CACHEBUST=1
 # Dependencies installaction
 
 ## Base dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     jq \
@@ -54,9 +57,10 @@ RUN for agent_dir in /tmp/agent-installs/*/; do \
     done
 
 # Create agent user
-RUN groupadd -g "${GID}" "${AGENT_USERNAME}" && \
-    useradd -u "${UID}" -g "${GID}" -m -d "${AGENT_HOME}" -s /bin/bash "${AGENT_USERNAME}"
-RUN echo "${AGENT_USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${AGENT_USERNAME}
+# -l on useradd avoids a huge sparse /var/log/lastlog entry when host UID is very high
+RUN groupadd -g "${GID}" "${AGENT_USERNAME}" \
+    && useradd -l -u "${UID}" -g "${GID}" -m -d "${AGENT_HOME}" -s /bin/bash "${AGENT_USERNAME}" \
+    && echo "${AGENT_USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${AGENT_USERNAME}
 
 # Prepare Agent CLI installations (user phase — user-space tools)
 RUN for agent_dir in /tmp/agent-installs/*/; do \
