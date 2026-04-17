@@ -82,6 +82,12 @@ USER ${AGENT_USERNAME}
 
 # Execute Agent CLI installations (user phase — user-space tools)
 ENV HOME=${AGENT_HOME}
+
+# support for non-interactive shells (agents run non-interactively), e.g. using NVM in non-interactive shells
+ENV BASH_ENV="${AGENT_HOME}/.bash_env"
+RUN touch "${AGENT_HOME}/.bash_env"
+RUN echo '[ -s "${BASH_ENV}" ] && . "${BASH_ENV}"' >> "${AGENT_HOME}/.bashrc"
+
 RUN for agent_dir in /tmp/agent-installs/*/; do \
       agent=$(basename "${agent_dir}"); \
       if [ -f "/tmp/agent-installs/${agent}/install-user.sh" ]; then \
