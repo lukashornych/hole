@@ -1088,7 +1088,10 @@ cmd_start() {
     build_flag=(--build)
   fi
 
-  HOLE_TMP_DIR="$(mktemp -d)"
+  # Place under $HOME so Colima/Lima VMs (which share $HOME but not $TMPDIR
+  # on macOS) can bind-mount files from this dir into containers.
+  mkdir -p "${HOME}/.hole/tmp"
+  HOLE_TMP_DIR="$(mktemp -d "${HOME}/.hole/tmp/run.XXXXXX")"
   # Register unified cleanup handler (covers all exit paths including signals)
   trap '_cleanup_sandbox' EXIT
 

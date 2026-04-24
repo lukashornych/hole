@@ -119,6 +119,8 @@ hole uninstall                # uninstall hole and optionally remove Docker reso
 
 
 
+> _Note: Hole keeps its per-run scratch directory under `~/.hole/tmp/` instead of `$TMPDIR`. This is intentional so that VM-backed runtimes (Colima, Lima, Podman Machine) — which share `$HOME` but not `/var/folders/...` by default on macOS — can bind-mount generated config files (tinyproxy whitelist, Corefile, prestart scripts, etc.) into the sandbox containers._
+
 To install the latest version, run the following command in your terminal:
 
 ```sh
