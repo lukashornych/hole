@@ -111,19 +111,15 @@ hole uninstall                # uninstall hole and optionally remove Docker reso
 
 **Supported platforms:** Linux, macOS, and WSL
 
-**Requirements:** `curl` or `wget`, `tar`, [`docker`](https://www.docker.com/get-started/) or [`podman`](https://podman.io/docs/installation) (with compose plugin), [`jq`](https://jqlang.github.io/jq/download/), [`jv`](https://github.com/santhosh-tekuri/jsonschema/releases)
+**Requirements:** `curl` or `wget`, `tar`, Docker runtime (see [supported runtimes](#supported-docker-runtimes)), [`jq`](https://jqlang.github.io/jq/download/), [`jv`](https://github.com/santhosh-tekuri/jsonschema/releases)
 
 > _Note: `jv` utility documentation mentions installation through golang, you don't have to do that, you can download the binary from their [release page](https://github.com/santhosh-tekuri/jsonschema/releases) and place it in your bin folder you have in your PATH._
 
 **Optional:** `flock` (from `util-linux`) — enables persistent Docker image caching across sandbox restarts when using Docker-in-Docker. Pre-installed on most Linux distributions; on macOS, install via `brew install util-linux`.
 
-**Container runtime:** Hole auto-detects Docker or Podman (Docker is preferred when both are available). To override the auto-detection, set the `HOLE_RUNTIME` environment variable:
 
-```sh
-export HOLE_RUNTIME=podman
-```
 
-> _Note: When using Podman, ensure `podman compose` is available (via `podman-compose` or the Podman Compose plugin). Rootless Podman may require additional configuration for bind mount permissions._
+> _Note: Hole keeps its per-run scratch directory under `~/.hole/tmp/` instead of `$TMPDIR`. This is intentional so that VM-backed runtimes (Colima, Lima, Podman Machine) — which share `$HOME` but not `/var/folders/...` by default on macOS — can bind-mount generated config files (tinyproxy whitelist, Corefile, prestart scripts, etc.) into the sandbox containers._
 
 To install the latest version, run the following command in your terminal:
 
@@ -137,6 +133,22 @@ If `~/.local/bin` is not in your `PATH`, add it to your shell profile (`.bashrc`
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
+```
+
+### Supported Docker runtimes
+
+You can theoretically use any Docker runtime that supports the Docker Compose v2 API, however we've tested the following:
+
+- [`docker`](https://www.docker.com/get-started/) 
+- [`podman`](https://podman.io/docs/installation) (with compose plugin)
+  - _when using Podman, ensure `podman compose` is available (via `podman-compose` or the Podman Compose plugin). Rootless Podman may require additional configuration for bind mount permissions._
+- [`colima`](https://github.com/abiosoft/colima) (with compose plugin)
+
+Hole auto-detects Docker or Podman (Docker is preferred when both are available). To override the auto-detection, 
+set the `HOLE_RUNTIME` environment variable:
+
+```sh
+export HOLE_RUNTIME=podman
 ```
 
 ### Update
