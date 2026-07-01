@@ -616,6 +616,39 @@ generate_instance_compose() {
     done <<< "${host_gateway_domains}"
   fi
 
+  # Generate proxy config with merged ConnectPort list.
+  # If user supplied network.allowedPorts (at global or project level), the merged
+  # list replaces the defaults (80, 443). An empty array disables CONNECT entirely
+  # (emitted as `ConnectPort 0`).
+  local proxy_conf="${HOLE_TMP_DIR}/tinyproxy.conf"
+  local base_proxy_conf
+  if [[ "${unrestricted_network}" == true ]]; then
+    base_proxy_conf="${SCRIPT_DIR}/proxy/tinyproxy-unrestricted.conf"
+  else
+    base_proxy_conf="${SCRIPT_DIR}/proxy/tinyproxy.conf"
+  fi
+  local allowed_ports_set
+  allowed_ports_set=$(echo "${merged_settings}" | jq -r '(.network // {}) | has("allowedPorts")' 2>/dev/null) || allowed_ports_set="false"
+  local allowed_ports
+  allowed_ports=$(echo "${merged_settings}" | jq -r '.network.allowedPorts[]? // empty' 2>/dev/null) || true
+  grep -v -E '^[[:space:]]*ConnectPort[[:space:]]' "${base_proxy_conf}" > "${proxy_conf}"
+  {
+    printf '\n'
+    if [[ "${allowed_ports_set}" == "true" ]]; then
+      if [[ -z "${allowed_ports}" ]]; then
+        echo "ConnectPort 0"
+      else
+        while IFS= read -r port; do
+          [[ -z "${port}" ]] && continue
+          echo "ConnectPort ${port}"
+        done <<< "${allowed_ports}"
+      fi
+    else
+      echo "ConnectPort 443"
+      echo "ConnectPort 80"
+    fi
+  } >> "${proxy_conf}"
+
   # Build CoreDNS Corefile: custom domain blocks + catch-all forward
   local corefile="${HOLE_TMP_DIR}/Corefile"
 
@@ -787,11 +820,7 @@ BLOCK
     echo "      - ${dns_ip}"
     echo "      - 127.0.0.11"
     echo "    volumes:"
-    if [[ "${unrestricted_network}" == true ]]; then
-      echo "      - ${SCRIPT_DIR}/proxy/tinyproxy-unrestricted.conf:/etc/tinyproxy/tinyproxy.conf:ro"
-    else
-      echo "      - ${SCRIPT_DIR}/proxy/tinyproxy.conf:/etc/tinyproxy/tinyproxy.conf:ro"
-    fi
+    echo "      - ${proxy_conf}:/etc/tinyproxy/tinyproxy.conf:ro"
     echo "      - ${HOLE_TMP_DIR}/tinyproxy-domain-whitelist.txt:/etc/tinyproxy/allowed-domains.txt:ro"
     if [[ "${has_host_gateway_domains}" == true ]]; then
       echo "    extra_hosts:"

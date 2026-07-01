@@ -420,6 +420,25 @@ By default, agents can only reach domains required for their operation (e.g. `ap
 
 Use plain domain names — dots are auto-escaped for the proxy filter. After changing the whitelist, restart the sandbox (changes take effect on next `hole start`).
 
+### Allowed ports
+
+By default the proxy only permits `CONNECT` to ports `80` and `443`. To reach a service on another port (e.g. an upstream API on port `2024`), list the ports in `network.allowedPorts`:
+
+```json
+{
+  "network": {
+    "domainWhitelist": ["37.221.253.75"],
+    "allowedPorts": [443, 80, 2024]
+  }
+}
+```
+
+- **The list replaces the defaults.** If you set `allowedPorts`, the built-in `[80, 443]` are dropped — include them yourself if you still need them. This is intentional: it gives you a single, authoritative view of which CONNECT ports the proxy accepts, and lets you lock down port 80 if you want HTTPS-only.
+- **Proxy-global, not per-host.** Tinyproxy applies `ConnectPort` across all whitelisted hosts; there is no way to bind a port to a single host. Adding port `2024` lets any whitelisted host be reached on that port.
+- **Empty array disables CONNECT entirely** (`allowedPorts: []` emits `ConnectPort 0`).
+- **Global / project merge.** Arrays from `~/.hole/settings.json` and `.hole/settings.json` are concatenated and deduplicated before the replace-defaults step is applied.
+- Changes take effect on next `hole start`.
+
 ### Host gateway domains
 
 Allow the agent to reach services running on the Docker host by domain name. Configured domains resolve to the host gateway IP via a CoreDNS container inside the sandbox:
