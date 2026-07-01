@@ -422,7 +422,7 @@ Use plain domain names — dots are auto-escaped for the proxy filter. After cha
 
 ### Allowed ports
 
-By default the proxy only permits HTTPS `CONNECT` to ports `80` and `443`. To reach a service on another port (e.g. an upstream API on port `2024`), list the ports in `network.allowedPorts`:
+By default the proxy only permits `CONNECT` to ports `80` and `443`. To reach a service on another port (e.g. an upstream API on port `2024`), list the ports in `network.allowedPorts`:
 
 ```json
 {
