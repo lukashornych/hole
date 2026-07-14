@@ -226,7 +226,8 @@ create_project_name_from_project_path() {
 
 # Generate a random 6-character hex instance ID
 generate_instance_id() {
-  LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6; echo
+  LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom 2>/dev/null | head -c 6 || true
+  echo
 }
 
 # Create an internal Docker network with a user-configured subnet (ipv4_address requires it).
