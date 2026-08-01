@@ -183,6 +183,30 @@ merge_settings() {
   '
 }
 
+# Warn when a project setup hook silently replaces the global one. In the legacy
+# object form hooks.setup is a scalar as far as deep_merge is concerned, so the
+# project value wins and the global script never runs. The array form merges.
+warn_on_setup_hook_shadowing() {
+  local global_file="${1}"
+  local project_file="${2}"
+
+  [[ -f "${global_file}" && -f "${project_file}" ]] || return 0
+  require_cmd "jq"
+
+  local global_type
+  global_type=$(jq -r '.hooks.setup | type' "${global_file}" 2>/dev/null) || return 0
+  local project_type
+  project_type=$(jq -r '.hooks.setup | type' "${project_file}" 2>/dev/null) || return 0
+
+  # Only two arrays merge; any other combination lets the project value replace
+  # the global one entirely.
+  if [[ "${global_type}" != "null" && "${project_type}" != "null" ]] \
+     && [[ "${global_type}" != "array" || "${project_type}" != "array" ]]; then
+    log_warn "project hooks.setup replaces the global one, so the setup script(s) from ~/.hole/settings.json will NOT run"
+    log_warn "use the array form ('\"setup\": [{ \"script\": \"...\" }]') in both files to run all setup scripts"
+  fi
+}
+
 # Resolve project directory to absolute path
 resolve_absolute_project_dir() {
   local target_dir="${1:-.}"
@@ -722,18 +746,38 @@ BLOCK
   local base_image
   base_image=$(echo "${merged_settings}" | jq -r '.container.baseImage // empty' 2>/dev/null) || true
 
-  # Read setup hook script from merged settings
-  local setup_script_path
-  setup_script_path=$(echo "${merged_settings}" | jq -r '.hooks.setup.script // empty' 2>/dev/null) || true
-  local has_setup_script=false
+  # Read setup hook scripts from merged settings.
+  # Accepts both the array form (global and project scripts are merged and all
+  # of them run) and the legacy object form (a single script; a project value
+  # replaces the global one).
+  local setup_scripts
+  setup_scripts=$(echo "${merged_settings}" | jq -r '
+    (.hooks.setup // empty) as $setup
+    | if ($setup | type) == "array" then $setup[].script // empty
+      else $setup.script // empty
+      end' 2>/dev/null) || true
 
-  if [[ -n "${setup_script_path}" ]]; then
-    setup_script_path=$(resolve_host_path "${setup_script_path}" "${project_dir}")
-    if [[ -f "${setup_script_path}" ]]; then
-      has_setup_script=true
-    else
-      log_warn "setup hook script '${setup_script_path}' not found, skipping"
-    fi
+  # Always create setup-scripts dir in temp (even if empty) so Dockerfile COPY works
+  mkdir -p "${HOLE_TMP_DIR}/setup-scripts"
+  touch "${HOLE_TMP_DIR}/setup-scripts/.gitkeep"
+
+  if [[ -n "${setup_scripts}" ]]; then
+    local setup_index=0
+    while IFS= read -r setup_script_path; do
+      [[ -z "${setup_script_path}" ]] && continue
+      setup_script_path=$(resolve_host_path "${setup_script_path}" "${project_dir}")
+      if [[ -f "${setup_script_path}" ]]; then
+        setup_index=$((setup_index + 1))
+        local setup_basename
+        setup_basename=$(basename "${setup_script_path}")
+        local setup_dest
+        setup_dest=$(printf "%03d-%s" "${setup_index}" "${setup_basename}")
+        cp "${setup_script_path}" "${HOLE_TMP_DIR}/setup-scripts/${setup_dest}"
+        chmod +x "${HOLE_TMP_DIR}/setup-scripts/${setup_dest}"
+      else
+        log_warn "setup hook script '${setup_script_path}' not found, skipping"
+      fi
+    done <<< "${setup_scripts}"
   fi
 
   # Read prestart hook scripts from merged settings
@@ -771,13 +815,6 @@ BLOCK
   # Copy entrypoint.sh to build context
   mkdir -p "${HOLE_TMP_DIR}"
   cp "${SCRIPT_DIR}/agents/entrypoint.sh" "${HOLE_TMP_DIR}/entrypoint.sh"
-
-  # Always create setup-scripts dir in temp (even if empty) so Dockerfile COPY works
-  mkdir -p "${HOLE_TMP_DIR}/setup-scripts"
-  touch "${HOLE_TMP_DIR}/setup-scripts/.gitkeep"
-  if [[ "${has_setup_script}" == true ]]; then
-    cp "${setup_script_path}" "${HOLE_TMP_DIR}/setup-scripts/setup.sh"
-  fi
 
   # Copy enabled agents' install scripts to build context
   mkdir -p "${HOLE_TMP_DIR}/agent-installs"
@@ -1130,6 +1167,7 @@ cmd_start() {
   validate_settings "${project_dir}/.hole/settings.json" "project settings (.hole/settings.json)"
 
   # Merge global and project settings
+  warn_on_setup_hook_shadowing "${GLOBAL_SETTINGS_FILE}" "${project_dir}/.hole/settings.json"
   local merged_settings
   merged_settings=$(merge_settings "${GLOBAL_SETTINGS_FILE}" "${project_dir}/.hole/settings.json")
 

@@ -94,14 +94,32 @@
       "additionalProperties": false,
       "properties": {
         "setup": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "script": {
-              "type": "string",
-              "minLength": 1
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "script": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["script"]
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "script": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
             }
-          }
+          ]
         },
         "prestart": {
           "type": "array",

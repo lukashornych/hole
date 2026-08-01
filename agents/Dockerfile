@@ -71,12 +71,13 @@ RUN for agent_dir in /tmp/agent-installs/*/; do \
       fi; \
     done
 
-## Prepare user setup hook script
+## Prepare user setup hook scripts (numbered by hole.sh, executed in sorted order)
 COPY setup-scripts/ /tmp/setup-scripts/
-RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
-      chown "${AGENT_USERNAME}" /tmp/setup-scripts/setup.sh && \
-      chmod +x /tmp/setup-scripts/setup.sh; \
-    fi
+RUN set -e; for setup_script in /tmp/setup-scripts/*.sh; do \
+      [ -f "${setup_script}" ] || continue; \
+      chown "${AGENT_USERNAME}" "${setup_script}"; \
+      chmod +x "${setup_script}"; \
+    done
 
 USER ${AGENT_USERNAME}
 
@@ -95,10 +96,13 @@ RUN for agent_dir in /tmp/agent-installs/*/; do \
       fi; \
     done
 
-## Execute User setup hook script
-RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
-      /tmp/setup-scripts/setup.sh; \
-    fi
+## Execute User setup hook scripts (global settings first, then project settings)
+# set -e: a failing setup script must abort the build, not be masked by a later one
+RUN set -e; for setup_script in /tmp/setup-scripts/*.sh; do \
+      [ -f "${setup_script}" ] || continue; \
+      echo "==> Running setup hook: $(basename "${setup_script}")"; \
+      "${setup_script}"; \
+    done
 
 USER root
 

@@ -108,15 +108,20 @@ passed to the DinD sidecar when Docker is enabled.
 
 | Hook | Where | When | Runs as | On failure |
 |---|---|---|---|---|
-| `hooks.setup.script` | container (build) | during `docker build`, after agent installs | agent user | aborts build |
+| `hooks.setup[]` | container (build) | during `docker build`, after agent installs | agent user | aborts build |
 | `hooks.prestart[]` | container (runtime) | every start, before the agent CLI (`entrypoint.sh`) | agent user | aborts startup |
 | `hooks.setupHost[]` | host | before any Docker work in `cmd_start` | host user | aborts startup (cleanupHost still runs) |
 | `hooks.cleanupHost[]` | host | teardown phase 5, after Docker teardown | host user | warning only, teardown continues |
 
 Implementation notes:
 
-- `setup.script` is a scalar (project overrides global); the script is copied into the build
-  context as `setup-scripts/setup.sh`, so content changes bust the Docker layer cache.
+- `setup` is an array (global entries first, then project); scripts are copied into the build
+  context as `setup-scripts/001-name.sh`, `002-name.sh`, ... and `agents/Dockerfile` runs them in
+  sorted order under `set -e`. Content changes bust the Docker layer cache.
+  The legacy object form (`"setup": { "script": "..." }`) is still accepted, but it is a scalar,
+  so a project value replaces the global one and the global script never runs —
+  `warn_on_setup_hook_shadowing()` warns whenever the two settings files do not both use the
+  array form.
 - `prestart` is an array (global entries first, then project); scripts are copied to
   `${HOLE_TMP_DIR}/prestart-scripts/` with numbered prefixes (`001-name.sh`, ...) and mounted
   read-only at `/tmp/prestart-scripts/`; `entrypoint.sh` runs them in sorted order.

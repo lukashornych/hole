@@ -52,8 +52,8 @@ Build phases, in order:
    user (`useradd -l` avoids a huge sparse lastlog for very high host UIDs); passwordless sudo.
 7. **User-phase agent installs** run as the agent user, with `BASH_ENV=~/.bash_env` set up so
    tools installed via nvm & co. work in non-interactive shells.
-8. **User setup hook** (`hooks.setup.script`, copied to `setup-scripts/setup.sh`) runs as the
-   agent user; script content changes bust the Docker layer cache.
+8. **User setup hooks** (`hooks.setup`, copied to `setup-scripts/001-name.sh`, `002-name.sh`, ...)
+   run as the agent user in sorted order; script content changes bust the Docker layer cache.
 9. **Entrypoint**: `agents/entrypoint.sh` — runs any mounted `/tmp/prestart-scripts/*` in sorted
    order (numbered `001-`, `002-`, ... prefixes; failure aborts startup), then `exec "$@"` into
    the agent command.

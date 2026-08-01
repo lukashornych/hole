@@ -593,24 +593,26 @@ If a setupHost script exits with a non-zero status, the sandbox startup is abort
 
 #### Setup hook
 
-Run a custom bash script during the Docker image build to perform system-level setup (install packages, configure locales, add apt repositories, etc.):
+Run custom bash scripts during the Docker image build to perform system-level setup (install packages, configure locales, add apt repositories, etc.):
 
 ```json
 {
   "hooks": {
-    "setup": {
-      "script": ".hole/setup.sh"
-    }
+    "setup": [
+      { "script": ".hole/setup.sh" },
+      { "script": "~/shared-setup.sh" }
+    ]
   }
 }
 ```
 
-The script runs as the agent user during the image build, after dependency installation. Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
+Scripts run as the agent user during the image build, after dependency installation. Passwordless `sudo` is available, so they can install system-wide packages. Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
 
-**Important:** The agent home directory (mirrors host's `$HOME`, e.g., `/Users/me` on macOS) is backed by a persistent Docker volume that overrides image contents.
-Do not install anything to the agent home directory in the setup script — it will be hidden by the volume mount.
+Scripts execute in array order (global settings first, then project settings), and both settings files contribute: a project can add its own build steps without losing the ones defined globally. If a setup script exits with a non-zero status, the image build fails and the remaining scripts do not run.
 
-Use `--rebuild` to force a fresh build if needed.
+**Legacy object form.** A single script can also be configured as `"setup": { "script": ".hole/setup.sh" }`. This form still works, but it is a scalar, so a project value **replaces** the global one instead of merging with it — the global script then never runs. Hole warns when this happens. Use the array form in both files to run all of them.
+
+Use `--rebuild` to force a fresh build if needed — setup scripts only run when the image is actually built.
 
 #### Prestart hook
 
