@@ -1,169 +1,263 @@
 # Architecture
 
-Hole is a single-process bash CLI (`hole.sh`) that orchestrates a multi-container sandbox via
-Docker Compose (or Podman Compose). There is no daemon: `hole start` builds/starts the sandbox,
-attaches the terminal to the agent container, and an `EXIT` trap destroys everything when the
-agent CLI exits.
+Hole is a single Go binary (`cmd/hole`) that orchestrates a multi-container sandbox via Docker
+Compose (or Podman Compose). There is no daemon and no server: `hole start` builds and starts
+the sandbox, attaches the terminal to the agent container, and a detached supervisor destroys
+everything when the agent exits.
 
-## CLI entry point
-
-`hole.sh` → `main()`:
-
-1. Parses arguments in a single loop. Flags before `--` belong to Hole
-   (`-d/--debug`, `-n/--dump-network-access`, `-r/--rebuild`, `-u/--unrestricted-network`,
-   `--with-docker`); everything after `--` is passed verbatim to the agent CLI.
-2. Positional arguments: `command` (`start`, `destroy`, `update`, `uninstall`, `version`, `help`),
-   `agent` (`claude`, `gemini`, `codex` — from `VALID_AGENTS`), `path` (defaults to `.`).
-3. Dispatches to `cmd_start`, `cmd_destroy` / `cmd_destroy_all` (no path given), `cmd_update`,
-   `cmd_uninstall`, `cmd_version`.
-
-### Sandbox identity
-
-- **Project name** (`create_project_name_from_project_path`): sanitized project dir basename +
-  `-` + first 8 hex chars of the sha1 of the sanitized absolute path. Stable per project —
-  used for cached image names (`hole-sandbox/agent-${PROJECT_NAME}:latest`, `.../proxy-...`,
-  `.../dns-...`) and for `hole destroy <path>` resource filtering.
-- **Instance ID** (`generate_instance_id`): 6 random `[a-z0-9]` chars from `/dev/urandom`.
-  Unique per run — multiple sandboxes of the same project can run concurrently.
-- **Instance name**: `hole-sandbox-<project_name>-<instance_id>`. Used as the compose project
-  name (`-p`), the sandbox network name (`<instance_name>_sandbox`), and container name prefix.
-
-### Container runtime detection
-
-`detect_container_runtime()` resolves the runtime in priority order: `$HOLE_RUNTIME` env var →
-`docker` → `podman` → error. It also verifies `<runtime> compose version` works. The resolved
-command is stored in the `CONTAINER_RUNTIME` global (one of the few intentional globals; see
-[guidelines](guidelines.md)).
-
-### Temp directory
-
-Every `start` creates `HOLE_TMP_DIR` via `mktemp -d "${HOME}/.hole/tmp/run.XXXXXX"`. It lives
-under `$HOME` (not `$TMPDIR`) so Colima/Lima VMs on macOS — which share `$HOME` but not
-`$TMPDIR` — can bind-mount files from it. It holds all generated per-run artifacts:
-
-- `docker-compose.yml` — generated compose override
-- `tinyproxy.conf` + `tinyproxy-domain-whitelist.txt` — generated proxy config
-- `Corefile` + `dns-entrypoint.sh` — DNS build context
-- `entrypoint.sh`, `agent-installs/`, `setup-scripts/` — agent image build context
-- `prestart-scripts/` — numbered prestart hook scripts (mounted read-only)
-- `excluded-dirs/` — empty dirs bind-mounted over excluded directories
-
-The whole directory is wiped in the last cleanup phase.
-
-## Compose file layering
-
-`create_compose_cmd()` assembles one compose invocation from five files, later files overriding
-earlier ones:
+## Package layout
 
 ```
-docker-compose.yml            # base: defines networks (sandbox, internet)
-proxy/docker-compose.yml      # proxy service
-dns/docker-compose.yml        # dns service
-agents/docker-compose.yml     # agent service (project mount, proxy env vars)
-${HOLE_TMP_DIR}/docker-compose.yml   # generated per-run override
+cmd/hole/              thin entry point: logging setup, dispatch to internal/cli
+assets/                go:embed root — agent plugins, Dockerfiles, entrypoints, schema
+internal/cli/          argument parsing, help text, command dispatch
+internal/config/       settings load/validate/merge, profiles, exclusion glob matcher
+internal/hostenv/      env expansion, path pipeline, host identity, ~/.hole layout, identity
+internal/engine/       the only package that shells out to docker/podman
+internal/compose/      typed compose model (~20 fields) + YAML marshalling
+internal/network/      allow-list model, gateway artifact generation, subnet allocator
+internal/agents/       agent registry: embedded builtins + ~/.hole/agents user agents
+internal/image/        canonical image config, manifest hashing, image identity and scope
+internal/hooks/        hook script resolution and host-side execution
+internal/sandbox/      orchestration: startup, mounts, compose generation, teardown, dump,
+                       the watchdog handoff, garbage collection, `hole list`
+internal/state/        instance registry under ~/.hole/instances
+internal/worktree/     git worktree detection and the libraries it implies
+internal/dindregistry/ the long-lived pull-through image cache
+internal/update/       release discovery, self-update, version-change migration, uninstall
+internal/logging/      slog setup: console handler + per-run JSON file handler
+internal/version/      version stamping
+test/e2e/              end-to-end suite driven by a generated test agent
 ```
 
-The generated override (`generate_instance_compose()`) contributes everything derived from
-merged settings and flags: build contexts/args, exclusion/inclusion/library volumes, environment
-variables, memory limits, the agent command (from `command.json` + args after `--`, or `bash` in
-debug mode), proxy/DNS config mounts, the optional DinD sidecar, and the external sandbox
-network reference.
+`internal/engine` deliberately has no interface or abstraction layer. Its value is that every
+runtime invocation lives in one file, so podman quirks and missing prune filters have exactly
+one place to be handled.
 
-Runtime variables consumed by the static compose files are exported by `cmd_start`:
-`PROJECT_NAME`, `PROJECT_DIR`, `SANDBOX_USERNAME`, `SANDBOX_HOME`, `SANDBOX_UID`/`SANDBOX_GID`
-(Linux only — Docker Desktop/OrbStack handle ID mapping themselves), and `CACHEBUST` /
-`SANDBOX_REBUILD` when `--rebuild` is used.
+## Assets
+
+Every runtime file — Dockerfiles, container entrypoints, agent plugins, the JSON schema — lives
+under `assets/` and is embedded with `go:embed`. The binary is the package; there is no install
+directory to keep in sync. See [guidelines](guidelines.md#non-negotiable-rules).
+
+## Sandbox identity
+
+- **Project name**: sanitized basename + `-` + the first 8 hex characters of the sha1 of the
+  absolute path. Stable per project, and two projects with the same basename never collide. Used
+  for image repositories and `hole destroy <path>`. The hash covers the path **as written**, not
+  the sanitized form: sanitizing loses `_` and case, and `hole destroy` force-removes by this
+  prefix — so a collision would tear down a live sandbox of a different project.
+- **Instance ID**: 6 random `[a-z0-9]` characters from `crypto/rand`.
+- **Instance name**: `hole-sandbox-<project_name>-<instance_id>` — the compose project name, the
+  network name prefix, and the container name prefix.
+
+## Directories
+
+| Path | Contents |
+|---|---|
+| `~/.hole/settings.json` | global settings |
+| `~/.hole/agents/<name>/` | user-defined agents |
+| `~/.hole/instances/<instance>.json` | one file per running sandbox (plus its lock files) |
+| `~/.hole/logs/run-*.log` | per-run debug logs, ~7 day retention |
+| `~/.hole/tmp/run.XXXXXX/` | per-run generated artifacts |
+| `~/.hole/state.json` | the last version that completed a run |
+
+The run temp directory lives under `$HOME` rather than `$TMPDIR` because Colima, Lima and
+Podman-Machine VMs share `$HOME` but not `/var/folders`, and generated files there must be
+bind-mountable into containers.
 
 ## Container architecture
 
-**Two-network design for security:**
+Two networks per instance, both created by Hole and referenced as `external` in the generated
+compose file:
 
-- `sandbox` network: `internal: true` (no direct internet access) — where the agent runs.
-  It is **pre-created by `create_sandbox_network()`** outside compose (declared `external` in the
-  override) because assigning a fixed DNS IP requires an explicit subnet: Docker's IPAM picks a
-  free subnet via a temporary probe network, then the network is re-created with `--subnet` set.
-  The DNS container gets the fixed address `<subnet base>.53` (`compute_dns_ip_from_subnet`).
-- `internet` network: plain bridge with internet access — joined only by `proxy` and `dns`.
+- `<instance>_sandbox` — `internal: true`, where the agent runs. The gateway holds the fixed
+  address `<subnet>.53` on it and is the sandbox's DNS server.
+- `<instance>_internet` — a plain bridge the gateway masquerades out of.
 
-**Services:**
+Services:
 
-- `proxy`: tinyproxy on port 8888, filters requests against the merged domain whitelist.
-  See [networking](networking.md).
-- `dns`: CoreDNS; resolves user-configured `hostGatewayDomains` to the Docker host gateway and
-  forwards everything else to Docker's embedded DNS (`127.0.0.11`). See [networking](networking.md).
-- `agent`: unified agent container (Ubuntu 24.04 by default) with all enabled agent CLIs
-  installed. The startup agent selects the container command. See [agents](agents.md).
-- `docker` (optional): `docker:dind` sidecar when Docker-in-Docker is enabled.
-  See [configuration — Docker-in-Docker](configuration.md#docker-in-docker-dind-sidecar).
+- `gateway` — DNS policy, router and firewall in one container. See [networking](networking.md).
+- `agent` — the unified agent container with every enabled agent CLI installed.
+  See [agents](agents.md).
+- `docker` (optional) — a privileged `docker:dind` sidecar.
+  See [configuration](configuration.md#docker-in-docker).
 
-## Startup sequence (`cmd_start`)
+## Startup sequence
 
-1. Detect container runtime; create `HOLE_TMP_DIR`; register `trap '_cleanup_sandbox' EXIT`.
-2. Validate global (`~/.hole/settings.json`) and project (`.hole/settings.json`) settings with
-   `jv` against `schema/settings.schema.json`; deep-merge them with `jq`
-   (see [configuration](configuration.md#merge-semantics)).
-3. Verify the startup agent is in `container.enabledAgents`.
-4. Export runtime variables for compose (see above). On `--rebuild`, export `CACHEBUST` and
-   remove old per-project images so no dangling images accumulate.
-5. `check_for_update` (silent, 1s timeout — skipped in dev checkouts without a `version` file).
-6. If DinD is enabled: ensure the shared `hole-sandbox-docker-cache` volume exists and seed a
-   per-instance `hole-sandbox-docker-data-<instance>` volume from it.
-7. Run `hooks.setupHost` scripts on the host (before any Docker work; failure aborts startup).
-8. Create the sandbox network and compute the DNS IP.
-9. Generate the compose override; assemble the compose command.
-10. Start services in order: `dns` → `proxy` (waits for healthcheck) → `docker` (if enabled) →
-    `agent`.
-11. Set the `_CLEANUP_*` state variables so the EXIT trap performs full teardown.
-12. `docker attach <instance>-agent-1` — the user now talks to the agent CLI. When the agent
-    exits (or the script receives a signal), the EXIT trap tears everything down.
+1. Resolve host identity, project name and instance ID; create the run temp directory.
+2. Write the instance state file **before any Docker resource exists**, take the run's liveness
+   lock, and spawn the teardown watchdog. From here on, an abort anywhere has an owner.
+3. Validate and merge the settings documents (with the selected profile's chain, if any); resolve
+   the agent registry and verify the startup agent is enabled.
+4. Resolve `cleanupHost` hooks and snapshot the merged settings into the state file, so teardown
+   works even if the next step aborts.
+5. Build the egress policy, resolve the image identity, run `setupHost` hooks.
+6. Run the version-change migration and garbage collection.
+7. Allocate and create the two networks, then the DinD volume — in that order, so a half-started
+   instance is always recognisable by its network.
+8. Materialize the build contexts and gateway configuration; generate one compose file.
+9. `compose up -d` per service: gateway → docker (if enabled) → agent. Health gating comes from
+   compose `depends_on: condition: service_healthy`.
+10. `docker attach` the agent container. Raw mode, terminal resize and Ctrl-C proxying stay the
+    runtime CLI's problem, which is the main reason Hole shells out rather than using the Engine
+    API.
 
-## Teardown (`_cleanup_sandbox`)
+    Whether the CLI has a terminal decides two things together, and they only work as a pair. With
+    one, the agent service gets `tty` and `stdin_open` and the attach forwards stdin. Without one —
+    a pipe, a CI job, the e2e suite — the service gets neither and the attach passes `--no-stdin`.
+    Dropping only the stdin forwarding is not enough: `stdin_open` keeps the agent's process alive
+    waiting for input that can no longer arrive, which hangs an interactive command (notably the
+    `-d` debug shell) forever. With no TTY and no open stdin it reads EOF and exits, while output
+    still streams and the exit code still propagates.
 
-A single idempotent EXIT-trap handler; state is passed via `_CLEANUP_*` globals set during
-`cmd_start` (a deliberate exception to the "no globals" rule — traps cannot receive arguments).
-Phases, in order:
+    The terminal test is a real ioctl (`engine.IsTerminal`), not a character-device check:
+    `/dev/null` is a character device, and `/dev/null` is exactly what a non-interactive run gets
+    for stdin.
+11. After the agent exits, mirror the watchdog's teardown progress until the instance is gone.
 
-1. **Network access log dump** (only with `-n`): stop the proxy gracefully so tinyproxy flushes
-   its log, `docker cp` the log out, extract distinct `ALLOWED`/`DENIED` domains into
-   `<project>/.hole/logs/network-access-<agent>-<instance_id>.log`.
-2. **`compose down --remove-orphans`** — must run before the temp dir is removed because the
-   compose files live there.
-3. **Remove the external sandbox network** (compose does not remove external networks).
-4. **DinD volume sync**: copy instance Docker data back to the shared cache volume (serialized
-   with `flock`), then remove the instance volume.
-5. **Run `hooks.cleanupHost` scripts** on the host (failures logged as warnings, never abort).
-6. **Remove `HOLE_TMP_DIR`** (always last).
+The exit code the CLI reports comes from the agent *container*, not from the attach client,
+whenever the container has already stopped. An agent whose command finishes before the attach
+lands makes the runtime refuse with "cannot attach to a stopped container" and exit 1, which would
+otherwise turn a successful short-lived agent into a failed run.
 
-## Destroy commands
+## Reliability: registry, watchdog, GC
 
-- `hole destroy <path>` (`cmd_destroy`): stops/removes containers, networks, cached
-  `hole-sandbox/{agent,proxy,dns}-<project_name>` images and orphaned DinD instance volumes for
-  one project.
-- `hole destroy` (`cmd_destroy_all`): removes **all** containers, images, networks and volumes
-  matching the `hole-sandbox` prefixes.
+### Instance registry
+
+`~/.hole/instances/<instance>.json` records everything teardown, `hole list` and GC need:
+identity, flags, the merged settings snapshot, both process IDs, networks and subnets, the DinD
+volume, the run directory and log file, and the start time. Writes are atomic (temp file +
+rename) so a reader never sees half a file.
+
+Docker labels (`hole.managed`, `hole.instance`, `hole.project`) remain the ground truth for what
+exists; the state file is the metadata cache. Its real job is letting GC distinguish an
+**abandoned** instance from a healthy concurrent one — a distinction the bash implementation
+could not make, which is why `kill -9` orphans were unrecoverable there.
+
+Liveness is a **file lock**, not a PID check: the CLI holds an exclusive `flock` for its whole
+run, and the kernel releases it when the process exits — before the parent reaps it. A process
+that has exited but not been reaped still answers signal 0, so a PID check would call a dead CLI
+alive for as long as its zombie lingers.
+
+### Watchdog
+
+Right after the state file is written, the CLI spawns `hole __watchdog <instance>` detached
+(`setsid`, stdio appended to the run log). The watchdog — not the CLI — performs teardown in
+**every** runtime case. Two things follow: the cleanup path is single-owner and continuously
+exercised (the code that runs after `kill -9` is the code that runs on every clean exit), and
+teardown is immune to terminal lifecycle, because signals cannot reach a setsid'd process.
+
+Watchdog logic: until the agent container has **started**, watch the CLI's liveness lock — a
+startup that aborts before any container must still have its partial resources removed. Once it
+has started, `docker wait` it, but keep watching the lock and the abort marker alongside: tear
+down when the container stops, when the CLI asks, or when the CLI dies, whichever comes first. The
+CLI drops the abort marker on early failure so the common failure case has no polling lag. (A
+marker rather than a signal: a signal sent in the milliseconds before the watchdog installs its
+handler is lost, or worse, kills it.)
+
+**The liveness lock has to be polled in the second phase too**, not just the first. A SIGKILLed
+CLI runs no cleanup of its own, so waiting only on the container means relying on the CLI's death
+stopping it — which happens by terminal hangup, and therefore only for a TTY-enabled container.
+A non-interactive run allocates no TTY (see step 10), so the sandbox would simply outlive its
+owner; an agent that ignores the hangup would do the same even with a TTY. The kernel releases the
+lock when the CLI dies, so no grace period is needed, and a clean run cannot trip it: the CLI's
+defers release the lock only *after* teardown has finished.
+
+**Started, not merely created**, and the distinction is load-bearing: compose creates the agent
+container and starts it only once the gateway reports healthy, and `docker wait` on a created
+container returns 0 immediately — indistinguishable from a clean exit. Reading existence as
+"running" therefore tears the sandbox down while it is still starting, and the visible symptom is
+compose failing with `No such container` against a container it had created moments earlier.
+`engine.ContainerStarted` is the predicate; an exited container still counts as started, or a
+container that stops between two polls would never be noticed.
+
+Because the CLI stops relaying when the instance leaves the registry, **deregistering is the last
+thing teardown does** — after the completeness check and the closing message. Anything logged
+after `store.Remove` reaches the log file but races the CLI's exit, so it may never appear on the
+console; that silently swallowed both the "Sandbox destroyed" line and, worse, the warnings naming
+resources teardown could not remove.
+
+CLI side, after attach returns or startup fails: mirror the watchdog's progress by tailing the
+run log — its records carry `component=watchdog`, which is how the CLI relays exactly those and
+none of its own — until the state file disappears. The prompt therefore returns only once the
+resources are gone, so an immediate re-start cannot race the previous sandbox's cleanup. If the
+watchdog is dead or stalls past a timeout, the CLI runs the same shared teardown itself.
+
+### Teardown
+
+One shared function (`sandbox.Teardown`) drives all three callers: watchdog, CLI fallback, and GC
+for abandoned instances. It is guarded by a per-instance `flock` — a reentrancy guard, not a
+coordination mechanism; whoever loses the race finds the instance already deregistered — and
+works entirely from the state file, which it re-reads after locking, because a supervisor that
+started earlier holds a snapshot with no networks in it.
+
+Phases: `-n` dump → `compose down --remove-orphans` (fileless, `-p` only, so teardown never
+depends on generated files) → registry mirror detach → explicit removal of both networks with an
+attached-container force fallback → DinD volume → `cleanupHost` hooks → run directory → state
+file → a final verification pass that names any leftover and prints the command to remove it.
+
+The force fallback exempts the registry mirror: it is shared by every sandbox, and the fallback
+is reached exactly when the recorded detach did not happen (the CLI killed between `Attach` and
+the `store.Write` that records it, or a failed `Detach`). It is disconnected instead, which frees
+the network without destroying another sandbox's image cache.
+
+**Nothing in teardown is gated on how far startup got.** That was the root cause behind the bash
+version's "cleanup seems random" symptom: `compose down` only ran when the final `up -d agent`
+had succeeded, so an earlier failure leaked containers, and the network removal then failed
+invisibly because containers were still attached.
+
+Signals (INT/TERM/HUP) reach the CLI for the whole run, including the image build: they stop the
+agent container, which ends an active attach, let the interrupted step return, and set the exit
+code to the conventional 130/143/129.
+
+### Garbage collection
+
+GC runs on every `start` and `list`. It is the backstop for the one case the watchdog cannot
+cover — CLI and watchdog killed at once — and it is deliberately conservative, because anything
+it removes might belong to a concurrent start:
+
+| Pass | Rule |
+|---|---|
+| Abandoned instances | CLI lock free **and** watchdog PID dead → full teardown, including running containers |
+| Networks | runtime prune filtered by `hole.managed` **and** `until=10m`, so a start that created its networks but no containers yet is safe |
+| Containers | stopped sandbox containers whose instance has no state file, no running sibling and **no networks left** (compose has a window where networks exist but containers do not) |
+| Volumes | per-instance DinD volumes whose instance has neither network nor container — volume prune has no age filter, so sibling liveness is the age proxy |
+| Run directories | `~/.hole/tmp/run.*` older than a day that no registered instance owns |
+| Run logs | older than 7 days |
+
+Image GC is separate and runs only *after* the agent service is up — never before, or a failed
+build could have destroyed the last working image. See
+[configuration](configuration.md#image-identity-and-scope).
+
+## Destroy
+
+- `hole destroy <path>` — containers, networks, that project's own image repository, and DinD
+  volumes for one project. The shared agent image and the gateway image are preserved; they may
+  serve other projects.
+- `hole destroy` — everything Hole owns, including the registry mirror.
 
 ## Security model
 
-**Network isolation:**
+**Network isolation**
 
-- The agent container sits on an internal network and cannot reach the internet directly.
-- All HTTP/HTTPS traffic is routed through the proxy via `HTTP_PROXY`/`HTTPS_PROXY` env vars
-  set in `agents/docker-compose.yml`.
-- The proxy enforces a domain whitelist merged from: default (`proxy/allowed-domains.txt`,
-  empty) → all enabled agents' `allowed-domains.txt` → user `network.domainWhitelist` →
-  `network.hostGatewayDomains`.
-- CONNECT is limited to ports 80/443 unless overridden via `network.allowedPorts`.
+- The agent container sits on an `internal: true` network. Its default route points at the
+  gateway, which is the only path off that network.
+- The gateway denies by default and filters at L3/L4, so every protocol and port is covered and
+  no tool needs proxy awareness.
+- A name that is not allowed does not resolve; an address is only reachable if the sandbox's own
+  resolver handed it out for an allowed entry.
 
-**File access control:**
+**File access control**
 
-- The project directory is mounted read-write at the **same absolute path** as on the host
-  (`${PROJECT_DIR}:${PROJECT_DIR}`), and it is the container working dir.
-- Secrets are hidden by over-mounting: files get `/dev/null:<path>:ro`, directories get an
-  empty host dir from `${HOLE_TMP_DIR}/excluded-dirs/` bind-mounted over them.
-- Extra mounts (`files.include`, `libraries`) are opt-in; libraries are read-only by default.
+- The project is mounted read-write at the **same absolute path** as on the host, and is the
+  container working directory.
+- Secrets are hidden by over-mounting: files get `/dev/null`, directories get an empty host
+  directory. Never anonymous volumes — `compose down` leaks those without `-v`.
+- `files.include` and `libraries` are opt-in; libraries are read-only by default.
 
-**Agent runs as non-root:**
-
-- The container user mirrors the host user (`$USER`, `$HOME`, and on Linux the host UID/GID) so
-  files created in the project mount have correct ownership. The user does have passwordless
-  `sudo` inside the container (the container is the sandbox boundary, not the user).
+**The agent runs as a non-root user** mirroring the host user, so files it creates in the project
+have the right ownership. It does have passwordless `sudo` inside the container: the container is
+the boundary, not the user. `NET_ADMIN` on the agent is likewise safe — the only route out is
+through the gateway, so rewriting routes inside the agent can break its own connectivity but
+never widen it.

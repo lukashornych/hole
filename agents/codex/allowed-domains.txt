@@ -1,3 +1,0 @@
-api\.openai\.com
-auth\.openai\.com
-chatgpt\.com

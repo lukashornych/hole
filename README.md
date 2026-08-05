@@ -8,9 +8,13 @@ Running AI agents directly on your host machine is risky — they have access to
 
 Hole provides true isolation through:
 
-- **Network control** — all traffic routes through a proxy with a domain whitelist; the agent cannot reach the internet directly
+- **Network control** — the sandbox has no route to the internet except through Hole's filtering gateway, which denies everything you have not allowed, on every protocol and port
 - **File access control** — project files are mounted into the container, with configurable exclusions (e.g. `.env`, `node_modules`) hidden from the agent
 - **Containerized execution** — the agent runs as a non-root user inside a Docker container that is destroyed on exit
+
+> **Upgrading from 1.x?** Hole 2.0 is a single binary with no `jq`/`jv` dependency, and a few
+> settings keys changed. See [MIGRATION.md](MIGRATION.md) — Hole also tells you exactly what to
+> change the first time it reads an old settings file.
 
 Table of contents:
 
@@ -20,27 +24,32 @@ Table of contents:
   - [Passing arguments to the agent](#passing-arguments-to-the-agent)
   - [Other commands](#other-commands)
 - [Installation](#installation)
+  - [Supported Docker runtimes](#supported-docker-runtimes)
   - [Update](#update)
   - [Uninstall](#uninstall)
 - [Agents](#agents)
   - [Claude Code](#claude-code)
   - [Gemini CLI](#gemini-cli)
   - [Codex CLI](#codex-cli)
+  - [Custom agents](#custom-agents)
 - [Configuration](#configuration)
   - [Project .gitignore](#project-gitignore)
   - [File exclusions](#file-exclusions)
-  - [Environment variable expansion](#environment-variable-expansion)
   - [File inclusions](#file-inclusions)
   - [Libraries](#libraries)
-  - [Domain whitelist](#domain-whitelist)
+  - [Git worktrees](#git-worktrees)
+  - [Network access](#network-access)
   - [Host gateway domains](#host-gateway-domains)
+  - [Subnet pool](#subnet-pool)
   - [Dependencies](#dependencies)
   - [Container settings](#container-settings)
   - [Docker-in-Docker](#docker-in-docker)
+  - [Environment variables](#environment-variables)
+  - [Agent arguments](#agent-arguments)
   - [Hooks](#hooks)
-    - [Setup hook](#setup-hook)
-    - [Prestart hook](#prestart-hook)
+  - [Profiles](#profiles)
   - [Configuration examples](#configuration-examples)
+- [Logs](#logs)
 
 ## Usage
 
@@ -58,98 +67,73 @@ hole start claude .
 hole start claude /path/to/project
 ```
 
-The sandbox is created from scratch each time and fully destroyed when you exit the agent CLI. Multiple sandboxes can run simultaneously for the same project.
+The project path is required. Hole builds the sandbox image if needed, starts the gateway and the agent, and attaches your terminal to the agent CLI. When the agent exits, everything is destroyed.
 
-All enabled agents are installed into a single unified sandbox image. By default, all supported agents (claude, gemini, codex) are installed, so any agent can invoke other agents from within the sandbox. The `agent` parameter only determines the startup command.
+Run without a terminal — from a script, a CI job, or with the output piped — and the agent gets no TTY and no open stdin, since there is no keyboard to forward. You still get its output and its exit code. An agent that waits for input sees end-of-input and exits instead of hanging, which also means `-d` opens a shell that closes immediately: to poke around a sandbox, run it from a terminal.
 
 ### Flags
 
-```sh
-hole start {agent} {project path} --debug
-hole start {agent} {project path} --dump-network-access
-hole start {agent} {project path} --rebuild
-hole start {agent} {project path} --unrestricted-network
-hole start {agent} {project path} --with-docker
-```
+| Flag | Description |
+|---|---|
+| `-d`, `--debug` | Open a bash shell instead of the agent CLI, for inspecting the sandbox |
+| `-n`, `--dump-network-access` | After the agent exits, write the domains the sandbox resolved (and those it was refused) to `.hole/logs/network-access-{agent}-{id}.log` |
+| `-r`, `--rebuild` | Force a rebuild of the sandbox images |
+| `-u`, `--unrestricted-network` | Disable egress filtering; allow all network access |
+| `--with-docker` | Enable the Docker-in-Docker sidecar |
+| `--library PATH[:MOUNT][:rw]` | Mount an extra directory (repeatable); defaults to `/libs/{basename}`, read-only unless `:rw` |
+| `--` | Everything after this is passed verbatim to the agent CLI |
 
-`-d`, `--debug` sets up the sandbox normally but drops you into an interactive shell for inspecting volumes, network connectivity, and installed packages.
-
-`-n`, `--dump-network-access` writes a `.hole/logs/network-access-{agent}-{instance id}.log` file to the project directory after the agent exits, containing a sorted list of distinct domains (both allowed and denied).
-
-`-r`, `--rebuild` forces a fresh build of the sandbox Docker images. Sandbox images are cached per-project for fast startup — use this flag after changing `dependencies`, hook scripts, or when the base agent image needs updating.
-
-`-u`, `--unrestricted-network` disables domain whitelist filtering, allowing the agent to access any domain. Traffic still flows through the proxy, so `--dump-network-access` logging continues to work. This is useful when the agent needs broad internet access and maintaining a whitelist is impractical.
-
-`--with-docker` enables a Docker-in-Docker sidecar for the sandbox, allowing the agent to run `docker` and `docker compose` commands. This is equivalent to setting `container.docker: true` in settings. See [Docker-in-Docker](#docker-in-docker) for details.
+`-r` is only needed to refresh *versions* (latest apt packages, latest agent CLIs). Changing a
+setting that affects the image produces a new image automatically.
 
 ### Passing arguments to the agent
-
-Use `--` to separate hole flags from agent-specific arguments. Everything after `--` is passed directly to the agent CLI:
 
 ```sh
 hole start claude . -- -p "explain this function"
 hole start claude . --rebuild -- --output-format stream-json
-hole start gemini . -- -p "refactor this code"
 ```
 
-The base command for each agent (e.g. `claude --dangerously-skip-permissions`) is defined in `agents/<agent>/command.json`. User arguments are appended to this base command.
-
-Note: `--debug` and agent arguments cannot be used together.
+Arguments after `--` reach the agent exactly as you typed them. `-d` cannot be combined with them, since debug mode replaces the agent command with a shell.
 
 ### Other commands
 
 ```sh
-hole destroy                  # remove ALL Hole Docker resources (containers, images, networks, volumes)
-hole destroy {project path}   # remove project-related Docker resources including cached agent and proxy images
-hole help                     # show usage information
-hole version                  # print installed version
-hole update                   # update to the latest release
-hole uninstall                # uninstall hole and optionally remove Docker resources
+hole list                      # show running sandboxes
+hole destroy                   # destroy ALL Hole Docker resources
+hole destroy .                 # destroy resources for the current project
+hole destroy /path/to/project  # destroy resources for a specific project
+hole version                   # print the installed version
+hole update                    # upgrade to the latest release
+hole uninstall                 # remove Hole's Docker resources and the binary
+hole help                      # usage
 ```
+
+`hole list` shows the instance ID, agent (and profile), project path, uptime, whether Docker-in-Docker is enabled, the sandbox network, and which settings files were merged.
 
 ## Installation
 
-**Supported platforms:** Linux, macOS, and WSL
-
-**Requirements:** `curl` or `wget`, `tar`, Docker runtime (see [supported runtimes](#supported-docker-runtimes)), [`jq`](https://jqlang.github.io/jq/download/), [`jv`](https://github.com/santhosh-tekuri/jsonschema/releases)
-
-> _Note: `jv` utility documentation mentions installation through golang, you don't have to do that, you can download the binary from their [release page](https://github.com/santhosh-tekuri/jsonschema/releases) and place it in your bin folder you have in your PATH._
-
-**Optional:** `flock` (from `util-linux`) — enables persistent Docker image caching across sandbox restarts when using Docker-in-Docker. Pre-installed on most Linux distributions; on macOS, install via `brew install util-linux`.
-
-
-
-> _Note: Hole keeps its per-run scratch directory under `~/.hole/tmp/` instead of `$TMPDIR`. This is intentional so that VM-backed runtimes (Colima, Lima, Podman Machine) — which share `$HOME` but not `/var/folders/...` by default on macOS — can bind-mount generated config files (tinyproxy whitelist, Corefile, prestart scripts, etc.) into the sandbox containers._
-
-To install the latest version, run the following command in your terminal:
+Hole is a single static binary. Install it with:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/lukashornych/hole/main/install.sh | bash
-# or
-wget -qO- https://raw.githubusercontent.com/lukashornych/hole/main/install.sh | bash
 ```
 
-If `~/.local/bin` is not in your `PATH`, add it to your shell profile (`.bashrc` / `.zshrc`):
+The installer detects your OS and architecture, downloads the release binary, verifies its
+checksum, and installs it to `~/.local/bin/hole`. Make sure that directory is on your `PATH`.
 
-```sh
-export PATH="$HOME/.local/bin:$PATH"
-```
+Requirements: **docker or podman with the compose plugin**. That is all — Hole embeds
+everything else it needs.
+
+Supported platforms: Linux (amd64/arm64, including WSL) and macOS (Intel/Apple Silicon).
 
 ### Supported Docker runtimes
 
-You can theoretically use any Docker runtime that supports the Docker Compose v2 API, however we've tested the following:
+Hole works with Docker Desktop, OrbStack, Colima, Rancher Desktop and rootless Podman. Set
+`HOLE_RUNTIME=podman` to force a runtime when both are installed.
 
-- [`docker`](https://www.docker.com/get-started/) 
-- [`podman`](https://podman.io/docs/installation) (with compose plugin)
-  - _when using Podman, ensure `podman compose` is available (via `podman-compose` or the Podman Compose plugin). Rootless Podman may require additional configuration for bind mount permissions._
-- [`colima`](https://github.com/abiosoft/colima) (with compose plugin)
-
-Hole auto-detects Docker or Podman (Docker is preferred when both are available). To override the auto-detection, 
-set the `HOLE_RUNTIME` environment variable:
-
-```sh
-export HOLE_RUNTIME=podman
-```
+The sandbox network is created from Hole's own address pool (`10.222.0.0/16` by default), so
+Docker's default pools stay untouched. If that range collides with a VPN or LAN of yours, see
+[subnet pool](#subnet-pool).
 
 ### Update
 
@@ -157,8 +141,9 @@ export HOLE_RUNTIME=podman
 hole update
 ```
 
-The update command will update to the newest version available. During the update, all existing sandboxes and their resources
-(Docker images, networks, volumes besides agent home volumes) will be stopped and removed to avoid any incompatiblity with the new version.
+Hole compares your version against the latest release, verifies the checksum of the new binary,
+and replaces itself in place. Every `hole start` also does a silent one-second check and tells
+you when a newer version exists.
 
 ### Uninstall
 
@@ -166,26 +151,24 @@ The update command will update to the newest version available. During the updat
 hole uninstall
 ```
 
-The uninstall command will remove all application data as well as sandbox resources (Docker images, networks, volumes, etc.).
+Removes Hole's containers, networks, volumes and images, then the binary. Your settings, custom
+agents and logs in `~/.hole` are only removed if you confirm.
 
 ## Agents
 
-These are currently supported agents: [Claude Code](https://claude.com/product/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CLI](https://github.com/openai/codex)
+Supported out of the box: [Claude Code](https://claude.com/product/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CLI](https://github.com/openai/codex). You can also add [your own](#custom-agents).
+
+All enabled agents are installed into one sandbox image; the agent you name on the command line only decides what starts.
 
 ### Claude Code
 
-Start a sandbox with Claude Code agent:
-
 ```shell
 hole start claude .
-# or
-hole start claude /path/to/project
 ```
 
 #### Authentication
 
-You can authenticate with any available method. However, to keep authenticated across sandboxes instance, you need to 
-add following [include](#file-inclusions) to `settings.json` file:
+You can authenticate with any available method. To stay authenticated across sandbox instances, add this [inclusion](#file-inclusions) to `settings.json`:
 
 ```json
 {
@@ -197,8 +180,7 @@ add following [include](#file-inclusions) to `settings.json` file:
 }
 ```
 
-This will keep in sync your Claude settings between sandboxes and your host system. If you want to also run Claude on host
-directly different settings, you can mount the sandbox's `~/.claude` folder to any host folder, for example:
+This keeps your Claude settings in sync between sandboxes and your host system. If you also run Claude on the host with different settings, mount the sandbox's `~/.claude` from another host folder:
 
 ```json
 {
@@ -210,22 +192,17 @@ directly different settings, you can mount the sandbox's `~/.claude` folder to a
 }
 ```
 
-The **important** part is to make sure the host folder is present on the host system before starting the sandbox.
+The **important** part is that the host folder exists before starting the sandbox.
 
-#### Example configurations
+#### Adding marketplaces
 
-##### Adding marketplaces
-
-Marketplaces are usually added via SSH repositories, but, you usually don't want to give your SSH keys to the agent.
-Fortunately, you can add marketplaces via HTTPS repositories, for example:
+Marketplaces are usually added via SSH repositories, but you generally don't want to give your SSH keys to the agent. You can add them over HTTPS instead:
 
 ```shell
 /plugin marketplace add https://github.com/anthropics/claude-plugins-official.git
 ```
 
-You will also need to whitelist the marketplace domain in the agent [settings](#domain-whitelist).
-
-If your marketplace is private, you will need also need some sort of authentication, usually via a personal access token:
+Allow the marketplace domain in [network access](#network-access). For a private marketplace you will also need authentication, usually a personal access token:
 
 ```shell
 /plugin marketplace add https://{username}:{pat}@gitlab.mydomain.com/internal/claude-marketplace.git
@@ -233,18 +210,13 @@ If your marketplace is private, you will need also need some sort of authenticat
 
 ### Gemini CLI
 
-Start a sandbox with Gemini CLI agent:
-
 ```shell
 hole start gemini .
-# or
-hole start gemini /path/to/project
 ```
 
 #### Authentication
 
-You can authenticate with any available method. However, to keep authenticated across sandboxes instance, you need to
-add following [include](#file-inclusions) to `settings.json` file:
+You can authenticate with any available method. To stay authenticated across sandbox instances, add this [inclusion](#file-inclusions) to `settings.json`:
 
 ```json
 {
@@ -256,8 +228,7 @@ add following [include](#file-inclusions) to `settings.json` file:
 }
 ```
 
-This will keep in sync your Gemini settings between sandboxes and your host system. If you want to also run Claude on host
-directly different settings, you can mount the sandbox's `~/.gemini` folder to any host folder, for example:
+This keeps your Gemini settings in sync between sandboxes and your host system. If you also run Gemini on the host with different settings, mount the sandbox's `~/.gemini` from another host folder:
 
 ```json
 {
@@ -269,22 +240,17 @@ directly different settings, you can mount the sandbox's `~/.gemini` folder to a
 }
 ```
 
-The **important** part is to make sure the host folder is present on the host system before starting the sandbox.
+The **important** part is that the host folder exists before starting the sandbox.
 
 ### Codex CLI
 
-Start a sandbox with Codex CLI agent:
-
 ```shell
 hole start codex .
-# or
-hole start codex /path/to/project
 ```
 
 #### Authentication
 
-You can authenticate with any available method. However, to keep authenticated across sandboxes instance, you need to
-add following [include](#file-inclusions) to `settings.json` file:
+You can authenticate with any available method. To stay authenticated across sandbox instances, add this [inclusion](#file-inclusions) to `settings.json`:
 
 ```json
 {
@@ -296,8 +262,7 @@ add following [include](#file-inclusions) to `settings.json` file:
 }
 ```
 
-This will keep in sync your Codex settings between sandboxes and your host system. If you want to also run Claude on host
-directly different settings, you can mount the sandbox's `~/.codex` folder to any host folder, for example:
+This keeps your Codex settings in sync between sandboxes and your host system. If you also run Codex on the host with different settings, mount the sandbox's `~/.codex` from another host folder:
 
 ```json
 {
@@ -309,438 +274,453 @@ directly different settings, you can mount the sandbox's `~/.codex` folder to an
 }
 ```
 
-The **important** part is to make sure the host folder is present on the host system before starting the sandbox.
+The **important** part is that the host folder exists before starting the sandbox.
+
+### Custom agents
+
+Any directory under `~/.hole/agents/<name>/` becomes an agent you can start:
+
+```
+~/.hole/agents/my-agent/
+  command.json       # required — startup command as a JSON array of argv parts
+  allow.txt          # required — domains the agent needs (see below)
+  install-root.sh    # optional — runs as root during the image build
+  install-user.sh    # optional — runs as the sandbox user during the image build
+```
+
+```json
+// command.json
+["my-agent", "--yolo"]
+```
+
+```
+# allow.txt — <host>[:<port>[,<port>...]], ports default to 443,80
+api.my-agent.example
+*.my-agent.example
+```
+
+Names must match `^[a-z0-9][a-z0-9-]*$`, and a name that collides with a builtin agent is an error rather than a silent override. Custom agents work everywhere builtins do, including `container.enabledAgents`. Editing a custom agent's files rebuilds the image automatically.
 
 ## Configuration
 
-Settings are defined in `~/.hole/settings.json` (global) and/or `.hole/settings.json` (per-project). When both exist, they are deep-merged: objects are recursively merged (project values win for scalar conflicts), arrays are concatenated and deduplicated (global items first).
+Two optional files, sharing one schema:
 
-You can find JSON chema definition at `~/.local/share/hole/schema/settings.schema.json`.
+- `~/.hole/settings.json` — global defaults
+- `<project>/.hole/settings.json` — per-project settings
+
+They are merged: objects deep-merge with the project winning, arrays concatenate (global first) and deduplicate, and scalars are overridden by the project.
+
+Add the schema reference for editor completion:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/lukashornych/hole/main/assets/schema/settings.schema.json"
+}
+```
+
+All path-valued settings support `$VAR`/`${VAR}` expansion, `~/` (your home on the host side, the sandbox home on the container side), and paths relative to the project directory.
 
 ### Project .gitignore
 
-It is recommended to add the following paths to your project `.gitignore` to avoid accidentally committing unwanted files:
+Hole writes network access dumps to `<project>/.hole/logs/`. Add it to your `.gitignore`:
 
-```
+```gitignore
 .hole/logs/
 ```
 
 ### File exclusions
-
-> _Note: if the excluded files are already in Git history, the agent may potentically find it in the history if you don't exclude entire `.git` folder._
 
 Hide files and directories from the agent:
 
 ```json
 {
   "files": {
-    "exclude": [".env", ".env.local", "node_modules", "dist"]
+    "exclude": [
+      ".env",
+      ".env.*",
+      "secrets",
+      "**/*.pem"
+    ]
   }
 }
 ```
 
-Files are mounted as `/dev/null` and directories are overlaid with empty host directories (bind-mounted from the sandbox's temporary directory and discarded on exit). Non-existent paths are skipped with a warning.
-
-Paths support environment variable expansion (`$VAR`, `${VAR}`) and glob patterns are supported for matching multiple paths at once:
-
-```json
-{
-  "files": {
-    "exclude": [".env*", "apps/*/config", "**/secrets"]
-  }
-}
-```
-
-- `*` — matches any characters within a single path segment (e.g. `.env*` matches `.env`, `.env.local`, `.env.production`)
-- `**` — matches zero or more path segments recursively (e.g. `**/secrets` matches `secrets`, `app/secrets`, `app/config/secrets`)
-- `?` — matches a single character
-- `[abc]` — matches one of the listed characters
-
-Patterns that match no files produce a warning and are skipped. Duplicate paths (from overlapping patterns) are mounted only once.
-Undefined variables produce a warning and are left unexpanded.
+Files are replaced with `/dev/null` and directories with an empty directory, so the agent sees nothing. Patterns support `*`, `?`, `[...]` and `**` (recursive). A pattern matching nothing is a warning, not an error. Exclusions are mirrored onto the Docker-in-Docker sidecar, so a container started inside the sandbox cannot bind-mount its way to them either.
 
 ### File inclusions
 
-Mount additional host files or directories into the sandbox. Keys are host paths, values are container paths:
+Mount extra host paths into the sandbox:
 
 ```json
 {
   "files": {
     "include": {
       "~/.npmrc": "~/.npmrc",
-      "./shared-config": "~/shared-config",
-      "/home/user/data": "/data"
+      "~/.gitconfig": "~/.gitconfig",
+      "/opt/shared-data": "/data"
     }
   }
 }
 ```
 
-Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), and relative paths (resolved against the project directory). Container `~/` expands to the sandbox home directory (which mirrors the host's `$HOME`).
-
-Non-existent paths are skipped with a warning. Undefined variables produce a warning and are left unexpanded.
+Keys are host paths, values are container paths. A missing host path is a warning and the entry is skipped. Two inclusions resolving to the *same* container path is an error — see [profiles](#profiles) for why that matters.
 
 ### Libraries
 
-Mount additional directories into the sandbox. By default, libraries are mounted **read-only**. This is useful for giving the agent access to shared libraries, SDKs, or sibling projects as reference material. Keys are host paths, values are either a container path string (read-only) or an object with `path` and optional `readwrite` flag:
+Mount sibling projects or dependencies, read-only by default:
 
 ```json
 {
   "libraries": {
-    "~/repos/shared-utils": "/libs/shared-utils",
-    "/opt/company/sdk": "/libs/company-sdk",
-    "./sibling-project": {
-      "path": "/libs/sibling",
-      "readwrite": true
-    }
+    "~/projects/shared-lib": "/libs/shared-lib",
+    "~/projects/other-lib": { "path": "/libs/other-lib", "readwrite": true }
   }
 }
 ```
 
-Both host and container paths support environment variable expansion (`$VAR`, `${VAR}`) and tilde
-expansion (`~/`). Host paths also support relative paths (resolved
-against the project directory).
+Or ad-hoc:
 
-Non-existent paths are skipped with a warning. Undefined variables produce a warning and are left unexpanded.
+```sh
+hole start claude . --library ~/projects/shared-lib
+hole start claude . --library ~/projects/other-lib:/libs/other:rw
+```
 
-Libraries are mounted **read-only** by default. Set `"readwrite": true` to mount a library with write access.
+If a library has its own `.hole/settings.json`, only its `files.exclude` entries are honored, scoped to that library's mount.
 
-If a library has its own `.hole/settings.json`, its `files.exclude` entries are applied scoped to that library's mount point (not mixed with the main project's exclusions). Other settings in the library's `.hole/settings.json` are ignored.
+### Git worktrees
 
-### Domain whitelist
+If your project is a git worktree, Hole mounts the related checkouts automatically — the main repository when you are in a linked worktree (a linked worktree's `.git` is only a pointer, so git would not work without it), and every linked worktree when you are in the main repository. Each is mounted at its own absolute path.
 
-By default, agents can only reach domains required for their operation (e.g. `api.anthropic.com` for Claude). Allow additional domains:
+```json
+{
+  "git": {
+    "worktreeLinks": "ro"
+  }
+}
+```
+
+`"ro"` (default), `"rw"`, or `"off"`. Explicit `libraries`/`--library` entries for the same path win. If `git` is not installed, this is skipped silently.
+
+### Network access
+
+The sandbox has **no route to the internet** except through Hole's gateway, which denies everything by default — on every protocol and port. Allow what the project needs:
 
 ```json
 {
   "network": {
-    "domainWhitelist": ["registry.npmjs.org", "api.github.com"]
+    "allow": [
+      "api.github.com",
+      "*.npmjs.org",
+      "db.example.com:5432",
+      "github.com:22,443",
+      "10.0.0.5:22,2222",
+      "192.168.1.0/24:8080"
+    ]
   }
 }
 ```
 
-Use plain domain names — dots are auto-escaped for the proxy filter. After changing the whitelist, restart the sandbox (changes take effect on next `hole start`).
+Entry grammar: `<host>[:<port>[,<port>...]]`
 
-### Allowed ports
+| Host form | Matches |
+|---|---|
+| `example.com` | that exact name, nothing else |
+| `*.example.com` | subdomains only — **not** the apex |
+| `10.0.0.5` | one IPv4 address |
+| `10.0.0.0/24` | an IPv4 range |
 
-By default the proxy only permits `CONNECT` to ports `80` and `443`. To reach a service on another port (e.g. an upstream API on port `2024`), list the ports in `network.allowedPorts`:
+Ports default to `443,80` and apply to **TCP and UDP** alike. Wildcards are explicit: `example.com` never implies its subdomains.
 
-```json
-{
-  "network": {
-    "domainWhitelist": ["37.221.253.75"],
-    "allowedPorts": [443, 80, 2024]
-  }
-}
-```
+How it works: the gateway is the sandbox's DNS server, router and firewall. A name you have not allowed does not resolve at all (a fast `NXDOMAIN` rather than a timeout), and an address is only reachable if the sandbox's own resolver handed it out for an allowed entry. So hardcoded IPs, third-party resolvers (`dig @8.8.8.8`) and DNS-over-TLS are all denied too.
 
-- **The list replaces the defaults.** If you set `allowedPorts`, the built-in `[80, 443]` are dropped — include them yourself if you still need them. This is intentional: it gives you a single, authoritative view of which CONNECT ports the proxy accepts, and lets you lock down port 80 if you want HTTPS-only.
-- **Proxy-global, not per-host.** Tinyproxy applies `ConnectPort` across all whitelisted hosts; there is no way to bind a port to a single host. Adding port `2024` lets any whitelisted host be reached on that port.
-- **Empty array disables CONNECT entirely** (`allowedPorts: []` emits `ConnectPort 0`).
-- **Global / project merge.** Arrays from `~/.hole/settings.json` and `.hole/settings.json` are concatenated and deduplicated before the replace-defaults step is applied.
-- Changes take effect on next `hole start`.
+Because filtering happens at the network layer, **no tool needs proxy configuration** — ssh, git over ssh, database clients, raw sockets and UDP all work as long as you allow the host and port.
+
+Each agent's own domains are always allowed, so the agent CLI works with empty settings.
+
+Use `-n` to discover what a project needs: it writes every domain the sandbox resolved or was refused to `.hole/logs/network-access-{agent}-{id}.log`.
+
+Known limitation: once an allowed name resolves to an address, that address stays reachable for the sandbox's lifetime, so an agent could in principle reach a *different* site sharing that address (common with CDNs). Direct-IP attempts blocked by the firewall do not appear in the `-n` dump, because they never produce a DNS query.
 
 ### Host gateway domains
 
-Allow the agent to reach services running on the Docker host by domain name. Configured domains resolve to the host gateway IP via a CoreDNS container inside the sandbox:
+Let the sandbox reach services running on your host under a stable name:
 
 ```json
 {
   "network": {
-    "hostGatewayDomains": ["myapp.local", "api.internal.dev"]
+    "hostGatewayDomains": [
+      "mydb.local",
+      "myapi.local:8080,8443"
+    ]
   }
 }
 ```
 
-CoreDNS uses zone-based matching, so a domain like `example.com` automatically matches `example.com` and all its subdomains (e.g., `foo.example.com`, `bar.baz.example.com`).
+Each name resolves to the Docker host gateway. Without a port suffix every port is allowed; with one, only those ports. Several entries for the same name merge into one, opening the union of their ports — and a port-less entry means all of them, so it wins over any port list for that name. Don't use `localhost` or `127.0.0.1` — inside the container those are the container itself.
 
-Configured domains are automatically added to the proxy's domain whitelist, so HTTP/HTTPS requests to these domains are allowed through the proxy without needing to add them to `domainWhitelist` separately.
+### Subnet pool
 
-Changes take effect on next `hole start`.
-
-### Dependencies
-
-Install additional apt packages at container startup:
+Each sandbox takes two `/24` networks from Hole's own pool. Change it if the default collides with your VPN or LAN:
 
 ```json
 {
-  "dependencies": ["python3", "build-essential", "htop"]
+  "network": {
+    "subnetPool": "10.99.0.0/16"
+  }
 }
 ```
 
-Packages are installed during the Docker image build and baked into the cached per-project image, so subsequent startups are instant. After changing the dependency list, use `--rebuild` to apply the changes.
+Must be a `/23` or larger (each sandbox needs two `/24`s). A `/16` supports ~127 concurrent sandboxes.
+
+### Dependencies
+
+Extra apt packages baked into the sandbox image:
+
+```json
+{
+  "dependencies": ["make", "openjdk-17-jdk", "postgresql-client=15+248"]
+}
+```
+
+Installed during the image build, which uses your host's network, so the Ubuntu repositories do **not** need to be in `network.allow`.
 
 ### Container settings
-
-Configure container resource limits:
 
 ```json
 {
   "container": {
     "memoryLimit": "8g",
-    "memorySwapLimit": "12g"
+    "memorySwapLimit": "8g",
+    "baseImage": "ubuntu:24.04",
+    "docker": true,
+    "enabledAgents": ["claude", "codex"]
   }
 }
 ```
 
-- `baseImage` — custom base Docker image for the agent container (defaults to `ubuntu:24.04`). The image must be based on Ubuntu 24.04; other base images may work but are not tested.
-- `memoryLimit` — Docker `mem_limit` (e.g. `"8g"`, `"512m"`)
-- `memorySwapLimit` — Docker `memswap_limit` (e.g. `"8g"`, `"512m"`)
-- `enabledAgents` — array of agent names to install in the sandbox (defaults to all: `["claude", "gemini", "codex"]`)
+- `memoryLimit` / `memorySwapLimit` — limits for the agent container
+- `baseImage` — must stay Ubuntu 24.04-based (the image build uses apt)
+- `docker` — enable the [Docker-in-Docker](#docker-in-docker) sidecar
+- `enabledAgents` — which agents get installed into the image (default: all registered agents, including your custom ones). The agent you start must be in this list.
 
-To install only specific agents (e.g., to reduce image size):
+The container user mirrors your host user — same username and home path — so agent config paths look identical inside and outside the sandbox. The user has passwordless `sudo`; the container is the boundary, not the user.
 
-```json
-{
-  "container": {
-    "enabledAgents": ["claude", "gemini"]
-  }
-}
-```
-
-The startup agent must be in the enabled list, otherwise `hole start` will fail with an error.
+**Image sharing:** projects whose settings do not change the image content share one image, so a rebuild in one project benefits all of them. A project that adds a dependency, changes the base image, changes `enabledAgents`, or has its own setup hook gets its own image — and the start banner tells you which, and why.
 
 ### Docker-in-Docker
 
-Enable an isolated Docker daemon inside the sandbox so the agent can run `docker` and `docker compose` (e.g., to spin up PostgreSQL, Redis, or other services for tests).
-
-Via settings:
+Give the agent its own Docker daemon so it can run `docker` and `docker compose` (for example to spin up PostgreSQL or Redis for tests):
 
 ```json
 {
-  "container": {
-    "docker": true
-  }
+  "container": { "docker": true }
 }
 ```
 
-Or ad-hoc via startup flag:
+Or ad-hoc:
 
 ```sh
 hole start claude . --with-docker
 ```
 
-When enabled, a `docker:dind` sidecar container starts on the internal `sandbox` network. The agent gets Docker CLI and Compose plugin installed automatically.
+A privileged `docker:dind` sidecar starts on the internal sandbox network; the agent gets the Docker CLI with the compose and buildx plugins automatically, so `docker build`, `docker buildx build` and `docker compose` all work inside the sandbox.
 
-**Registry domain whitelist:** Image pulls go through the sandbox proxy, so you must whitelist your registry domains. For Docker Hub, add:
-
-```json
-{
-  "network": {
-    "domainWhitelist": [
-      "registry-1.docker.io",
-      "auth.docker.io",
-      "production.cloudflare.docker.com",
-      "docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com",
-      "docker-images-prod.r2.cloudflarestorage.com"
-    ]
-  }
-}
-```
-
-For other registries (GitHub Container Registry, AWS ECR, etc.), add the corresponding domains.
-
-**Accessing services:** Containers started inside DinD are reachable from the agent at hostname `docker`, not `localhost`. For example, if you run PostgreSQL on port 5432 inside DinD, connect to `docker:5432` from the agent. When exposing ports in `docker run` or `docker-compose.yml`, bind to all interfaces (e.g., `3307:3306`) rather than localhost (e.g., `127.0.0.1:3307:3306`), because the agent connects to the DinD sidecar over the Docker network, not via loopback.
-
-**Workspace bind mounts:** The project directory is mounted at the same absolute path as on the host in both the agent and DinD containers, so bind mounts in user `docker-compose.yml` files resolve correctly.
-
-**File exclusions:** Exclusion volumes from the agent are mirrored on the DinD container's project mount, so `docker compose` files cannot access excluded secrets.
-
-**Persistent image cache:** Each DinD sidecar gets its own ephemeral instance volume (`hole-sandbox-docker-data-<instance>`), seeded on start from a global cache volume (`hole-sandbox-docker-cache`). On teardown the instance data is synced back to the cache and the instance volume is removed. This means images survive sandbox teardown (via the cache) and do not need to be re-downloaded, while multiple sandboxes (even across different projects) can run simultaneously without conflicts (each has its own `/var/lib/docker`). Images pulled in one project are available to seed any other project. The cache volume is preserved during `hole update` (soft-wipe) and only removed on full `hole uninstall`.
-
-**Security:** The DinD container runs with `privileged: true`, which is required for Docker-in-Docker. This is contained within the isolated sandbox network — the DinD container has no direct internet access (all traffic routes through the proxy).
-
-Use `--rebuild` after enabling this setting for the first time to install the Docker CLI in the agent image.
+- **Accessing services**: containers started inside DinD are reachable from the agent at hostname `docker`, not `localhost`. Bind ports to all interfaces (`3307:3306`, not `127.0.0.1:3307:3306`).
+- **Workspace bind mounts**: the project is mounted at the same absolute path in both containers, so bind mounts in your compose files resolve correctly.
+- **File exclusions** are mirrored onto the sidecar, so a container started inside the sandbox cannot bind-mount a path the agent was meant not to see.
+- **Libraries and inclusions are not** mounted into the sidecar. They stay available to the agent as always; only the sidecar does not get them, because it is privileged and a privileged process can remount a read-only bind read-write. Builds are unaffected — `docker build` and `buildx` stream the context from the client, so they work with paths the daemon cannot see. What does need a daemon-side path is a **bind mount at run time**: `docker run -v /libs/shared:/x` or a compose `volumes:` entry pointing at a library will not resolve. Use the project directory, or copy what you need into it.
+- **Image cache**: Hole runs a long-lived pull-through cache (`hole-registry`) so repeated pulls do not re-download. It caches **Docker Hub only** — other registries (ghcr.io, ECR, …) go through the gateway and need `network.allow` entries.
+- **Non-Hub registries**: allow their domains, e.g. `"network": { "allow": ["ghcr.io", "*.githubusercontent.com"] }`.
+- **Security**: the sidecar is privileged, which Docker-in-Docker requires. It has no internet route of its own — its traffic is filtered by the same gateway.
 
 ### Environment variables
-
-Define custom environment variables for the agent container:
 
 ```json
 {
   "environment": {
+    "MY_VAR": "value",
     "NODE_ENV": "development",
-    "API_URL": "https://api.example.com"
+    "PROJECT_PATH": "$PROJECT_PATH",
+    "CACHE_DIR": "$HOME/.cache/agent"
   }
 }
 ```
 
-Variables are set in the agent container at startup. When Docker-in-Docker is enabled, these variables are also passed to the DinD sidecar container. Since `environment` is an object, global and project settings are deep-merged — unique keys from both are combined, and if both define the same key, the project value wins.
+Passed to the agent container and, when enabled, to the DinD sidecar.
+
+`$VAR` and `${VAR}` are resolved from **your** environment when the sandbox starts, so a value can
+carry a host variable into the sandbox. `$HOME` is the exception: it becomes the sandbox home, since
+that is what a container-side value means. An undefined variable is left as written and warned
+about, rather than silently becoming empty.
+
+### Agent arguments
+
+Default CLI arguments for an agent:
+
+```json
+{
+  "agents": {
+    "claude": { "args": ["--model", "opus"] }
+  }
+}
+```
+
+Applied only when that agent starts. Arguments you pass after `--` come last, so an ad-hoc flag overrides one from settings. With `-d` they are simply unused.
+
+Configured arguments expand `$VAR` the same way `environment` values do. Arguments given on the command line do not — your shell already had its turn at those, and expanding again would defeat the quoting you used to keep a literal `$`.
+
+> A project's `.hole/settings.json` can therefore inject agent flags. This is no new exposure — project settings already control mounts and `hooks.setupHost`, which runs a script on your host.
 
 ### Hooks
 
-Hooks allow you to inject some logic into sandbox lifecycle.
-
-#### Set up host hook
-
-Run custom bash scripts on the **host** system every time the sandbox starts, before any Docker containers are created. This is useful for bringing up external services the sandbox will connect to (local databases, mock APIs, tunnels, etc.).
+| Hook | Runs where | When | On failure |
+|---|---|---|---|
+| `hooks.setupHost` | host | before any Docker work | aborts startup (`cleanupHost` still runs) |
+| `hooks.setup` | container, during the image build | when the image is built | aborts the build |
+| `hooks.prestart` | container | every start, before the agent CLI | aborts startup |
+| `hooks.cleanupHost` | host | during teardown | logged, teardown continues |
 
 ```json
 {
   "hooks": {
-    "setupHost": [
-      { "script": ".hole/start-local-db.sh" },
-      { "script": "~/shared/start-mock-api.sh" }
-    ]
+    "setupHost": [{ "script": ".hole/setup-host.sh" }],
+    "setup": [{ "script": ".hole/setup.d/*.sh" }],
+    "prestart": [{ "script": ".hole/prestart.sh" }],
+    "cleanupHost": [{ "script": ".hole/cleanup-host.sh" }]
   }
 }
 ```
 
-Unlike the [setup hook](#setup-hook) (image build, inside container) and the [prestart hook](#prestart-hook) (runtime, inside container), setupHost scripts run **on the host** as the user who invoked `hole`, with full access to the host shell environment. Hole exports `PROJECT_NAME`, `PROJECT_DIR`, `SANDBOX_USERNAME`, and `SANDBOX_HOME` before the hook runs, so scripts can key off the active project.
+Every entry is a literal path or a glob. Matches run in lexicographic order, so `001-`, `002-` prefixes give a predictable sequence. A missing script or a pattern matching nothing is a warning, not an error.
 
-Scripts execute in array order (global settings first, then project settings). Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
+Hooks receive `HOLE_PROJECT_DIR`, `HOLE_PROJECT_NAME`, `HOLE_INSTANCE_NAME`, `HOLE_INSTANCE_ID` and `HOLE_SANDBOX_NETWORK` in their environment.
 
-If a setupHost script exits with a non-zero status, the sandbox startup is aborted before any Docker resources are created. The [clean up host hook](#clean-up-host-hook) **still runs** on this failure path, so any services already started by earlier scripts get a chance to shut down.
+`hooks.setup` scripts are part of the image identity, so editing one rebuilds the image.
 
-#### Setup hook
+> `cleanupHost` scripts normally run in Hole's detached teardown supervisor, which has **no TTY**. Their output goes to the run log; interactive scripts are not supported there.
 
-Run a custom bash script during the Docker image build to perform system-level setup (install packages, configure locales, add apt repositories, etc.):
+### Profiles
+
+Named overlays for different modes of work, selected at start time:
 
 ```json
 {
-  "hooks": {
-    "setup": {
-      "script": ".hole/setup.sh"
+  "network": { "allow": ["api.github.com"] },
+  "profiles": {
+    "research": {
+      "network": { "allow": ["*.wikipedia.org"] }
+    },
+    "docker": {
+      "container": { "docker": true },
+      "dependencies": ["make"]
+    },
+    "research-docker": {
+      "extends": ["research", "docker"],
+      "agents": { "claude": { "args": ["--model", "opus"] } }
     }
   }
 }
 ```
 
-The script runs as the agent user during the image build, after dependency installation. Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
-
-**Important:** The agent home directory (mirrors host's `$HOME`, e.g., `/Users/me` on macOS) is backed by a persistent Docker volume that overrides image contents.
-Do not install anything to the agent home directory in the setup script — it will be hidden by the volume mount.
-
-Use `--rebuild` to force a fresh build if needed.
-
-#### Prestart hook
-
-Run custom bash scripts every time the sandbox starts, before the agent CLI launches:
-
-```json
-{
-  "hooks": {
-    "prestart": [
-      { "script": ".hole/prestart.sh" },
-      { "script": "~/shared-prestart.sh" }
-    ]
-  }
-}
+```sh
+hole start claude:research .
+hole start claude:research-docker .
 ```
 
-Unlike the [setup hook](#setup-hook) (which runs during the Docker image build), prestart scripts run at container startup in the fully configured agent environment with all environment variables, proxy settings, and network access available. This makes them suitable for runtime initialization tasks such as starting background services, seeding databases, or configuring tools that depend on runtime state.
+A profile accepts exactly the same settings as the root (except `profiles` itself), can be defined in either settings file, and can `extends` other profiles — including across files, so a project profile may extend a global one. Names must match `^[a-z0-9][a-z0-9-]*$`.
 
-Scripts are executed in array order (global settings first, then project settings). Host paths support environment variable expansion (`$VAR`, `${VAR}`), tilde expansion (`~/`), relative paths (resolved against the project directory), and absolute paths. Non-existent paths are skipped with a warning.
+Merge order: global base → global overlays (parents first) → project base → project overlays. So the project still overrides the global file, and the selected profile is the last word within each.
 
-If a prestart script exits with a non-zero status, the sandbox startup is aborted and the error is reported.
+A profile you ask for that no settings file defines is an **error**, not a silent no-op — Hole lists what each file does define. Profiles only work with `start`.
 
-#### Clean up host hook
+**Profiles only add; they never take away.** This keeps effective permissions readable, and has two consequences:
 
-Run custom bash scripts on the **host** system every time the sandbox exits — including normal exit, Ctrl-C, and error/abort paths. Use this to tear down whatever [setupHost](#set-up-host-hook) started.
-
-```json
-{
-  "hooks": {
-    "cleanupHost": [
-      { "script": ".hole/stop-local-db.sh" },
-      { "script": "~/shared/stop-mock-api.sh" }
-    ]
-  }
-}
-```
-
-Cleanup scripts run **after** the sandbox is fully torn down (containers stopped, network removed, Docker cache synced) and before Hole's temporary files are deleted. They receive the same exported environment (`PROJECT_NAME`, `PROJECT_DIR`, `SANDBOX_USERNAME`, `SANDBOX_HOME`) as setupHost.
-
-Scripts execute in array order (global settings first, then project settings). Path resolution, merge semantics, and the "non-existent path → warn and skip" behavior are identical to [setupHost](#set-up-host-hook).
-
-Unlike setupHost, a cleanupHost script that exits with a non-zero status does **not** abort teardown — the error is logged and subsequent cleanup scripts still run. This guarantees that a single flaky script cannot leak external resources or strand temporary files.
+1. **Keep the base minimal.** A broad base cannot be narrowed by a profile, so put in the base only what every mode needs and let each profile add the rest.
+2. **A mount whose source varies between profiles belongs in each profile**, not in the base. `files.include` is keyed by *host* path, so a base `~/.claude → ~/.claude` and a profile `~/claude-review → ~/.claude` would both survive the merge and target the same container path — which Hole rejects, naming both sources.
 
 ### Configuration examples
 
-#### Run Maven compilation and tests
+#### Run Maven builds and tests
 
-To use Maven inside sandboxes (e.g.: to run test by the agent), you need some special configuration for the sandbox.
+_These can go in the global `~/.hole/settings.json` or a project's `.hole/settings.json`._
 
-_Note: the following configurations can be added to global `~/.hole/settings.json` file, or project-specific `.hole/settings.json` file._
+**1. Create Maven settings for the agent.** You probably don't want to hand `~/.m2/settings.xml` and its secrets to the agent, so make a separate `~/.m2/agent-settings.xml`. No proxy configuration is needed — the sandbox filters at the network layer, so Maven just works.
 
-##### 1. Create Maven settings for agent
+If you need toolchains, note the JDK path inside the sandbox depends on the architecture:
 
-We don't want to pass the main `~/.m2/settings.xml` with potential secrets into the sandbox. Also, we need some special
-proxy configuration for the agent. Therefore, it is advisable to create separate `~/.m2/agent-settings.xml` file.
-
-The main configuration needed by the agent is as follows:
+```
+/usr/lib/jvm/java-17-openjdk-amd64   # x86 (standard Linux, WSL)
+/usr/lib/jvm/java-17-openjdk-arm64   # ARM (Apple Silicon)
+```
 
 ```xml
-<proxies>
-    <proxy>
-        <id>http-internet</id>
-        <active>true</active>
-        <protocol>http</protocol>
-        <host>proxy</host>
-        <port>8888</port>
-    </proxy>
-    <proxy>
-        <id>https-internet</id>
-        <active>true</active>
-        <protocol>https</protocol>
-        <host>proxy</host>
-        <port>8888</port>
-    </proxy>
-</proxies>
-```
-
-the rest is up to you.
-
-You can also set up specific toolchains settings for the agent, if you need. The tricky part is specifying the JDK installation folder
-inside the agent. If JDK is installed through `dependencies`, it should be found at:
-
-```
-/usr/lib/jvm/java-17-openjdk-amd64  // for x86 devices (e.g. standard Linux machine, WSL)
-/usr/lib/jvm/java-17-openjdk-arm64  // for ARM devices (e.g. macOS)
-```
-
-With that information, create file `~/.m2/agent-toolchains.xml` and set it up:
-
-```xml
+<!-- ~/.m2/agent-toolchains.xml -->
 <?xml version="1.0" encoding="UTF-8"?>
 <toolchains>
-    <toolchain>
+  <toolchain>
     <type>jdk</type>
     <provides>
-        <version>17</version>
-        <vendor>openjdk</vendor>
+      <version>17</version>
+      <vendor>openjdk</vendor>
     </provides>
     <configuration>
-        <jdkHome>/usr/lib/jvm/java-17-openjdk-arm64</jdkHome>
+      <jdkHome>/usr/lib/jvm/java-17-openjdk-arm64</jdkHome>
     </configuration>
-    </toolchain>
+  </toolchain>
 </toolchains>
 ```
 
-##### 2. Include Maven settings into agent
+**2. Mount them and allow the repositories:**
 
 ```json
 {
+  "dependencies": ["openjdk-17-jdk", "maven"],
   "files": {
     "include": {
       "~/.m2/repository": "~/.m2/repository",
       "~/.m2/agent-settings.xml": "~/.m2/settings.xml",
-      "~/.m2/agent-toolchains.xml": "~/.m2/toolchains.xml" // optional, only if you use toolchains
+      "~/.m2/agent-toolchains.xml": "~/.m2/toolchains.xml"
     }
+  },
+  "network": {
+    "allow": ["repo.maven.apache.org", "*.apache.org", "nexus.mycompany.internal"]
   }
 }
 ```
 
-##### 3. Allow internal Maven repositories
+#### Node project with a private registry
 
-The sandbox denies all network traffic from not-whitelisted domains. To run Maven, you typically need at least `apache.org`
-domain for standard repositories. If you have some internal repositories, include them too:
+```json
+{
+  "dependencies": ["nodejs", "npm"],
+  "files": {
+    "include": { "~/.npmrc": "~/.npmrc" },
+    "exclude": [".env", ".env.*", "node_modules"]
+  },
+  "network": {
+    "allow": ["registry.npmjs.org", "*.npmjs.org", "npm.mycompany.internal"]
+  }
+}
+```
+
+#### Reaching a database on your host
 
 ```json
 {
   "network": {
-    "domainWhitelist": [
-      "apache.org"
-    ]
+    "hostGatewayDomains": ["mydb.local:5432"]
   }
 }
 ```
+
+Then connect to `mydb.local:5432` from inside the sandbox.
+
+## Logs
+
+| Path | Contents |
+|---|---|
+| `~/.hole/logs/run-<date>-<agent>-<pid>.log` | per-run debug log: every runtime command, timings, teardown detail (kept ~7 days) |
+| `<project>/.hole/logs/network-access-<agent>-<id>.log` | the `-n` dump of resolved and refused domains |
+| `~/.hole/instances/` | one file per running sandbox, powering `hole list` |
+
+Run with `-d` to see debug output on the console as well.

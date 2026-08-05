@@ -1,0 +1,4 @@
+# Domains the Gemini CLI needs at runtime.
+# Format: <host>[:<port>[,<port>...]] — ports default to 443,80.
+googleapis.com
+*.googleapis.com
