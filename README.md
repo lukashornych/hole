@@ -241,6 +241,13 @@ This keeps your Gemini settings in sync between sandboxes and your host system. 
 }
 ```
 
+#### Network access
+
+Gemini is allowed `cloudcode-pa.googleapis.com` (login with Google), `generativelanguage.googleapis.com` (`GEMINI_API_KEY`) and `oauth2.googleapis.com` (token refresh) — not `*.googleapis.com`, which would also open `storage.googleapis.com` and every other Google API. Two consequences, both expected:
+
+- A `-n` dump shows `DENIED play.googleapis.com` (usage telemetry) and may show `DENIED www.googleapis.com` (caching your Google account ID, which the CLI logs and moves past). Neither affects the CLI.
+- Vertex AI needs its host allowed explicitly, e.g. `"network": {"allow": ["aiplatform.googleapis.com", "europe-west1-aiplatform.googleapis.com"]}`.
+
 The **important** part is that the host folder exists before starting the sandbox.
 
 ### Codex CLI
@@ -465,7 +472,7 @@ How it works: the gateway is the sandbox's DNS server, router and firewall. A na
 
 Because filtering happens at the network layer, **no tool needs proxy configuration** — ssh, git over ssh, database clients, raw sockets and UDP all work as long as you allow the host and port.
 
-Each agent's own domains are always allowed, so the agent CLI works with empty settings.
+Every **enabled** agent's own domains are always allowed, so the agent CLI works with empty settings — and because one image installs all of them, an agent that launches another agent works too. That does mean `hole start claude .` also permits codex's and gemini's endpoints; set [`container.enabledAgents`](#container-settings) to just the agent you use if you want a narrower surface — globally, so all your sandboxes share one narrower image, or in a project, which gives that project its own image. Each agent's list names the specific hosts its CLI needs, never a wildcard over a namespace shared with other tenants, and optional traffic such as usage telemetry is left out — allow it yourself if you want it.
 
 Use `-n` to discover what a project needs: it writes every domain the sandbox resolved or was refused to `~/.hole/logs/{project}/network-access-{agent}-{id}.log`.
 

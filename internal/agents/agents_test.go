@@ -52,6 +52,48 @@ func TestBuiltinAgentsAreComplete(t *testing.T) {
 	}
 }
 
+// Every enabled agent's allow.txt is merged into every sandbox's policy, so a builtin entry that
+// wildcards a namespace shared with other tenants opens attacker-controlled endpoints in the
+// default configuration — `*.googleapis.com` covers `storage.googleapis.com`, where anyone can
+// create a writable bucket. The gateway matches names, not URL paths, so it cannot tell those apart
+// from the vendor's own API. Wildcards over a namespace one vendor owns (`*.chatgpt.com`) are fine.
+func TestBuiltinAllowListsDoNotWildcardMultiTenantNamespaces(t *testing.T) {
+	multiTenant := []string{"googleapis.com", "amazonaws.com", "azurewebsites.net", "cloudfront.net",
+		"blob.core.windows.net", "r2.cloudflarestorage.com", "herokuapp.com", "web.app",
+		"firebaseio.com", "pages.dev", "workers.dev", "vercel.app", "netlify.app", "github.io"}
+
+	registry, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, name := range []string{"claude", "gemini", "codex"} {
+		agent, ok := registry.Get(name)
+		if !ok {
+			t.Fatalf("builtin agent %q missing from the registry", name)
+		}
+		allow, err := agent.AllowFile()
+		if err != nil {
+			t.Fatalf("agent %q allow.txt: %v", name, err)
+		}
+		entries, err := network.ParseAllowFile(allow, name)
+		if err != nil {
+			t.Fatalf("agent %q allow.txt does not parse: %v", name, err)
+		}
+		for _, entry := range entries {
+			if entry.Kind != network.KindWildcard {
+				continue
+			}
+			for _, namespace := range multiTenant {
+				if entry.Host == namespace || strings.HasSuffix(entry.Host, "."+namespace) {
+					t.Errorf("agent %q allows '%s': %s is multi-tenant, so the wildcard also allows "+
+						"other tenants' endpoints; name the specific hosts the CLI needs instead",
+						name, entry, namespace)
+				}
+			}
+		}
+	}
+}
+
 // An agent whose command names the Node interpreter by absolute path pins a patch version, and
 // its install script must install exactly that version. The two files drifting apart is invisible
 // until launch, where it surfaces as ENOENT inside the sandbox — and it drifts on its own, because

@@ -173,6 +173,15 @@ database clients, raw sockets, UDP and QUIC — as long as you allow the host an
 immediate DNS error instead of a proxy timeout. That is intentional: fast and obvious beats
 slow and mysterious.
 
+**Gemini's built-in domains are narrower.** 1.x listed the unanchored regex `googleapis\.com`,
+which matched every host under it — `storage.googleapis.com` included, so any sandbox with gemini
+enabled could read from and write to arbitrary Google Cloud Storage buckets. 2.0 allows only
+`cloudcode-pa.googleapis.com` (login with Google), `generativelanguage.googleapis.com`
+(`GEMINI_API_KEY`) and `oauth2.googleapis.com` (token refresh). Both auth paths and normal use are
+unaffected; Vertex AI now needs `network.allow` entries (`aiplatform.googleapis.com` plus the
+regional host), and gemini's usage telemetry (`play.googleapis.com`) is denied, which shows up in a
+`-n` dump and changes nothing else.
+
 **`-r`/`--rebuild` is rarely needed.** Images are tagged with a hash of everything that affects
 their content, so changing a setting that matters rebuilds automatically. Use `-r` only to pick
 up newer apt packages or agent CLI versions.

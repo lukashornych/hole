@@ -26,7 +26,15 @@ assets/agents/<name>/      (builtin, embedded)
   prompts.
 - `allow.txt` uses the allow-list shorthand (`<host>[:<port>,...]`, default ports 443 and 80),
   with `#` comments. Entries from **every enabled agent** are merged regardless of which agent
-  starts, so switching agents inside one image needs no settings change.
+  starts, so switching agents inside one image needs no settings change — and so every entry is
+  part of the egress surface of every sandbox, whichever agent runs.
+- Because of that merge, an entry must be **no wider than the CLI genuinely needs**, and must never
+  wildcard a namespace the agent's vendor does not exclusively own. `*.chatgpt.com` is one vendor's
+  subdomains; `*.googleapis.com` includes `storage.googleapis.com`, where anyone can create a
+  writable bucket. The gateway matches DNS names and L3/L4, never URL paths, so a multi-tenant
+  wildcard allows attacker-controlled endpoints indistinguishably from the vendor's own API. Name
+  the specific hosts instead, and leave optional traffic (telemetry, alternative backends) out —
+  users add those through `network.allow`.
 - `install-user.sh` typically also pre-seeds config so the user is not re-prompted in every
   sandbox — claude writes `~/.claude.json` with the onboarding and trust flags accepted.
 
