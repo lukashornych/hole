@@ -34,7 +34,6 @@ Table of contents:
   - [Custom agents](#custom-agents)
 - [Configuration](#configuration)
   - [Project trust](#project-trust)
-  - [Project .gitignore](#project-gitignore)
   - [File exclusions](#file-exclusions)
   - [File inclusions](#file-inclusions)
   - [Libraries](#libraries)
@@ -77,7 +76,7 @@ Run without a terminal — from a script, a CI job, or with the output piped —
 | Flag | Description |
 |---|---|
 | `-d`, `--debug` | Open a bash shell instead of the agent CLI, for inspecting the sandbox |
-| `-n`, `--dump-network-access` | After the agent exits, write the domains the sandbox resolved (and those it was refused) to `.hole/logs/network-access-{agent}-{id}.log` |
+| `-n`, `--dump-network-access` | After the agent exits, write the domains the sandbox resolved (and those it was refused) to `~/.hole/logs/{project}/network-access-{agent}-{id}.log` |
 | `-r`, `--rebuild` | Force a rebuild of the sandbox images |
 | `-u`, `--unrestricted-network` | Disable egress filtering; allow all network access |
 | `--with-docker` | Enable the Docker-in-Docker sidecar |
@@ -359,14 +358,6 @@ Without a terminal — a CI job, a piped run — there is nobody to ask, so an u
 hole start claude . --trust-project -- -p "run the test suite"
 ```
 
-### Project .gitignore
-
-Hole writes network access dumps to `<project>/.hole/logs/`. Add it to your `.gitignore`:
-
-```gitignore
-.hole/logs/
-```
-
 ### File exclusions
 
 Hide files and directories from the agent:
@@ -476,7 +467,7 @@ Because filtering happens at the network layer, **no tool needs proxy configurat
 
 Each agent's own domains are always allowed, so the agent CLI works with empty settings.
 
-Use `-n` to discover what a project needs: it writes every domain the sandbox resolved or was refused to `.hole/logs/network-access-{agent}-{id}.log`.
+Use `-n` to discover what a project needs: it writes every domain the sandbox resolved or was refused to `~/.hole/logs/{project}/network-access-{agent}-{id}.log`.
 
 Known limitation: once an allowed name resolves to an address, that address stays reachable for the sandbox's lifetime, so an agent could in principle reach a *different* site sharing that address (common with CDNs). Direct-IP attempts blocked by the firewall do not appear in the `-n` dump, because they never produce a DNS query.
 
@@ -762,7 +753,7 @@ Then connect to `mydb.local:5432` from inside the sandbox.
 | Path | Contents |
 |---|---|
 | `~/.hole/logs/run-<date>-<agent>-<pid>.log` | per-run debug log: every runtime command, timings, teardown detail (kept ~7 days) |
-| `<project>/.hole/logs/network-access-<agent>-<id>.log` | the `-n` dump of resolved and refused domains |
+| `~/.hole/logs/<project>/network-access-<agent>-<id>.log` | the `-n` dump of resolved and refused domains |
 | `~/.hole/instances/` | one file per running sandbox, powering `hole list` |
 | `~/.hole/trust.json` | which projects' settings you accepted, see [project trust](#project-trust) |
 

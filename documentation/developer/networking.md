@@ -161,7 +161,9 @@ capacity so "too small" is distinguishable from "full".
 
 The gateway container's CoreDNS query log is parsed on teardown: `NXDOMAIN` answers become
 `DENIED <name>`, everything else `ALLOWED <name>`. Output goes to
-`<project>/.hole/logs/network-access-<agent>-<instance>.log`.
+`~/.hole/logs/<project>/network-access-<agent>-<instance>.log` — under `~/.hole`, never the
+project's own `.hole/logs`, which is bind-mounted read-write with the host UID and so could be
+replaced with a symlink to redirect this host-side write (`internal/sandbox/dump.go`).
 
 Documented limitation: direct-IP attempts blocked by the firewall never produce a DNS query, so
 they do not appear in the dump. The nftables counter records them for debugging

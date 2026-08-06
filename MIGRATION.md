@@ -239,6 +239,12 @@ untouched. What does change: a **non-interactive** run — CI, a piped invocatio
 so it fails instead of granting silently. Add `--trust-project` to accept the project's current
 requests up front. See [project trust](README.md#project-trust).
 
+**The `-n` network-access dump moved out of the project.** 1.x wrote it to
+`<project>/.hole/logs/`, inside the sandbox's own read-write mount; 2.0 writes it to
+`~/.hole/logs/<project>/network-access-<agent>-<id>.log`, which the sandbox cannot reach. Nothing
+else was ever written into `<project>/.hole/`, so if you added `.hole/logs/` to a project's
+`.gitignore` purely for these dumps, you can drop that line.
+
 **New: `hole list`** shows what is running, and per-run debug logs are written to
 `~/.hole/logs/`.
 
@@ -254,7 +260,7 @@ again.
 hole start claude . -n
 ```
 
-On exit, `<project>/.hole/logs/network-access-claude-<id>.log` lists every domain the sandbox
+On exit, `~/.hole/logs/<project>/network-access-claude-<id>.log` lists every domain the sandbox
 resolved (`ALLOWED`) and every one it was refused (`DENIED`). The `DENIED` lines are your
 missing `network.allow` entries. Note that a tool connecting to a hardcoded IP never appears
 there, because it never asks DNS.

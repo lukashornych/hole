@@ -50,7 +50,7 @@ func Teardown(containerEngine *engine.Engine, host hostenv.Host, store *state.St
 	agentRan := containerEngine.ContainerStarted(instance.InstanceName + "-agent-1")
 
 	if instance.Flags.DumpNetworkAccess && containerEngine.ContainerExists(instance.InstanceName+"-gateway-1") {
-		writeNetworkAccessDump(containerEngine, instance)
+		writeNetworkAccessDump(containerEngine, host, instance)
 	}
 
 	if err := containerEngine.ComposeDown(instance.InstanceName); err != nil {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/lukashornych/hole/internal/engine"
+	"github.com/lukashornych/hole/internal/hostenv"
 	"github.com/lukashornych/hole/internal/logging"
 	"github.com/lukashornych/hole/internal/network"
 	"github.com/lukashornych/hole/internal/state"
@@ -25,9 +26,14 @@ var coreDNSQuery = regexp.MustCompile(`"[A-Z]+ [A-Z]+ ([^ "]+)[^"]*" ([A-Z]+)`)
 // writeNetworkAccessDump extracts the domains the sandbox resolved (and those it was
 // refused) from the gateway's DNS log.
 //
+// The dump is written under `~/.hole/logs/<project>/`, never into the project's own
+// `.hole/logs`: that directory is bind-mounted read-write with the host UID, so the sandbox
+// could replace it with a symlink and turn this host-side write into an arbitrary-file
+// overwrite as the invoking user. `~/.hole` is outside every sandbox mount.
+//
 // Direct-IP connection attempts blocked by the firewall do not appear here — they never
 // produce a DNS query. The nftables denied counter records them for debugging.
-func writeNetworkAccessDump(containerEngine *engine.Engine, instance *state.Instance) {
+func writeNetworkAccessDump(containerEngine *engine.Engine, host hostenv.Host, instance *state.Instance) {
 	container := instance.InstanceName + "-gateway-1"
 	logs, err := containerEngine.ContainerLogs(container)
 	if err != nil && strings.TrimSpace(logs) == "" {
@@ -59,20 +65,32 @@ func writeNetworkAccessDump(containerEngine *engine.Engine, instance *state.Inst
 	}
 	sort.Strings(lines)
 
-	logDir := filepath.Join(instance.ProjectPath, ".hole", "logs")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		logging.Warn("could not create %s: %v", logDir, err)
-		return
-	}
-	logFile := filepath.Join(logDir, fmt.Sprintf("network-access-%s-%s.log", instance.Agent, instance.InstanceID))
 	content := strings.Join(lines, "\n")
 	if content != "" {
 		content += "\n"
 	}
-	if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
-		logging.Warn("could not write %s: %v", logFile, err)
+	logFile, err := writeDumpFile(host, instance, content)
+	if err != nil {
+		logging.Warn("could not write network access log: %v", err)
 		return
 	}
 	logging.Line()
 	logging.Info("Network access log written to: %s", logFile)
+}
+
+// writeDumpFile stores the dump under `~/.hole/logs/<project>/` and returns the path.
+//
+// The per-project directory lives in `~/.hole`, which is outside every sandbox mount, so the
+// sandbox cannot pre-plant a symlink at the write target — unlike the project's own
+// `.hole/logs`, which is bind-mounted read-write with the host UID.
+func writeDumpFile(host hostenv.Host, instance *state.Instance, content string) (string, error) {
+	logDir := filepath.Join(host.LogDir(), instance.ProjectName)
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return "", fmt.Errorf("create %s: %w", logDir, err)
+	}
+	logFile := filepath.Join(logDir, fmt.Sprintf("network-access-%s-%s.log", instance.Agent, instance.InstanceID))
+	if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", logFile, err)
+	}
+	return logFile, nil
 }
