@@ -34,6 +34,53 @@ is suggested as both an exact and a wildcard entry so reachability is preserved;
 (the old `ConnectPort 0`) is called out as the block-everything case rather than turned into
 reachable entries.
 
+## Project trust
+
+The global file is the user's own document. The project file is repository content, so the
+settings in it whose effect **leaves the sandbox** are gated behind a per-project confirmation
+(`internal/trust`):
+
+`hooks.setupHost`, `hooks.cleanupHost` (host code), `files.include`, `libraries` (host paths into
+the sandbox), `container.docker` (privileged sidecar), `hooks.setup`, `dependencies` (code during
+the image build, which uses the host's unfiltered network). Nothing else is gated: `files.exclude`
+only removes access, and `network.allow`, `environment`, `agents.*.args`, `container.baseImage` and
+`hooks.prestart` act inside the container, which is the boundary. Gating `network.allow` was
+considered and rejected — it is the most common thing a project file contains, and a prompt that
+fires on nearly every project trains the user to accept it, which is what would then also accept a
+`setupHost` script.
+
+Three details carry the design:
+
+- **Where the gate runs.** In `Start`, immediately after the settings load and **before** the
+  merged snapshot reaches the instance registry. Teardown replays `cleanupHost` from that snapshot
+  (`teardown.go:runCleanupHostHooks`) without checking how far startup got, so a gate placed after
+  the snapshot write would decline a project's script and then run it.
+- **What is trusted.** `trust.Grants` reads the project document *before* the merge, so the prompt
+  shows what the repository asks for rather than what merging produced, and it scans the base
+  settings **and every profile** — the file is the unit of trust, so which profile a run selects
+  neither hides a grant nor invalidates a recorded decision. Values are kept **raw**: an expanded
+  path embeds the host's home, which would make the digest machine-specific, and a redirected
+  `$VAR` would leave it unchanged.
+- **What re-prompts.** `~/.hole/trust.json` records a sha256 over the grant set per project path,
+  so an ungated settings edit keeps the decision valid while a project that starts asking for more
+  asks again. Keying on the grant set rather than on the path is what closes the obvious loop: the
+  project is mounted read-write, so an agent can add `hooks.setupHost` to the file it lives in, and
+  the next start must not inherit the trust the file had before. Such an edit cannot affect the
+  run it happens in either: teardown replays `cleanupHost` from the snapshot taken at the trusted
+  start, never from the file. An unreadable record counts as untrusted — the failure direction has
+  to be a prompt. `~/.hole` is not part of any sandbox mount
+  unless the user mounts it explicitly, which is itself a gated `files.include`.
+
+Without a terminal the start fails, naming the file, the keys and `--trust-project`; that flag
+accepts the current grant set non-interactively and records it. Failing to *write* the record is a
+warning, not an error: the user has already given the answer for this run.
+
+This supersedes §3 item 5 of
+[analysis/dind-hardening-fix-plan.md](../analysis/dind-hardening-fix-plan.md), which proposed
+honoring `container.docker` only from the global file. Trust-on-first-use makes it a prompted grant
+instead of a refused one, so a project that legitimately needs a daemon still works — do not
+implement both.
+
 ## Merge semantics
 
 Merging happens on the untyped document, which is then decoded into `config.Settings`:

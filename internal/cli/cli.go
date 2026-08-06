@@ -46,6 +46,8 @@ Options:
       --library PATH[:MOUNT][:rw]  Mount an extra directory (repeatable). Defaults to
                                   /libs/{basename}, read-only unless :rw is given
       --with-docker           Enable Docker-in-Docker sidecar for the sandbox
+      --trust-project         Accept the host access this project's .hole/settings.json
+                                  asks for without being asked, and remember it
   --                          Separator for agent-specific arguments;
                                   everything after -- is passed to the agent CLI
 
@@ -81,6 +83,7 @@ type Invocation struct {
 	Rebuild           bool
 	Unrestricted      bool
 	WithDocker        bool
+	TrustProject      bool
 	// Libraries are the raw --library values, in the order they were given.
 	Libraries []string
 }
@@ -111,6 +114,8 @@ func Parse(args []string) (*Invocation, error) {
 			inv.Unrestricted = true
 		case "--with-docker":
 			inv.WithDocker = true
+		case "--trust-project":
+			inv.TrustProject = true
 		case "--library":
 			// The value is the next argument; the `--library=x` form is handled below.
 			expectLibrary = true
@@ -246,6 +251,7 @@ func runStart(inv *Invocation) int {
 		Unrestricted:      inv.Unrestricted,
 		DumpNetworkAccess: inv.DumpNetworkAccess,
 		WithDocker:        inv.WithDocker,
+		TrustProject:      inv.TrustProject,
 		Libraries:         inv.Libraries,
 		AgentArgs:         inv.AgentArgs,
 	})

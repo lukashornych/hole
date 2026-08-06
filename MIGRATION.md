@@ -225,6 +225,20 @@ undefined variable stays literal with a warning instead of becoming an empty str
 survives a closed terminal, which means those scripts cannot prompt. Their output goes to the
 run log.
 
+**A project's own settings now need your confirmation before they reach your host.** 1.x trusted
+`<project>/.hole/settings.json` completely: cloning a repository and starting a sandbox in it ran
+that file's `hooks.setupHost` on your machine, mounted whatever `files.include` and `libraries`
+named, and could switch on the privileged Docker-in-Docker sidecar — all without a word. 2.0 shows
+you what a project asks for and asks once, remembering the answer in `~/.hole/trust.json`. Only
+settings whose effect leaves the sandbox are gated (`hooks.setupHost`, `hooks.cleanupHost`,
+`hooks.setup`, `files.include`, `libraries`, `container.docker`, `dependencies`); everything else,
+`network.allow` included, is confined to the container and never prompts.
+
+Your own `~/.hole/settings.json` is never gated, so a global configuration keeps working
+untouched. What does change: a **non-interactive** run — CI, a piped invocation — cannot be asked,
+so it fails instead of granting silently. Add `--trust-project` to accept the project's current
+requests up front. See [project trust](README.md#project-trust).
+
 **New: `hole list`** shows what is running, and per-run debug logs are written to
 `~/.hole/logs/`.
 

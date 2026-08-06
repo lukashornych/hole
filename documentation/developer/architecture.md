@@ -22,6 +22,7 @@ internal/hooks/        hook script resolution and host-side execution
 internal/sandbox/      orchestration: startup, mounts, compose generation, teardown, dump,
                        the watchdog handoff, garbage collection, `hole list`
 internal/state/        instance registry under ~/.hole/instances
+internal/trust/        per-project consent for host-affecting project settings
 internal/worktree/     git worktree detection and the libraries it implies
 internal/dindregistry/ the long-lived pull-through image cache
 internal/update/       release discovery, self-update, version-change migration, uninstall
@@ -61,6 +62,7 @@ directory to keep in sync. See [guidelines](guidelines.md#non-negotiable-rules).
 | `~/.hole/logs/run-*.log` | per-run debug logs, ~7 day retention |
 | `~/.hole/tmp/run.XXXXXX/` | per-run generated artifacts |
 | `~/.hole/state.json` | the last version that completed a run |
+| `~/.hole/trust.json` | project paths whose settings the user accepted, and what they accepted |
 
 The run temp directory lives under `$HOME` rather than `$TMPDIR` because Colima, Lima and
 Podman-Machine VMs share `$HOME` but not `/var/folders`, and generated files there must be
@@ -261,6 +263,14 @@ have the right ownership. It does have passwordless `sudo` inside the container:
 the boundary, not the user. `NET_ADMIN` on the agent is likewise safe — the only route out is
 through the gateway, so rewriting routes inside the agent can break its own connectivity but
 never widen it.
+
+**Project settings are untrusted input.** `<project>/.hole/settings.json` is repository content,
+and a few of its keys act on the host: `hooks.setupHost`/`cleanupHost` run scripts as the invoking
+user, `files.include`/`libraries` mount host paths, `container.docker` adds the privileged sidecar,
+and `hooks.setup`/`dependencies` run during a build that uses the host's unfiltered network. Those
+need a per-project confirmation, recorded in `~/.hole/trust.json`; the gate sits before the settings
+snapshot is written, because teardown replays `cleanupHost` from it. See
+[configuration](configuration.md#project-trust).
 
 **Docker-in-Docker is the weak point in this model, deliberately bounded.** The sidecar container
 must be privileged (rootlesskit will not start otherwise), so it is the one place an agent-reachable

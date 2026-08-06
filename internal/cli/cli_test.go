@@ -18,6 +18,7 @@ func TestParseFlagsAndPositionalsInterleave(t *testing.T) {
 		rebuild    bool
 		unrestrict bool
 		withDocker bool
+		trust      bool
 	}{
 		{
 			name:       "plain start",
@@ -48,13 +49,14 @@ func TestParseFlagsAndPositionalsInterleave(t *testing.T) {
 		},
 		{
 			name:       "all flags",
-			args:       []string{"start", "claude", ".", "-n", "-r", "-u", "--with-docker"},
+			args:       []string{"start", "claude", ".", "-n", "-r", "-u", "--with-docker", "--trust-project"},
 			command:    "start",
 			positional: []string{"claude", "."},
 			dump:       true,
 			rebuild:    true,
 			unrestrict: true,
 			withDocker: true,
+			trust:      true,
 		},
 		{
 			name:       "long flag forms",
@@ -114,7 +116,8 @@ func TestParseFlagsAndPositionalsInterleave(t *testing.T) {
 				t.Errorf("agent args = %v, want %v", inv.AgentArgs, test.agentArgs)
 			}
 			if inv.Debug != test.debug || inv.DumpNetworkAccess != test.dump || inv.Rebuild != test.rebuild ||
-				inv.Unrestricted != test.unrestrict || inv.WithDocker != test.withDocker {
+				inv.Unrestricted != test.unrestrict || inv.WithDocker != test.withDocker ||
+				inv.TrustProject != test.trust {
 				t.Errorf("flags = %+v", inv)
 			}
 		})

@@ -27,6 +27,7 @@ import (
 	"github.com/lukashornych/hole/internal/logging"
 	"github.com/lukashornych/hole/internal/network"
 	"github.com/lukashornych/hole/internal/state"
+	"github.com/lukashornych/hole/internal/trust"
 	"github.com/lukashornych/hole/internal/update"
 	"github.com/lukashornych/hole/internal/version"
 	"github.com/lukashornych/hole/internal/worktree"
@@ -46,6 +47,9 @@ type Options struct {
 	Unrestricted      bool
 	DumpNetworkAccess bool
 	WithDocker        bool
+	// TrustProject accepts the project settings' host-affecting keys without asking, for
+	// runs with no terminal to prompt on.
+	TrustProject bool
 	// Libraries are raw --library values: PATH[:MOUNT][:rw].
 	Libraries []string
 	AgentArgs []string
@@ -128,16 +132,32 @@ func Start(opts Options) (exitCode int, err error) {
 	defer finishTeardown(containerEngine, host, store, instance, supervisor)
 	watchSignals(containerEngine, instance, signalled)
 
-	document, globalDocument, settingsFiles, err := loadSettingsDocument(host, opts.ProjectDir, opts.Profile)
+	documents, err := loadSettingsDocument(host, opts.ProjectDir, opts.Profile)
 	if err != nil {
 		return 1, err
 	}
-	settings, err := config.Decode(document)
+	settings, err := config.Decode(documents.merged)
 	if err != nil {
 		return 1, err
 	}
-	globalSettings, err := config.Decode(globalDocument)
+	globalSettings, err := config.Decode(documents.globalOnly)
 	if err != nil {
+		return 1, err
+	}
+
+	// Before the settings snapshot below and before any host-side hook: the project file is
+	// repository content, and teardown replays cleanupHost from that snapshot, so a start that
+	// declines the project's grants must not have recorded one.
+	if err := trust.Gate(trust.Options{
+		ProjectDir:   opts.ProjectDir,
+		SettingsFile: projectSettingsFile(opts.ProjectDir),
+		Document:     documents.project,
+		Store:        trust.NewStore(host.HoleDir()),
+		Interactive:  engine.IsTerminal(os.Stdin),
+		PreApproved:  opts.TrustProject,
+		In:           os.Stdin,
+		Out:          os.Stderr,
+	}); err != nil {
 		return 1, err
 	}
 
@@ -161,9 +181,9 @@ func Start(opts Options) (exitCode int, err error) {
 
 	// The snapshot is what runs cleanupHost hooks during teardown — including in the
 	// watchdog, which must not depend on settings files that may have changed since.
-	if snapshot, err := json.Marshal(document); err == nil {
+	if snapshot, err := json.Marshal(documents.merged); err == nil {
 		instance.Settings = snapshot
-		instance.SettingsFiles = settingsFiles
+		instance.SettingsFiles = documents.files
 		if err := store.Write(instance); err != nil {
 			logging.Warn("could not update the instance registry: %v", err)
 		}
@@ -393,50 +413,70 @@ func attach(containerEngine *engine.Engine, container string) int {
 	return 1
 }
 
-// loadSettingsDocument validates and merges the settings documents, returning the merged
-// document and the files that contributed to it (which `hole list` reports).
+// projectSettingsFile is the per-project settings path.
+func projectSettingsFile(projectDir string) string {
+	return filepath.Join(projectDir, ".hole", "settings.json")
+}
+
+// settingsDocuments is the outcome of loading the settings files for one run.
+type settingsDocuments struct {
+	// merged is the effective document: global, project and the selected profile chain.
+	merged config.Document
+	// globalOnly is the same pipeline over the global file alone, the baseline the image
+	// scope decision compares against.
+	globalOnly config.Document
+	// project is the project file exactly as read — the input to the trust gate, which must
+	// see what the repository asks for and not what the merge produced.
+	project config.Document
+	// files are the documents that contributed, which `hole list` reports.
+	files []string
+}
+
+// loadSettingsDocument validates and merges the settings documents.
 //
 // With a profile selected, its inheritance chain is expanded across both files first, so a
 // project profile can extend a globally-defined one and vice versa.
-func loadSettingsDocument(host hostenv.Host, projectDir, profile string) (config.Document, config.Document, []string, error) {
+func loadSettingsDocument(host hostenv.Host, projectDir, profile string) (settingsDocuments, error) {
 	globalPath := host.GlobalSettingsFile()
-	projectPath := filepath.Join(projectDir, ".hole", "settings.json")
+	projectPath := projectSettingsFile(projectDir)
 
 	globalDoc, err := config.LoadAndValidate(globalPath, "global settings (~/.hole/settings.json)")
 	if err != nil {
-		return nil, nil, nil, err
+		return settingsDocuments{}, err
 	}
 	projectDoc, err := config.LoadAndValidate(projectPath, "project settings (.hole/settings.json)")
 	if err != nil {
-		return nil, nil, nil, err
+		return settingsDocuments{}, err
 	}
 
-	var files []string
+	documents := settingsDocuments{project: projectDoc}
 	if globalDoc != nil {
-		files = append(files, globalPath)
+		documents.files = append(documents.files, globalPath)
 	}
 	if projectDoc != nil {
-		files = append(files, projectPath)
+		documents.files = append(documents.files, projectPath)
 	}
 	// An empty chain degenerates to the plain two-way merge, and going through
 	// MergeWithProfile keeps the argument-vector handling that plain Merge would dedup away.
 	if profile == "" {
-		return config.MergeWithProfile(globalDoc, projectDoc, nil),
-			config.MergeWithProfile(globalDoc, nil, nil), files, nil
+		documents.merged = config.MergeWithProfile(globalDoc, projectDoc, nil)
+		documents.globalOnly = config.MergeWithProfile(globalDoc, nil, nil)
+		return documents, nil
 	}
 
 	// A requested profile that no file defines is fatal: running with the base permissions
 	// instead of the ones the profile grants would be a silent, wrong sandbox.
 	chain, err := config.ResolveChain(globalDoc, projectDoc, profile)
 	if err != nil {
-		return nil, nil, nil, err
+		return settingsDocuments{}, err
 	}
 	logging.Debug("profile chain: %s", strings.Join(chain, " -> "))
 
 	// The global-only baseline keeps the profile applied: a *global* profile is still global,
 	// so a profile that only adds runtime settings keeps the shared image.
-	return config.MergeWithProfile(globalDoc, projectDoc, chain),
-		config.MergeWithProfile(globalDoc, nil, chain), files, nil
+	documents.merged = config.MergeWithProfile(globalDoc, projectDoc, chain)
+	documents.globalOnly = config.MergeWithProfile(globalDoc, nil, chain)
+	return documents, nil
 }
 
 // buildPolicy folds every allow-list source into the gateway policy: each enabled agent's

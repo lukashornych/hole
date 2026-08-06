@@ -4,6 +4,7 @@ package engine
 
 import (
 	"os"
+	"runtime"
 	"testing"
 )
 
@@ -33,13 +34,26 @@ func TestIsTerminal(t *testing.T) {
 		t.Error("a pipe reported as a terminal")
 	}
 
-	// A pty master is the only terminal a test can rely on having.
-	ptmx, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		t.Skipf("no pty available: %v", err)
+	// Something that really is a terminal, in order of preference: the controlling terminal
+	// exists whenever the suite runs from one, and a pty master stands in where it does not.
+	//
+	// The master is a Linux-only fallback on purpose. On Darwin the termios ioctls belong to the
+	// slave side, so the master answers ENOTTY and is not a terminal by this test — which is why
+	// asserting on it failed on macOS while passing on Linux.
+	candidates := []string{"/dev/tty"}
+	if runtime.GOOS == "linux" {
+		candidates = append(candidates, "/dev/ptmx")
 	}
-	defer func() { _ = ptmx.Close() }()
-	if !IsTerminal(ptmx) {
-		t.Error("a pty master reported as not a terminal")
+	for _, path := range candidates {
+		terminal, err := os.OpenFile(path, os.O_RDWR, 0)
+		if err != nil {
+			continue
+		}
+		defer func() { _ = terminal.Close() }()
+		if !IsTerminal(terminal) {
+			t.Errorf("%s reported as not a terminal", path)
+		}
+		return
 	}
+	t.Skipf("no terminal available to check the positive case (tried %v)", candidates)
 }

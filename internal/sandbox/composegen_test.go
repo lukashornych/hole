@@ -335,11 +335,11 @@ func TestAgentCommandKeepsRepeatedFlagsWithoutAProfile(t *testing.T) {
 		`{"agents":{"claude":{"args":["--allowedTools","Read"]}}}`)
 
 	host := hostenv.Host{Username: "dev", Home: home}
-	document, _, _, err := loadSettingsDocument(host, projectDir, "")
+	documents, err := loadSettingsDocument(host, projectDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings, err := config.Decode(document)
+	settings, err := config.Decode(documents.merged)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -48,9 +48,13 @@ against the registry at runtime.
 4. Decide whether it affects the image. If it does, add it to the canonical config in
    `internal/image` **and** the table in [configuration](configuration.md#image-identity-and-scope),
    or cached images will go stale.
-5. Add a valid and an invalid example to the schema tests, and a merge test if its merge behavior
+5. Decide whether its effect leaves the sandbox — host code, a host path, a privileged container,
+   or anything running during the image build. If it does, add it to `capabilities` in
+   `internal/trust`, or a project file will be able to set it without the user's consent
+   ([configuration](configuration.md#project-trust)).
+6. Add a valid and an invalid example to the schema tests, and a merge test if its merge behavior
    is interesting.
-6. Document it in the README.
+7. Document it in the README.
 
 ## Add a runtime asset
 

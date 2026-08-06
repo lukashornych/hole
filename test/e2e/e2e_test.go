@@ -361,7 +361,9 @@ func TestPrestartAndHostHooksRun(t *testing.T) {
 	write(t, filepath.Join(projectDir, ".hole", "setup-host.sh"), "#!/bin/bash\ntouch \""+filepath.Join(projectDir, "setup-host-ran")+"\"\n")
 	write(t, filepath.Join(projectDir, ".hole", "cleanup-host.sh"), "#!/bin/bash\ntouch \""+filepath.Join(projectDir, "cleanup-host-ran")+"\"\n")
 
-	output, code := runHole(t, home, 20*time.Minute, "start", "test-agent", projectDir)
+	// --trust-project: these settings run scripts on the host, and a test has no terminal to
+	// confirm that on.
+	output, code := runHole(t, home, 20*time.Minute, "start", "test-agent", projectDir, "--trust-project")
 	if code != 0 {
 		t.Fatalf("hole start exited with %d:\n%s", code, output)
 	}
@@ -387,7 +389,7 @@ func TestSetupHostFailureAbortsButStillCleansUp(t *testing.T) {
 	write(t, filepath.Join(projectDir, ".hole", "fail.sh"), "#!/bin/bash\nexit 7\n")
 	write(t, filepath.Join(projectDir, ".hole", "cleanup.sh"), "#!/bin/bash\ntouch \""+filepath.Join(projectDir, "cleanup-ran")+"\"\n")
 
-	output, code := runHole(t, home, 10*time.Minute, "start", "test-agent", projectDir)
+	output, code := runHole(t, home, 10*time.Minute, "start", "test-agent", projectDir, "--trust-project")
 	if code == 0 {
 		t.Errorf("a failing setupHost hook must abort startup:\n%s", output)
 	}
@@ -405,6 +407,37 @@ func TestInvalidSettingsFailBeforeAnyDockerWork(t *testing.T) {
 	output, code := runHole(t, home, 2*time.Minute, "start", "test-agent", projectDir)
 	if code == 0 {
 		t.Errorf("invalid settings were accepted:\n%s", output)
+	}
+	assertNoLeftovers(t, projectDir)
+}
+
+// A project's own settings file is repository content, so the host-affecting keys in it need
+// the user's consent. Without a terminal to ask on, the start must fail — before the setupHost
+// script it asked for has run, and before cleanupHost can be replayed from a snapshot.
+func TestUntrustedProjectSettingsAbortBeforeAnyHostHook(t *testing.T) {
+	home, projectDir := environment(t, `["bash", "-c", "echo SHOULD_NOT_RUN"]`, `{
+	  "container": {"enabledAgents": ["test-agent"]},
+	  "hooks": {
+	    "setupHost": [{"script": ".hole/setup-host.sh"}],
+	    "cleanupHost": [{"script": ".hole/cleanup-host.sh"}]
+	  }
+	}`)
+	for _, hook := range []string{"setup-host", "cleanup-host"} {
+		write(t, filepath.Join(projectDir, ".hole", hook+".sh"),
+			"#!/bin/bash\ntouch \""+filepath.Join(projectDir, hook+"-ran")+"\"\n")
+	}
+
+	output, code := runHole(t, home, 2*time.Minute, "start", "test-agent", projectDir)
+	if code == 0 {
+		t.Errorf("untrusted project settings were accepted:\n%s", output)
+	}
+	if !strings.Contains(output, "hooks.setupHost") || !strings.Contains(output, "--trust-project") {
+		t.Errorf("the refusal does not say what was asked for or how to accept it:\n%s", output)
+	}
+	for _, hook := range []string{"setup-host", "cleanup-host"} {
+		if _, err := os.Stat(filepath.Join(projectDir, hook+"-ran")); err == nil {
+			t.Errorf("%s ran for a project that was never trusted", hook)
+		}
 	}
 	assertNoLeftovers(t, projectDir)
 }

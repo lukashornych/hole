@@ -33,6 +33,7 @@ Table of contents:
   - [Codex CLI](#codex-cli)
   - [Custom agents](#custom-agents)
 - [Configuration](#configuration)
+  - [Project trust](#project-trust)
   - [Project .gitignore](#project-gitignore)
   - [File exclusions](#file-exclusions)
   - [File inclusions](#file-inclusions)
@@ -80,6 +81,7 @@ Run without a terminal — from a script, a CI job, or with the output piped —
 | `-r`, `--rebuild` | Force a rebuild of the sandbox images |
 | `-u`, `--unrestricted-network` | Disable egress filtering; allow all network access |
 | `--with-docker` | Enable the Docker-in-Docker sidecar |
+| `--trust-project` | Accept the host access the project's own `.hole/settings.json` asks for without being asked, and remember it — see [project trust](#project-trust) |
 | `--library PATH[:MOUNT][:rw]` | Mount an extra directory (repeatable); defaults to `/libs/{basename}`, read-only unless `:rw` |
 | `--` | Everything after this is passed verbatim to the agent CLI |
 
@@ -320,6 +322,43 @@ Add the schema reference for editor completion:
 
 All path-valued settings support `$VAR`/`${VAR}` expansion, `~/` (your home on the host side, the sandbox home on the container side), and paths relative to the project directory.
 
+### Project trust
+
+`~/.hole/settings.json` is yours. A project's `.hole/settings.json` is *repository content* — and some settings reach outside the sandbox, which is exactly what you are pointing an agent at a repository to avoid. So the first time a project asks for one of them, Hole shows you what it wants and asks:
+
+```
+  The project's own settings ask for access beyond the sandbox:
+  /home/you/repo/.hole/settings.json
+
+    hooks.setupHost — runs a script on your host before the sandbox is created
+        .hole/setup-host.sh
+    files.include — mounts host paths into the sandbox
+        ~/.ssh -> ~/.ssh
+
+  Trust them only if you trust this repository's contents.
+
+  Trust this project? [y/N]
+```
+
+Answering no starts nothing at all — no container, and none of the scripts above. The settings that need confirmation are the ones whose effect leaves the sandbox:
+
+| Setting | What the project is asking for |
+|---|---|
+| `hooks.setupHost`, `hooks.cleanupHost` | run a script **on your host**, as you |
+| `files.include`, `libraries` | mount host paths into the sandbox |
+| `container.docker` | add the privileged Docker-in-Docker sidecar |
+| `hooks.setup`, `dependencies` | run during the image build, which uses your host's network rather than the gateway |
+
+Everything else in a project file is confined to the sandbox and never prompts — `files.exclude` only takes access away, and `network.allow`, `environment`, `agents.*.args`, `container.baseImage` and `hooks.prestart` act inside the container, which is the boundary.
+
+A yes is remembered in `~/.hole/trust.json`, keyed by project path and by *what* you accepted: editing an ungated setting later changes nothing, but a project that starts asking for more asks again. Delete the file (or the project's entry) to be asked afresh.
+
+Without a terminal — a CI job, a piped run — there is nobody to ask, so an untrusted project fails to start instead of being granted silently. Pass `--trust-project` to accept its current requests up front:
+
+```sh
+hole start claude . --trust-project -- -p "run the test suite"
+```
+
 ### Project .gitignore
 
 Hole writes network access dumps to `<project>/.hole/logs/`. Add it to your `.gitignore`:
@@ -531,6 +570,7 @@ A `docker:dind-rootless` sidecar starts on the internal sandbox network; the age
 - **Libraries and inclusions are not** mounted into the sidecar. They stay available to the agent as always; the sidecar simply does not need them, and there is no reason to widen what it can see. Builds are unaffected — `docker build` and `buildx` stream the context from the client, so they work with paths the daemon cannot see. What does need a daemon-side path is a **bind mount at run time**: `docker run -v /libs/shared:/x` or a compose `volumes:` entry pointing at a library will not resolve. Use the project directory, or copy what you need into it.
 - **Image cache**: Hole runs a long-lived pull-through cache (`hole-registry`) so repeated pulls do not re-download. It caches **Docker Hub only** — other registries (ghcr.io, ECR, …) go through the gateway and need `network.allow` entries.
 - **Non-Hub registries**: allow their domains, e.g. `"network": { "allow": ["ghcr.io", "*.githubusercontent.com"] }`.
+- **Trust**: a *project's* settings file asking for `container.docker` needs your confirmation, since it adds a privileged container — see [project trust](#project-trust). `--with-docker` and your global settings are your own choice and never prompt.
 - **Security**: the daemon runs **rootless** — as an unprivileged user in a user namespace — so a container the agent starts through it, even a `--privileged` one, cannot read the host's disks or files. It has no internet route of its own either; its traffic is filtered by the same gateway. The sidecar *container* is still privileged, because Docker-in-Docker requires it, so this is defense-in-depth rather than a hard boundary: a kernel or container-runtime escape from inside the sidecar could still reach the host. Keep your host's kernel and container runtime patched, and treat "the agent can run Docker" as a larger surface than the rest of the sandbox. If you do not need a real daemon, prefer leaving DinD off.
 
 ### Environment variables
@@ -569,7 +609,7 @@ Applied only when that agent starts. Arguments you pass after `--` come last, so
 
 Configured arguments expand `$VAR` the same way `environment` values do. Arguments given on the command line do not — your shell already had its turn at those, and expanding again would defeat the quoting you used to keep a literal `$`.
 
-> A project's `.hole/settings.json` can therefore inject agent flags. This is no new exposure — project settings already control mounts and `hooks.setupHost`, which runs a script on your host.
+> A project's `.hole/settings.json` can therefore inject agent flags. Those flags act inside the sandbox, so they are not gated — the settings that reach your host or widen what is mounted need your confirmation instead, see [project trust](#project-trust).
 
 ### Hooks
 
@@ -594,6 +634,8 @@ Configured arguments expand `$VAR` the same way `environment` values do. Argumen
 Every entry is a literal path or a glob. Matches run in lexicographic order, so `001-`, `002-` prefixes give a predictable sequence. A missing script or a pattern matching nothing is a warning, not an error.
 
 Hooks receive `HOLE_PROJECT_DIR`, `HOLE_PROJECT_NAME`, `HOLE_INSTANCE_NAME`, `HOLE_INSTANCE_ID` and `HOLE_SANDBOX_NETWORK` in their environment.
+
+`setupHost`, `cleanupHost` and `setup` in a *project's* settings file need your confirmation before they run — see [project trust](#project-trust).
 
 `hooks.setup` scripts are part of the image identity, so editing one rebuilds the image.
 
@@ -722,5 +764,6 @@ Then connect to `mydb.local:5432` from inside the sandbox.
 | `~/.hole/logs/run-<date>-<agent>-<pid>.log` | per-run debug log: every runtime command, timings, teardown detail (kept ~7 days) |
 | `<project>/.hole/logs/network-access-<agent>-<id>.log` | the `-n` dump of resolved and refused domains |
 | `~/.hole/instances/` | one file per running sandbox, powering `hole list` |
+| `~/.hole/trust.json` | which projects' settings you accepted, see [project trust](#project-trust) |
 
 Run with `-d` to see debug output on the console as well.
