@@ -59,6 +59,30 @@ so it absorbs any port list for the same domain.
 A malformed entry is fatal. A wrong allow list makes the sandbox unsafe or broken, which is not a
 skippable warning.
 
+### Docker Hub is a capability token
+
+One host does more than open itself. `network.DockerHubToken` (`docker.io`) also decides whether a
+Docker-in-Docker sandbox gets the pull-through image cache: `Policy.AllowsDockerHub()` is true when
+the resolved policy carries that host as an exact or wildcard entry, or when filtering is off (`-u`),
+and only then does `start.go` attach `hole-registry` to the sandbox network — see
+[configuration](configuration.md#docker-in-docker).
+
+The token exists because the mirror is reached over the *unfiltered* sandbox network, so the cache is
+a Hub channel the gateway never sees. Gating it on an explicit entry is what keeps "the sandbox can
+reach Docker Hub" a decision recorded in the allow list rather than a side effect of
+`container.docker`.
+
+Two consequences follow from the two accepted spellings, and both are documented in the README
+because users hit them:
+
+- `"docker.io"` alone opens the apex (which no pull contacts) and the cache. If the cache fails to
+  start there is no fallback: Hub pulls simply fail.
+- `"*.docker.io"` also opens `registry-1.docker.io` and `auth.docker.io`, i.e. most of a direct-pull
+  path through the gateway. Blob fetches redirect off `docker.io` — to `*.cloudflare.docker.com` as
+  of writing — so a direct-pull allow list needs that domain too. That last part is documented from
+  Hub's published behavior, not verified here against a live pull; a `-n` dump names the actual host
+  if one is denied.
+
 ## Generated per-run artifacts
 
 Three files are rendered from the policy into the run directory and bind-mounted read-only. All

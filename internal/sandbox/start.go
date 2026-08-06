@@ -259,8 +259,15 @@ func Start(opts Options) (exitCode int, err error) {
 		instance.DinDEnabled = true
 		instance.DinDVolume = "hole-sandbox-docker-data-" + instanceName
 		// The mirror lives on past this sandbox — that is the point of it — and gets attached
-		// to the sandbox network so the DinD daemon can reach it with no internet access.
-		if dindregistry.Ensure(containerEngine) && dindregistry.Attach(containerEngine, sandboxNet.name) {
+		// to the sandbox network so the DinD daemon can reach it with no internet access. That
+		// attachment is an unfiltered channel to Docker Hub, so it exists only for a sandbox
+		// that allowed Hub itself; the mirror may well stay running for another project.
+		switch {
+		case !policy.AllowsDockerHub():
+			logging.Warn("'%s' is not in network.allow, so the Docker Hub image cache is disabled — add it to "+
+				"enable the cache. Hub pulls will fail unless you allowed Hub's endpoints directly.",
+				network.DockerHubToken)
+		case dindregistry.Ensure(containerEngine) && dindregistry.Attach(containerEngine, sandboxNet.name):
 			instance.RegistryMirror = dindregistry.MirrorURL
 		}
 		if err := containerEngine.VolumeCreate(instance.DinDVolume, resourceLabels(instanceName, projectName)); err != nil {

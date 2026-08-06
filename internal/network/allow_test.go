@@ -261,6 +261,53 @@ func TestPolicyRegex(t *testing.T) {
 	}
 }
 
+// The token gates whether the Docker Hub image cache is attached to a sandbox at all, so both
+// accepted spellings and every near-miss are pinned here.
+func TestPolicyAllowsDockerHub(t *testing.T) {
+	tests := []struct {
+		name  string
+		allow []string
+		want  bool
+	}{
+		{"exact", []string{"docker.io"}, true},
+		{"wildcard", []string{"*.docker.io"}, true},
+		{"exact with port", []string{"docker.io:443"}, true},
+		{"wildcard with ports", []string{"*.docker.io:80,443"}, true},
+		{"padded", []string{"  docker.io  "}, true},
+		{"mixed case", []string{"DOCKER.io"}, true},
+		{"among other entries", []string{"github.com", "docker.io", "10.0.0.0/8"}, true},
+		{"registry endpoint is not the token", []string{"registry-1.docker.io"}, false},
+		{"index endpoint is not the token", []string{"index.docker.io"}, false},
+		{"suffix of another domain", []string{"mydocker.io"}, false},
+		{"token as a prefix", []string{"docker.io.evil.com"}, false},
+		{"unrelated entries", []string{"github.com"}, false},
+		{"nothing allowed", nil, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var entries []Entry
+			for _, raw := range test.allow {
+				entry, err := ParseEntry(raw)
+				if err != nil {
+					t.Fatalf("ParseEntry(%q): %v", raw, err)
+				}
+				entries = append(entries, entry)
+			}
+			if got := BuildPolicy(entries, nil, false).AllowsDockerHub(); got != test.want {
+				t.Errorf("AllowsDockerHub() for %v = %v, want %v", test.allow, got, test.want)
+			}
+		})
+	}
+}
+
+// Unrestricted mode allows every host, so withholding the cache there would remove a capability
+// without removing any access.
+func TestPolicyAllowsDockerHubWhenUnrestricted(t *testing.T) {
+	if !BuildPolicy(nil, nil, true).AllowsDockerHub() {
+		t.Error("an unrestricted policy must allow Docker Hub")
+	}
+}
+
 func TestPolicyRegexEmptyWhenNothingAllowed(t *testing.T) {
 	if got := BuildPolicy(nil, nil, false).PolicyRegex(); got != "" {
 		t.Errorf("expected empty regex for empty policy, got %q", got)

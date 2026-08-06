@@ -276,6 +276,14 @@ at teardown so the network stays removable. Sandbox-internal traffic is not filt
 polices egress to the internet only — so the daemon reaches the mirror even under default-deny.
 Every failure here is non-fatal: DinD without a cache simply pulls from the internet.
 
+That same unfiltered reachability is why the attachment is gated: `start.go` attaches the mirror
+only when `policy.AllowsDockerHub()` holds, and otherwise warns and leaves `RegistryMirror` empty
+(so `composegen` omits `--registry-mirror` and the daemon has no Hub path at all). The gate reads
+the *resolved* policy rather than `settings.Network.Allow`, which is what makes it agree with actual
+reachability: it also sees each agent's `allow.txt` and `-u`, where every host is allowed anyway and
+withholding the cache would remove a capability without removing any access. See
+[networking](networking.md#docker-hub-is-a-capability-token) for the token itself.
+
 ## Image identity and scope
 
 Images are tagged with the first 12 hex characters of a sha1 over a manifest of:

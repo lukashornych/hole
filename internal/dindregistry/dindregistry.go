@@ -21,8 +21,9 @@ const (
 	// VolumeName holds the mirror's cached blobs.
 	VolumeName = "hole-registry-data"
 	// NetworkName is the mirror's own bridge network, which has normal egress: the mirror only
-	// ever talks to Docker Hub, and it is host-side infrastructure rather than part of any
-	// sandbox's trust boundary.
+	// ever talks to Docker Hub. It is host-side infrastructure, but while Attach has it connected
+	// to a sandbox network it is also a dual-homed container inside that sandbox's trust
+	// boundary — which is why the caller attaches it only to sandboxes that allowed Docker Hub.
 	NetworkName = "hole-registry-net"
 	// Image is the upstream registry implementation.
 	Image = "registry:2"
@@ -43,7 +44,8 @@ const (
 // internet each time. Breaking a sandbox over a cache would be the wrong trade.
 func Ensure(containerEngine *engine.Engine) bool {
 	if err := ensureNetwork(containerEngine); err != nil {
-		logging.Warn("could not prepare the image cache network, Docker-in-Docker will pull without a cache: %v", err)
+		logging.Warn("could not prepare the image cache network, so Docker-in-Docker has no cache — "+
+			"Docker Hub pulls will fail unless the allow list covers Hub's endpoints directly: %v", err)
 		return false
 	}
 
@@ -80,7 +82,8 @@ func Ensure(containerEngine *engine.Engine) bool {
 		"-e", "REGISTRY_PROXY_REMOTEURL="+upstream,
 		Image)
 	if err != nil {
-		logging.Warn("could not start the image cache, Docker-in-Docker will pull without one: %v", err)
+		logging.Warn("could not start the image cache, so Docker-in-Docker has none — Docker Hub pulls "+
+			"will fail unless the allow list covers Hub's endpoints directly: %v", err)
 		return false
 	}
 	return true
@@ -88,9 +91,13 @@ func Ensure(containerEngine *engine.Engine) bool {
 
 // Attach connects the mirror to a sandbox network so the DinD daemon can reach it without
 // having internet access of its own.
+//
+// Sandbox-internal traffic is unfiltered, so this bypasses the gateway's allow-list: callers must
+// only attach sandboxes whose policy allows Docker Hub (`network.Policy.AllowsDockerHub`).
 func Attach(containerEngine *engine.Engine, sandboxNetwork string) bool {
 	if err := containerEngine.NetworkConnect(sandboxNetwork, ContainerName); err != nil {
-		logging.Warn("could not attach the image cache to %s: %v", sandboxNetwork, err)
+		logging.Warn("could not attach the image cache to %s, so Docker Hub pulls will fail unless the "+
+			"allow list covers Hub's endpoints directly: %v", sandboxNetwork, err)
 		return false
 	}
 	return true

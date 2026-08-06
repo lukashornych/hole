@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,12 @@ import (
 
 // DefaultPorts apply to an allow entry that does not name any ports.
 var DefaultPorts = []int{80, 443}
+
+// DockerHubToken is the allow-list host that opts a sandbox into the Docker Hub image cache
+// (`internal/dindregistry`). It counts as an exact entry (`docker.io`) or as a wildcard
+// (`*.docker.io`); no other spelling does, because a capability users cannot spell is one they
+// cannot reason about.
+const DockerHubToken = "docker.io"
 
 // Kind classifies an allow-list entry's host part.
 type Kind string
@@ -238,6 +245,18 @@ type Policy struct {
 	// Unrestricted disables filtering entirely (-u): DNS forwards everything and the
 	// firewall's forward chain accepts.
 	Unrestricted bool
+}
+
+// AllowsDockerHub reports whether this policy opts in to the Docker Hub image cache, i.e.
+// whether it carries DockerHubToken as an exact or wildcard host. Unrestricted mode allows every
+// host, so it opts in too.
+//
+// The resolved policy is the input rather than the raw setting, so port suffixes, padding, casing
+// and an agent's own allow.txt are all already accounted for.
+func (p Policy) AllowsDockerHub() bool {
+	return p.Unrestricted ||
+		slices.Contains(p.Exact, DockerHubToken) ||
+		slices.Contains(p.Wildcards, DockerHubToken)
 }
 
 // BuildPolicy folds allow entries into a deterministic policy: entries for the same host

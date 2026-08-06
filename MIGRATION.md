@@ -196,6 +196,13 @@ first pull after upgrading re-downloads and later ones come from the mirror. The
 `hole-sandbox-docker-cache` volume is removed on first run. The mirror caches Docker Hub only;
 other registries need `network.allow` entries as before.
 
+**Docker Hub now needs an allow entry too.** In 1.x, enabling Docker-in-Docker made Hub reachable
+with no `network.allow` entry at all. In 2.0 the mirror is attached to a sandbox only when its
+allow-list contains `"docker.io"` or `"*.docker.io"` (or filtering is off with `-u`) — the mirror
+reaches Hub over a channel the gateway does not filter, so that access is now something you ask for
+rather than a side effect of turning Docker on. Without the entry the sandbox still starts and warns,
+and `docker pull nginx` fails while pulls from registries you *have* allowed keep working.
+
 **The Docker-in-Docker sidecar now receives only the file exclusions.** 1.x handed it the agent's
 whole mount set — exclusions, `files.include` targets *and* `libraries` — although both its own code
 comment and its README described exclusions only. The wider set was never a deliberate decision, and
