@@ -265,11 +265,13 @@ through the gateway, so rewriting routes inside the agent can break its own conn
 never widen it.
 
 **Project settings are untrusted input.** `<project>/.hole/settings.json` is repository content,
-and a few of its keys act on the host: `hooks.setupHost`/`cleanupHost` run scripts as the invoking
-user, `files.include`/`libraries` mount host paths, `container.docker` adds the privileged sidecar,
-and `hooks.setup`/`dependencies` run during a build that uses the host's unfiltered network. Those
-need a per-project confirmation, recorded in `~/.hole/trust.json`; the gate sits before the settings
-snapshot is written, because teardown replays `cleanupHost` from it. See
+and a few of its keys reach past the sandbox: `hooks.setupHost`/`cleanupHost` run scripts as the
+invoking user, `files.include`/`libraries` mount host paths, `container.docker` adds the privileged
+sidecar, `network.hostGatewayDomains` reaches services on the developer's machine,
+`hooks.setup`/`dependencies` run during a build that uses the host's unfiltered network, and
+`network.allow` widens egress. Those need a per-project confirmation, recorded in
+`~/.hole/trust.json`; the gate sits before the settings snapshot is written, because teardown
+replays `cleanupHost` from it. See
 [configuration](configuration.md#project-trust).
 
 **Docker-in-Docker is the weak point in this model, deliberately bounded.** The sidecar container

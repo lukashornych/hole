@@ -288,7 +288,7 @@ func TestAgentArgsOfAnotherAgentAreIgnored(t *testing.T) {
 func TestProfileOverlayCarriesEveryRootSetting(t *testing.T) {
 	settings := merged(t, `{}`, `{"profiles":{"p":{
 	  "files": {"exclude": [".env"], "include": {"~/.npmrc": "~/.npmrc"}},
-	  "network": {"allow": ["api.github.com"], "hostGatewayDomains": ["mydb.local"], "subnetPool": "10.99.0.0/16"},
+	  "network": {"allow": ["api.github.com"], "hostGatewayDomains": ["mydb.local:5432"], "subnetPool": "10.99.0.0/16"},
 	  "dependencies": ["make"],
 	  "container": {"docker": true, "memoryLimit": "8g", "baseImage": "ubuntu:24.04", "enabledAgents": ["claude"]},
 	  "hooks": {"setup": [{"script": "s.sh"}], "prestart": [{"script": "p.sh"}]},

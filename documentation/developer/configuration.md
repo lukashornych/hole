@@ -41,13 +41,22 @@ settings in it whose effect **leaves the sandbox** are gated behind a per-projec
 (`internal/trust`):
 
 `hooks.setupHost`, `hooks.cleanupHost` (host code), `files.include`, `libraries` (host paths into
-the sandbox), `container.docker` (privileged sidecar), `hooks.setup`, `dependencies` (code during
-the image build, which uses the host's unfiltered network). Nothing else is gated: `files.exclude`
-only removes access, and `network.allow`, `environment`, `agents.*.args`, `container.baseImage` and
-`hooks.prestart` act inside the container, which is the boundary. Gating `network.allow` was
-considered and rejected — it is the most common thing a project file contains, and a prompt that
-fires on nearly every project trains the user to accept it, which is what would then also accept a
-`setupHost` script.
+the sandbox), `container.docker` (privileged sidecar), `network.hostGatewayDomains` (services on
+the developer's machine), `hooks.setup`, `dependencies` (code during the image build, which uses
+the host's unfiltered network), `network.allow` (egress widening). Nothing else is gated:
+`files.exclude` only removes access, and `environment`, `agents.*.args`, `container.baseImage`,
+`hooks.prestart` and `network.subnetPool` act inside the container, which is the boundary.
+
+The network keys are gated for the same reason as the rest: the test is whether an effect **leaves
+the sandbox**, and egress does. The gateway still polices `network.allow` at L3/L4, but it polices
+it *to the widened set* — a repository that adds `attacker.example.com` gets a full-duplex channel
+for the project's contents, which is the harm the default-deny policy exists to prevent, and the
+gateway enforcing a policy the repository wrote is not a boundary. Prompt fatigue is the cost: the
+gate fires once per project and again whenever the grant set changes, and `--trust-project` covers
+automation. Gating only allow entries that name private/loopback addresses was considered and
+rejected — an allow entry can be a *name*, which resolves at runtime, so no syntactic check can
+tell LAN reach from public reach
+([analysis](../analysis/host-gateway-mandatory-ports-plan.md)).
 
 Three details carry the design:
 

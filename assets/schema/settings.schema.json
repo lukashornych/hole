@@ -83,11 +83,11 @@
             },
             "hostGatewayDomains": {
               "type": "array",
-              "description": "Domains resolved to the Docker host gateway, optionally restricted to ports; without a port suffix every port is allowed",
+              "description": "Domains resolved to the Docker host gateway, restricted to the listed ports (required)",
               "items": {
                 "type": "string",
                 "minLength": 1,
-                "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*(:[0-9]{1,5}(,[0-9]{1,5})*)?$"
+                "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*:[0-9]{1,5}(,[0-9]{1,5})*$"
               }
             },
             "subnetPool": {

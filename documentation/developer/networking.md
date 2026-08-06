@@ -37,7 +37,8 @@ runs in: resolver and firewall must share a namespace.
 `network.allow`, and `network.hostGatewayDomains` — into one policy. Entry grammar:
 
 ```
-<host>[:<port>[,<port>...]]
+<host>[:<port>[,<port>...]]                  network.allow, agent allow.txt
+<domain>:<port>[,<port>...]                  network.hostGatewayDomains (ports mandatory)
 
 host  := exact domain     example.com
        | wildcard domain  *.example.com      (subdomains only, not the apex)
@@ -53,8 +54,16 @@ deterministic order.
 `hostGatewayDomains` entries merge the same way, and they have to: each one renders a CoreDNS
 server block, and CoreDNS refuses a Corefile that defines the same zone twice — so two entries for
 one domain (easily produced by the global and the project file naming different ports) would kill
-the gateway and with it every start. Ports are unioned, and a port-less entry means *every* port,
-so it absorbs any port list for the same domain.
+the gateway and with it every start.
+
+Their port list is **mandatory**, and the firewall side of them is coarser than the Corefile side:
+every entry resolves to the same host gateway address, and nftables matches address plus port, so
+one flat union of all configured ports is emitted (`Generate`, `gateway.go`). The sandbox can reach
+the host gateway IP on that union directly, without DNS — the names choose what resolves, not what
+the firewall permits. Requiring ports is what bounds the union; a port-less entry used to emit a
+bare `ip daddr {HOST_GATEWAY_IP} accept`, i.e. every service on the developer's machine. Per-name
+enforcement would need a DNAT address per entry, which was considered and rejected
+([analysis](../analysis/host-gateway-mandatory-ports-plan.md)).
 
 A malformed entry is fatal. A wrong allow list makes the sandbox unsafe or broken, which is not a
 skippable warning.

@@ -113,13 +113,12 @@ func TestParseAllowFileReportsLineNumbers(t *testing.T) {
 }
 
 func TestParseHostGatewayDomain(t *testing.T) {
-	entry, err := ParseHostGatewayDomain("mydb.local")
+	entry, err := ParseHostGatewayDomain("mydb.local:5432")
 	if err != nil {
 		t.Fatalf("valid host gateway domain rejected: %v", err)
 	}
-	// No port suffix means every port, which is the historical behavior for host services.
-	if entry.Domain != "mydb.local" || entry.Ports != nil {
-		t.Errorf("ParseHostGatewayDomain = %+v, want mydb.local with no port restriction", entry)
+	if entry.Domain != "mydb.local" || !reflect.DeepEqual(entry.Ports, []int{5432}) {
+		t.Errorf("ParseHostGatewayDomain = %+v, want mydb.local:5432", entry)
 	}
 
 	withPorts, err := ParseHostGatewayDomain("mydb.local:5432,8080")
@@ -130,9 +129,23 @@ func TestParseHostGatewayDomain(t *testing.T) {
 		t.Errorf("ports = %v, want [5432 8080]", withPorts.Ports)
 	}
 
-	for _, raw := range []string{"my db", "", "-bad.local", "mydb.local:", "mydb.local:0", "mydb.local:https"} {
+	for _, raw := range []string{"my db", "", "-bad.local", "mydb.local", "mydb.local:", "mydb.local:0", "mydb.local:https"} {
 		if _, err := ParseHostGatewayDomain(raw); err == nil {
 			t.Errorf("invalid host gateway domain %q accepted", raw)
+		}
+	}
+}
+
+// The firewall matches the host gateway *address*, so a port-less entry opened every TCP and UDP
+// port on the developer's machine. The suffix is mandatory to keep that unreachable.
+func TestParseHostGatewayDomainRequiresPorts(t *testing.T) {
+	_, err := ParseHostGatewayDomain("mydb.local")
+	if err == nil {
+		t.Fatal("a port-less hostGatewayDomains entry was accepted")
+	}
+	for _, want := range []string{"mydb.local", "port list is required"} {
+		if !contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
 		}
 	}
 }
@@ -189,19 +202,14 @@ func TestBuildPolicyMergesHostGatewayDomains(t *testing.T) {
 			want:    []HostGatewayDomain{{Domain: "app.test", Ports: []int{8080, 9090}}},
 		},
 		{
-			name:    "port-less wins over a port list",
-			entries: []HostGatewayDomain{{Domain: "app.test", Ports: []int{8080}}, {Domain: "app.test"}},
-			want:    []HostGatewayDomain{{Domain: "app.test"}},
-		},
-		{
-			name:    "port-less first still wins",
-			entries: []HostGatewayDomain{{Domain: "app.test"}, {Domain: "app.test", Ports: []int{8080}}},
-			want:    []HostGatewayDomain{{Domain: "app.test"}},
+			name:    "repeated ports collapse",
+			entries: []HostGatewayDomain{{Domain: "app.test", Ports: []int{8080}}, {Domain: "app.test", Ports: []int{8080}}},
+			want:    []HostGatewayDomain{{Domain: "app.test", Ports: []int{8080}}},
 		},
 		{
 			name:    "distinct domains are sorted",
-			entries: []HostGatewayDomain{{Domain: "z.test"}, {Domain: "a.test", Ports: []int{80}}},
-			want:    []HostGatewayDomain{{Domain: "a.test", Ports: []int{80}}, {Domain: "z.test"}},
+			entries: []HostGatewayDomain{{Domain: "z.test", Ports: []int{9090}}, {Domain: "a.test", Ports: []int{80}}},
+			want:    []HostGatewayDomain{{Domain: "a.test", Ports: []int{80}}, {Domain: "z.test", Ports: []int{9090}}},
 		},
 	}
 	for _, test := range tests {

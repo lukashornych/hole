@@ -36,7 +36,7 @@ func TestGrants(t *testing.T) {
 			name: "settings confined to the sandbox are not gated",
 			document: `{
 				"files": {"exclude": [".env"]},
-				"network": {"allow": ["registry.npmjs.org"], "hostGatewayDomains": ["db.local:5432"]},
+				"network": {"subnetPool": "10.99.0.0/16"},
 				"environment": {"CI": "1"},
 				"agents": {"claude": {"args": ["--model", "opus"]}},
 				"container": {"baseImage": "ubuntu:24.04", "memoryLimit": "8g"},
@@ -50,6 +50,7 @@ func TestGrants(t *testing.T) {
 				"container": {"docker": true},
 				"libraries": {"~/lib": {"path": "/libs/lib", "readwrite": true}},
 				"files": {"include": {"~/.ssh": "~/.ssh"}},
+				"network": {"allow": ["registry.npmjs.org"], "hostGatewayDomains": ["db.local:5432"]},
 				"hooks": {
 					"setup": [{"script": ".hole/setup.sh"}],
 					"setupHost": [{"script": ".hole/setup-host.sh"}],
@@ -62,8 +63,22 @@ func TestGrants(t *testing.T) {
 				{Key: "files.include", Values: []string{"~/.ssh -> ~/.ssh"}},
 				{Key: "libraries", Values: []string{"~/lib -> /libs/lib (read-write)"}},
 				{Key: "container.docker", Values: []string{"true"}},
+				{Key: "network.hostGatewayDomains", Values: []string{"db.local:5432"}},
 				{Key: "hooks.setup", Values: []string{".hole/setup.sh"}},
 				{Key: "dependencies", Values: []string{"maven"}},
+				{Key: "network.allow", Values: []string{"registry.npmjs.org"}},
+			},
+		},
+		{
+			// Egress leaves the sandbox, so widening it is the repository's request to make
+			// visible — including from a profile, which is part of the same file.
+			name: "network.allow is gated in the base settings and in profiles",
+			document: `{
+				"network": {"allow": ["registry.npmjs.org"]},
+				"profiles": {"research": {"network": {"allow": ["*.wikipedia.org"]}}}
+			}`,
+			want: []grant{
+				{Key: "network.allow", Values: []string{"registry.npmjs.org", "*.wikipedia.org"}},
 			},
 		},
 		{
@@ -140,13 +155,19 @@ func TestDigest(t *testing.T) {
 	// again for a settings change that grants nothing.
 	if digestOf(base) != digestOf(`{
 		"hooks": {"setupHost": [{"script": "a.sh"}]},
-		"network": {"allow": ["example.com"]},
+		"environment": {"CI": "1"},
 		"files": {"exclude": [".env"]}
 	}`) {
 		t.Error("an ungated addition changed the digest")
 	}
 	if digestOf(base) == digestOf(`{"hooks": {"setupHost": [{"script": "a.sh"}, {"script": "b.sh"}]}}`) {
 		t.Error("a widened grant kept the same digest")
+	}
+	// Egress is gated, so a project that starts reaching one more destination asks again —
+	// including for the user's own projects.
+	if digestOf(`{"network": {"allow": ["a.example.com"]}}`) ==
+		digestOf(`{"network": {"allow": ["a.example.com", "b.example.com"]}}`) {
+		t.Error("adding a domain to network.allow kept the same digest")
 	}
 	if digestOf(base) == digestOf(`{"hooks": {"cleanupHost": [{"script": "a.sh"}]}}`) {
 		t.Error("the same value under a different key kept the same digest")
@@ -170,7 +191,7 @@ func gateOptions(t *testing.T, raw, answer string) (Options, *bytes.Buffer, *Sto
 }
 
 func TestGateDoesNotPromptForUngatedSettings(t *testing.T) {
-	opts, out, store := gateOptions(t, `{"network": {"allow": ["example.com"]}}`, "")
+	opts, out, store := gateOptions(t, `{"files": {"exclude": [".env"]}, "environment": {"CI": "1"}}`, "")
 	if err := Gate(opts); err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +200,32 @@ func TestGateDoesNotPromptForUngatedSettings(t *testing.T) {
 	}
 	if trustFileExists(store) {
 		t.Error("recorded a decision for a project that asked for nothing")
+	}
+}
+
+// A settings file that only widens egress used to be the canonical no-prompt document. It is
+// gated now: the gateway policing a policy the repository wrote is not a boundary.
+func TestGateAsksForNetworkOnlyProjects(t *testing.T) {
+	opts, out, _ := gateOptions(t, `{"network": {"allow": ["attacker.example.com"]}}`, "y\n")
+	if err := Gate(opts); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"network.allow", "attacker.example.com"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("prompt does not mention %q:\n%s", want, out)
+		}
+	}
+
+	headless, _, _ := gateOptions(t, `{"network": {"allow": ["attacker.example.com"]}}`, "")
+	headless.Interactive = false
+	err := Gate(headless)
+	if err == nil {
+		t.Fatal("a non-interactive run accepted an untrusted network-only project")
+	}
+	for _, want := range []string{"network.allow", "--trust-project"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not mention %q: %v", want, err)
+		}
 	}
 }
 

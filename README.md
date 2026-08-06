@@ -80,7 +80,7 @@ Run without a terminal — from a script, a CI job, or with the output piped —
 | `-r`, `--rebuild` | Force a rebuild of the sandbox images |
 | `-u`, `--unrestricted-network` | Disable egress filtering; allow all network access |
 | `--with-docker` | Enable the Docker-in-Docker sidecar |
-| `--trust-project` | Accept the host access the project's own `.hole/settings.json` asks for without being asked, and remember it — see [project trust](#project-trust) |
+| `--trust-project` | Accept whatever the project's own `.hole/settings.json` asks for beyond the sandbox — host access and network widening alike — without being asked, and remember it; see [project trust](#project-trust) |
 | `--library PATH[:MOUNT][:rw]` | Mount an extra directory (repeatable); defaults to `/libs/{basename}`, read-only unless `:rw` |
 | `--` | Everything after this is passed verbatim to the agent CLI |
 
@@ -340,6 +340,8 @@ All path-valued settings support `$VAR`/`${VAR}` expansion, `~/` (your home on t
         .hole/setup-host.sh
     files.include — mounts host paths into the sandbox
         ~/.ssh -> ~/.ssh
+    network.allow — widens the sandbox's network allow-list
+        uploads.example.com
 
   Trust them only if you trust this repository's contents.
 
@@ -353,9 +355,11 @@ Answering no starts nothing at all — no container, and none of the scripts abo
 | `hooks.setupHost`, `hooks.cleanupHost` | run a script **on your host**, as you |
 | `files.include`, `libraries` | mount host paths into the sandbox |
 | `container.docker` | add the privileged Docker-in-Docker sidecar |
+| `network.hostGatewayDomains` | reach services running on your host |
 | `hooks.setup`, `dependencies` | run during the image build, which uses your host's network rather than the gateway |
+| `network.allow` | widen the network allow-list — every destination the sandbox may reach is also somewhere it can send the project's contents |
 
-Everything else in a project file is confined to the sandbox and never prompts — `files.exclude` only takes access away, and `network.allow`, `environment`, `agents.*.args`, `container.baseImage` and `hooks.prestart` act inside the container, which is the boundary.
+Everything else in a project file is confined to the sandbox and never prompts — `files.exclude` only takes access away, and `environment`, `agents.*.args`, `container.baseImage`, `hooks.prestart` and `network.subnetPool` act inside the container, which is the boundary.
 
 A yes is remembered in `~/.hole/trust.json`, keyed by project path and by *what* you accepted: editing an ungated setting later changes nothing, but a project that starts asking for more asks again. Delete the file (or the project's entry) to be asked afresh.
 
@@ -364,6 +368,8 @@ Without a terminal — a CI job, a piped run — there is nobody to ask, so an u
 ```sh
 hole start claude . --trust-project -- -p "run the test suite"
 ```
+
+The flag accepts *whatever the file asks for at that moment* — network keys, host mounts, `hooks.setupHost`, all of it. A CI script that carries it because the project only widens `network.allow` today also pre-approves a host hook the repository adds tomorrow.
 
 ### File exclusions
 
@@ -486,14 +492,16 @@ Let the sandbox reach services running on your host under a stable name:
 {
   "network": {
     "hostGatewayDomains": [
-      "mydb.local",
+      "mydb.local:5432",
       "myapi.local:8080,8443"
     ]
   }
 }
 ```
 
-Each name resolves to the Docker host gateway. Without a port suffix every port is allowed; with one, only those ports. Several entries for the same name merge into one, opening the union of their ports — and a port-less entry means all of them, so it wins over any port list for that name. Don't use `localhost` or `127.0.0.1` — inside the container those are the container itself.
+Each name resolves to the Docker host gateway. **The port list is required**: the firewall matches the host gateway *address*, not the name, so a port-less entry would expose every service on your machine — SSH, a TCP-exposed Docker socket, databases, anything bound to `0.0.0.0`. Several entries for the same name merge into one, opening the union of their ports.
+
+For the same reason, the ports are unioned across *all* entries: with the example above the sandbox can reach the host gateway IP on 5432, 8080 and 8443, directly and without DNS. The names choose what resolves, not what the firewall permits. Don't use `localhost` or `127.0.0.1` — inside the container those are the container itself.
 
 ### Subnet pool
 

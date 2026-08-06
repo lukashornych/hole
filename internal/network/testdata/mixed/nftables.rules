@@ -34,7 +34,8 @@ table inet hole {
         type filter hook forward priority filter; policy drop;
         meta nfproto ipv6 drop
         ct state established,related accept
-        ip daddr {HOST_GATEWAY_IP} accept
+        ip daddr {HOST_GATEWAY_IP} tcp dport { 5432 } accept
+        ip daddr {HOST_GATEWAY_IP} udp dport { 5432 } accept
         ip daddr @g0 tcp dport { 22, 443 } accept
         ip daddr @g0 udp dport { 22, 443 } accept
         ip daddr @g1_static tcp dport { 22, 2222 } accept

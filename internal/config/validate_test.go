@@ -12,7 +12,7 @@ func TestValidateAcceptsKnownSettings(t *testing.T) {
 		`{}`,
 		`{"$schema":"https://example.com/schema.json"}`,
 		`{"files":{"exclude":[".env"],"include":{"~/.npmrc":"~/.npmrc"}}}`,
-		`{"network":{"allow":["api.github.com","*.npmjs.org","db.example.com:5432","github.com:22,443","10.0.0.5:22","192.168.1.0/24:8080"],"hostGatewayDomains":["mydb.local","mydb.local:5432,8080"]}}`,
+		`{"network":{"allow":["api.github.com","*.npmjs.org","db.example.com:5432","github.com:22,443","10.0.0.5:22","192.168.1.0/24:8080"],"hostGatewayDomains":["mydb.local:5432","myapi.local:5432,8080"]}}`,
 		`{"network":{"subnetPool":"10.222.0.0/16"}}`,
 		`{"dependencies":["make","gcc=4:13.2.0-7ubuntu1"]}`,
 		`{"container":{"memoryLimit":"8g","memorySwapLimit":"8g","docker":true,"baseImage":"ubuntu:24.04","enabledAgents":["claude"]}}`,
@@ -48,6 +48,7 @@ func TestValidateRejectsUnknownAndMalformedSettings(t *testing.T) {
 		"malformed agent name":    `{"container":{"enabledAgents":["Not An Agent"]}}`,
 		"library relative path":   `{"libraries":{"lib":"relative/path"}}`,
 		"host gateway bad port":   `{"network":{"hostGatewayDomains":["mydb.local:notaport"]}}`,
+		"host gateway no port":    `{"network":{"hostGatewayDomains":["mydb.local"]}}`,
 		"malformed subnet pool":   `{"network":{"subnetPool":"not-a-cidr"}}`,
 		"hook entry without path": `{"hooks":{"prestart":[{}]}}`,
 		// Profiles cannot nest, cannot redeclare $schema, and are strict about their keys.

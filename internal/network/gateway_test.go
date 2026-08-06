@@ -44,7 +44,7 @@ func TestGenerateGoldenArtifacts(t *testing.T) {
 				"github.com:22,443",
 				"10.0.0.5:22,2222",
 				"192.168.1.0/24:8080",
-			), []HostGatewayDomain{{Domain: "mydb.local"}}, false),
+			), []HostGatewayDomain{{Domain: "mydb.local", Ports: []int{5432}}}, false),
 		},
 		{
 			name: "host-gateway-ports",
@@ -198,6 +198,32 @@ func TestGeneratedHealthZoneIsAlwaysResolvable(t *testing.T) {
 					recordType, unrestricted)
 			}
 		}
+	}
+}
+
+// A port-less hostGatewayDomains entry used to emit a bare `ip daddr {HOST_GATEWAY_IP} accept`,
+// opening every TCP and UDP port on the developer's machine. Pinned at the artifact level,
+// which is where the exposure lived.
+func TestGeneratedRulesNeverAcceptAllHostGatewayPorts(t *testing.T) {
+	policies := map[string]Policy{
+		"single host gateway entry": BuildPolicy(nil,
+			[]HostGatewayDomain{{Domain: "mydb.local", Ports: []int{5432}}}, false),
+		"several entries": BuildPolicy(entries(t, "api.github.com"), []HostGatewayDomain{
+			{Domain: "mydb.local", Ports: []int{5432}},
+			{Domain: "myapi.local", Ports: []int{8080, 8443}},
+		}, false),
+		"no host gateway entries": BuildPolicy(entries(t, "api.github.com"), nil, false),
+	}
+	for name, policy := range policies {
+		t.Run(name, func(t *testing.T) {
+			artifacts, err := policy.Generate()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if contains(artifacts.NftablesRule, "ip daddr {HOST_GATEWAY_IP} accept") {
+				t.Errorf("the ruleset accepts every host gateway port:\n%s", artifacts.NftablesRule)
+			}
+		})
 	}
 }
 

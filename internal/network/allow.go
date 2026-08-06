@@ -188,15 +188,15 @@ func ParseAllowFile(content []byte, label string) ([]Entry, error) {
 // can reach services running on the host.
 type HostGatewayDomain struct {
 	Domain string
-	// Ports restricts the firewall allow; nil means every port, which is the historical
-	// behavior for these explicitly user-configured host services.
+	// Ports restricts the firewall allow. Always non-empty: a port-less entry would open every
+	// TCP and UDP port on the host, because the firewall matches the host gateway address, not
+	// the domain name.
 	Ports []int
 }
 
 // ParseHostGatewayDomain validates one `network.hostGatewayDomains` entry:
-// `<domain>[:<port>[,<port>...]]`. Without a port suffix every port is allowed, which is the
-// historical behavior — host services are explicitly user-configured and typically listen on
-// arbitrary development ports.
+// `<domain>:<port>[,<port>...]`. The port list is mandatory — the firewall matches the host
+// gateway address, so a port-less entry would expose every service on the host.
 func ParseHostGatewayDomain(raw string) (HostGatewayDomain, error) {
 	value := strings.TrimSpace(raw)
 
@@ -207,18 +207,20 @@ func ParseHostGatewayDomain(raw string) (HostGatewayDomain, error) {
 	}
 	if !domainPattern.MatchString(domainPart) {
 		return HostGatewayDomain{}, fmt.Errorf(
-			"invalid hostGatewayDomains entry: '%s' — must be a valid domain name with an optional :port,port suffix", raw)
+			"invalid hostGatewayDomains entry: '%s' — must be a valid domain name with a :port,port suffix", raw)
+	}
+	// Checked after the domain syntax so a malformed domain still reports the syntax error.
+	if !hasPorts {
+		return HostGatewayDomain{}, fmt.Errorf(
+			"invalid hostGatewayDomains entry '%s': a port list is required (e.g. '%s:5432') — "+
+				"without it every TCP and UDP port on the host would be reachable from the sandbox", raw, value)
 	}
 
-	entry := HostGatewayDomain{Domain: strings.ToLower(domainPart)}
-	if hasPorts {
-		ports, err := parsePorts(portPart)
-		if err != nil {
-			return HostGatewayDomain{}, fmt.Errorf("invalid hostGatewayDomains entry '%s': %w", raw, err)
-		}
-		entry.Ports = ports
+	ports, err := parsePorts(portPart)
+	if err != nil {
+		return HostGatewayDomain{}, fmt.Errorf("invalid hostGatewayDomains entry '%s': %w", raw, err)
 	}
-	return entry, nil
+	return HostGatewayDomain{Domain: strings.ToLower(domainPart), Ports: ports}, nil
 }
 
 // Group is a set of hosts sharing one port set. Each group becomes one nftables set pair
@@ -325,8 +327,7 @@ func BuildPolicy(entries []Entry, hostGateway []HostGatewayDomain, unrestricted 
 
 // mergeHostGateway folds entries for the same domain into one, unioning their ports. CoreDNS
 // refuses a Corefile that defines the same zone twice, so two entries for one domain would kill
-// the gateway at startup — and merging is what the nftables side already does anyway. A
-// port-less entry means every port, so it absorbs any port list for the same domain.
+// the gateway at startup — and merging is what the nftables side already does anyway.
 func mergeHostGateway(entries []HostGatewayDomain) []HostGatewayDomain {
 	merged := map[string]HostGatewayDomain{}
 	var domains []string
@@ -334,18 +335,10 @@ func mergeHostGateway(entries []HostGatewayDomain) []HostGatewayDomain {
 		existing, seen := merged[entry.Domain]
 		if !seen {
 			domains = append(domains, entry.Domain)
-			first := HostGatewayDomain{Domain: entry.Domain}
-			if len(entry.Ports) > 0 {
-				first.Ports = normalizePorts(entry.Ports)
-			}
-			merged[entry.Domain] = first
+			merged[entry.Domain] = HostGatewayDomain{Domain: entry.Domain, Ports: normalizePorts(entry.Ports)}
 			continue
 		}
-		if len(existing.Ports) == 0 || len(entry.Ports) == 0 {
-			existing.Ports = nil
-		} else {
-			existing.Ports = normalizePorts(append(existing.Ports, entry.Ports...))
-		}
+		existing.Ports = normalizePorts(append(existing.Ports, entry.Ports...))
 		merged[entry.Domain] = existing
 	}
 

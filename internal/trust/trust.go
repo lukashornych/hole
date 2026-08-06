@@ -3,11 +3,15 @@
 // The global settings file is the user's own document and is trusted implicitly. A project
 // file is repository content: pointing an agent at an untrusted repository is the workflow
 // Hole exists for, and that file can run scripts on the host, mount host paths into the
-// sandbox and switch on the privileged Docker-in-Docker sidecar. Those grants therefore need
-// the user's confirmation once per project, recorded in `~/.hole/trust.json`.
+// sandbox, switch on the privileged Docker-in-Docker sidecar and widen the egress policy.
+// Those grants therefore need the user's confirmation once per project, recorded in
+// `~/.hole/trust.json`.
 //
 // Everything a project file can ask for that stays *inside* the sandbox is deliberately not
-// gated — the sandbox is the boundary, so in-container effects need no separate consent.
+// gated — the sandbox is the boundary, so in-container effects need no separate consent. The
+// test is whether an effect *leaves* the sandbox, which is why the network keys are gated too:
+// widened egress is a channel out of it, and the gateway enforcing a policy the repository wrote
+// is not a boundary.
 package trust
 
 import (
@@ -43,9 +47,8 @@ type capability struct {
 
 // capabilities are the settings a project file may not enable on its own, most host-reaching
 // first. Settings whose effect is confined to the sandbox are absent on purpose: `files.exclude`
-// only removes access, `network.allow` widens egress the gateway still polices at L3/L4, and
-// `environment`, `agents.*.args`, `container.baseImage` and `hooks.prestart` act inside the
-// container, which is the boundary.
+// only removes access, and `environment`, `agents.*.args`, `container.baseImage`,
+// `hooks.prestart` and `network.subnetPool` act inside the container, which is the boundary.
 var capabilities = []capability{
 	{
 		key:    "hooks.setupHost",
@@ -73,6 +76,11 @@ var capabilities = []capability{
 		values: dockerValues,
 	},
 	{
+		key:    "network.hostGatewayDomains",
+		effect: "lets the sandbox reach services on your host",
+		values: func(s *config.Settings) []string { return s.Network.HostGatewayDomains },
+	},
+	{
 		key:    "hooks.setup",
 		effect: "runs a script during the image build, on your host's unfiltered network",
 		values: func(s *config.Settings) []string { return scriptPaths(s.Hooks.Setup) },
@@ -81,6 +89,11 @@ var capabilities = []capability{
 		key:    "dependencies",
 		effect: "installs packages into the sandbox image, over your host's network",
 		values: func(s *config.Settings) []string { return s.Dependencies },
+	},
+	{
+		key:    "network.allow",
+		effect: "widens the sandbox's network allow-list",
+		values: func(s *config.Settings) []string { return s.Network.Allow },
 	},
 }
 
@@ -249,7 +262,8 @@ func Gate(opts Options) error {
 			opts.SettingsFile, keys)
 	case !opts.Interactive:
 		return fmt.Errorf(
-			"project settings in %s ask for host access (%s) and this project has not been trusted; "+
+			"project settings in %s ask for access beyond the sandbox (%s) and this project has not "+
+				"been trusted; "+
 				"there is no terminal to confirm on, so re-run from a terminal or pass --trust-project",
 			opts.SettingsFile, keys)
 	default:

@@ -113,9 +113,7 @@ table inet hole {
 {{- if not .Unrestricted }}
         meta nfproto ipv6 drop
         ct state established,related accept
-{{- if .HostGatewayAll }}
-        ip daddr {HOST_GATEWAY_IP} accept
-{{- else if .HostGatewayPorts }}
+{{- if .HostGatewayPorts }}
         ip daddr {HOST_GATEWAY_IP} tcp dport { {{ ports .HostGatewayPorts }} } accept
         ip daddr {HOST_GATEWAY_IP} udp dport { {{ ports .HostGatewayPorts }} } accept
 {{- end }}
@@ -194,25 +192,21 @@ func (p Policy) Generate() (Artifacts, error) {
 		return Artifacts{}, fmt.Errorf("generate dnsmasq.conf: %w", err)
 	}
 
-	hostGatewayAll := false
+	// One flat union across every entry, not one rule per domain: all of them resolve to the
+	// same host gateway address and nftables matches address plus port, so the domain name
+	// cannot narrow the rule. Bounding the union is what mandatory ports buys.
 	var hostGatewayPorts []int
 	for _, entry := range p.HostGateway {
-		if len(entry.Ports) == 0 {
-			hostGatewayAll = true
-			continue
-		}
 		hostGatewayPorts = normalizePorts(append(hostGatewayPorts, entry.Ports...))
 	}
 
 	nftData := struct {
 		Groups           []Group
 		Unrestricted     bool
-		HostGatewayAll   bool
 		HostGatewayPorts []int
 	}{
 		Groups:           groups,
 		Unrestricted:     p.Unrestricted,
-		HostGatewayAll:   hostGatewayAll,
 		HostGatewayPorts: hostGatewayPorts,
 	}
 	var nftables strings.Builder

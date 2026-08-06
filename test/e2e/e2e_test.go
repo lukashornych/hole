@@ -287,7 +287,8 @@ func TestAllowedDomainResolves(t *testing.T) {
 	command := `["bash", "-c", "sleep 3; getent hosts example.com >/dev/null && echo ALLOWED_RESOLVED || echo ALLOWED_BLOCKED"]`
 	home, projectDir := environment(t, command, settings)
 
-	output, code := runHole(t, home, 20*time.Minute, "start", "test-agent", projectDir)
+	// `network.allow` in a project file is gated, and an e2e run has no terminal to confirm on.
+	output, code := runHole(t, home, 20*time.Minute, "start", "test-agent", projectDir, "--trust-project")
 	if code != 0 {
 		t.Fatalf("hole start exited with %d:\n%s", code, output)
 	}
@@ -302,7 +303,7 @@ func TestNetworkAccessDumpIsWritten(t *testing.T) {
 	command := `["bash", "-c", "getent hosts example.com >/dev/null; getent hosts blocked.invalid >/dev/null; true"]`
 	home, projectDir := environment(t, command, settings)
 
-	_, code := runHole(t, home, 20*time.Minute, "start", "test-agent", projectDir, "-n")
+	_, code := runHole(t, home, 20*time.Minute, "start", "test-agent", projectDir, "-n", "--trust-project")
 	if code != 0 {
 		t.Fatalf("hole start exited with %d", code)
 	}
@@ -438,6 +439,25 @@ func TestUntrustedProjectSettingsAbortBeforeAnyHostHook(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(projectDir, hook+"-ran")); err == nil {
 			t.Errorf("%s ran for a project that was never trusted", hook)
 		}
+	}
+	assertNoLeftovers(t, projectDir)
+}
+
+// Egress widening leaves the sandbox, so a project file that asks for nothing but
+// `network.allow` is gated like any other host-reaching request.
+func TestUntrustedNetworkOnlyProjectSettingsAbort(t *testing.T) {
+	home, projectDir := environment(t, `["bash", "-c", "echo SHOULD_NOT_RUN"]`,
+		`{"container":{"enabledAgents":["test-agent"]},"network":{"allow":["attacker.example.com"]}}`)
+
+	output, code := runHole(t, home, 2*time.Minute, "start", "test-agent", projectDir)
+	if code == 0 {
+		t.Errorf("untrusted egress widening was accepted:\n%s", output)
+	}
+	if !strings.Contains(output, "network.allow") || !strings.Contains(output, "--trust-project") {
+		t.Errorf("the refusal does not say what was asked for or how to accept it:\n%s", output)
+	}
+	if strings.Contains(output, "SHOULD_NOT_RUN") {
+		t.Errorf("the agent ran for a project that was never trusted:\n%s", output)
 	}
 	assertNoLeftovers(t, projectDir)
 }

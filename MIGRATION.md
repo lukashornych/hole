@@ -137,7 +137,6 @@ Nothing here is required; all of it is opt-in.
 | `agents.<name>.args` | default CLI arguments for an agent |
 | `git.worktreeLinks` | mount related git worktrees (`ro` by default, `rw`, or `off`) |
 | `network.subnetPool` | the address range sandbox networks come from (default `10.222.0.0/16`) |
-| `network.hostGatewayDomains` | now accepts an optional `:port,port` suffix |
 | `container.enabledAgents` | now accepts custom agent names, not just the three builtins |
 
 See the [README](README.md#configuration) for details.
@@ -150,6 +149,11 @@ directory. Write `hole start claude .` when that is what you want.
 **`hole destroy <path>` honors the path.** In 1.x the positional landed in the agent slot and
 the *current* directory's project was destroyed instead; `hole destroy .` only worked by
 accident.
+
+**`network.hostGatewayDomains` entries now require a `:port,port` suffix.** A 1.x-style port-less
+entry (`"mydb.local"`) fails validation at startup with a message naming it — write
+`"mydb.local:5432"` instead. The firewall matches the host gateway *address* rather than the name,
+so a port-less entry opened every TCP and UDP port on your machine for the sandbox's lifetime.
 
 **No more proxy environment variables.** `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` are gone from the
 sandbox, because filtering no longer happens at the HTTP layer. Anything that needed proxy
@@ -247,13 +251,20 @@ that file's `hooks.setupHost` on your machine, mounted whatever `files.include` 
 named, and could switch on the privileged Docker-in-Docker sidecar — all without a word. 2.0 shows
 you what a project asks for and asks once, remembering the answer in `~/.hole/trust.json`. Only
 settings whose effect leaves the sandbox are gated (`hooks.setupHost`, `hooks.cleanupHost`,
-`hooks.setup`, `files.include`, `libraries`, `container.docker`, `dependencies`); everything else,
-`network.allow` included, is confined to the container and never prompts.
+`hooks.setup`, `files.include`, `libraries`, `container.docker`, `dependencies`,
+`network.hostGatewayDomains`, `network.allow`); everything else is confined to the container and
+never prompts.
+
+The two network keys are the ones to watch: a project file that used to start silently because it
+contained nothing but `network.allow` now needs a confirmation. Every destination a repository adds
+is also somewhere the sandbox can send that repository's contents, which is what the default-deny
+policy exists to prevent.
 
 Your own `~/.hole/settings.json` is never gated, so a global configuration keeps working
 untouched. What does change: a **non-interactive** run — CI, a piped invocation — cannot be asked,
 so it fails instead of granting silently. Add `--trust-project` to accept the project's current
-requests up front. See [project trust](README.md#project-trust).
+requests up front — bearing in mind it accepts whatever the file asks for at that moment, host
+hooks included. See [project trust](README.md#project-trust).
 
 **The `-n` network-access dump moved out of the project.** 1.x wrote it to
 `<project>/.hole/logs/`, inside the sandbox's own read-write mount; 2.0 writes it to
