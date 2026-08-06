@@ -50,15 +50,15 @@ services:
         mem_limit: 8g
         memswap_limit: 8g
     docker:
-        image: docker:dind
+        image: docker:dind-rootless
         entrypoint:
             - sh
             - -c
             - |
               ip route replace default via $${HOLE_GATEWAY_IP} || echo "WARNING: could not set gateway route" >&2
-              rm -rf /var/lib/docker/containerd/daemon/io.containerd.metadata.v1.bolt/meta.db-lock
-              rm -f /var/run/docker.pid
-              exec dockerd-entrypoint.sh "$$@"
+              rm -rf /home/rootless/.local/share/docker/containerd/daemon/io.containerd.metadata.v1.bolt/meta.db-lock
+              rm -f /run/user/1000/docker.pid
+              exec su rootless -c "HOME=/home/rootless XDG_RUNTIME_DIR=/run/user/1000 exec dockerd-entrypoint.sh $$@"
             - --
         environment:
             - DOCKER_TLS_CERTDIR=
@@ -67,7 +67,7 @@ services:
             - MODE=test
         volumes:
             - <PROJECT>:<PROJECT>
-            - hole-sandbox-docker-data-hole-sandbox-demo-abcd1234-xyz123:/var/lib/docker
+            - hole-sandbox-docker-data-hole-sandbox-demo-abcd1234-xyz123:/home/rootless/.local/share/docker
             - /dev/null:<PROJECT>/.env:ro
             - <RUN>/excluded-dirs<PROJECT>/secrets:<PROJECT>/secrets
             - /dev/null:<PROJECT>/config/app.yaml:ro
@@ -83,6 +83,8 @@ services:
             test:
                 - CMD
                 - docker
+                - -H
+                - tcp://127.0.0.1:2375
                 - info
             interval: 3s
             timeout: 5s
@@ -92,6 +94,7 @@ services:
             hole.managed: "true"
             hole.project: demo-abcd1234
         privileged: true
+        user: root
     gateway:
         image: hole-sandbox/gateway:0123456789ab
         build:

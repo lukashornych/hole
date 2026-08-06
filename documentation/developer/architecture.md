@@ -80,8 +80,8 @@ Services:
 - `gateway` — DNS policy, router and firewall in one container. See [networking](networking.md).
 - `agent` — the unified agent container with every enabled agent CLI installed.
   See [agents](agents.md).
-- `docker` (optional) — a privileged `docker:dind` sidecar.
-  See [configuration](configuration.md#docker-in-docker).
+- `docker` (optional) — a `docker:dind-rootless` sidecar (privileged container, unprivileged
+  daemon). See [configuration](configuration.md#docker-in-docker).
 
 ## Startup sequence
 
@@ -261,3 +261,13 @@ have the right ownership. It does have passwordless `sudo` inside the container:
 the boundary, not the user. `NET_ADMIN` on the agent is likewise safe — the only route out is
 through the gateway, so rewriting routes inside the agent can break its own connectivity but
 never widen it.
+
+**Docker-in-Docker is the weak point in this model, deliberately bounded.** The sidecar container
+must be privileged (rootlesskit will not start otherwise), so it is the one place an agent-reachable
+container holds the capabilities a container escape needs. The daemon inside it runs **rootless** so
+the agent cannot use it to read the host — a nested `--privileged` container maps to a subuid that
+owns none of the host's devices, verified against both the raw-disk read and the exclusion-strip
+escapes ([analysis/security-audit.md](../analysis/security-audit.md), findings 1 and 3). What
+remains is a kernel- or runtime-level escape from the privileged sidecar, which is why DinD is
+off by default and documented as a larger surface than the rest of the sandbox. See
+[configuration](configuration.md#docker-in-docker).

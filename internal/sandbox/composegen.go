@@ -15,12 +15,23 @@ import (
 	"github.com/lukashornych/hole/internal/worktree"
 )
 
-// dindEntrypoint wraps the stock dind entrypoint: it points the sidecar's default route at
-// the gateway and clears state a hard-killed daemon leaves behind in the instance volume.
+// dindDataRoot is the rootless daemon's data directory. Unlike a root daemon's
+// /var/lib/docker, the rootless entrypoint stores everything under the unprivileged user's
+// home, so the instance volume and the stale-lock cleanup below both target this path.
+const dindDataRoot = "/home/rootless/.local/share/docker"
+
+// dindEntrypoint wraps the rootless dind entrypoint. It runs as root only long enough to point
+// the sidecar's default route at the gateway (route changes need NET_ADMIN, which the
+// unprivileged user lacks) and to clear the state a hard-killed daemon leaves in the instance
+// volume, then drops to the unprivileged `rootless` user before exec'ing dockerd. Running the
+// daemon rootless is what stops a container the agent starts through it from reaching the host,
+// even though the sidecar is still privileged (which dind requires). HOME and XDG_RUNTIME_DIR
+// must be set explicitly because `su` keeps root's environment, and the rootless daemon needs
+// its own. `$@` forwards any dockerd flags (the registry mirror) through to the entrypoint.
 const dindEntrypoint = `ip route replace default via ${HOLE_GATEWAY_IP} || echo "WARNING: could not set gateway route" >&2
-rm -rf /var/lib/docker/containerd/daemon/io.containerd.metadata.v1.bolt/meta.db-lock
-rm -f /var/run/docker.pid
-exec dockerd-entrypoint.sh "$@"
+rm -rf /home/rootless/.local/share/docker/containerd/daemon/io.containerd.metadata.v1.bolt/meta.db-lock
+rm -f /run/user/1000/docker.pid
+exec su rootless -c "HOME=/home/rootless XDG_RUNTIME_DIR=/run/user/1000 exec dockerd-entrypoint.sh $@"
 `
 
 type composeInput struct {
@@ -198,14 +209,13 @@ func generateCompose(in composeInput) (string, error) {
 		dindEnv := []string{"DOCKER_TLS_CERTDIR=", "HOLE_GATEWAY_IP=" + in.gatewayIP}
 		dindEnv = append(dindEnv, userEnvironment(in.settings.Environment, in.host)...)
 
-		dindVolumes := []string{projectMount, in.dindVolume + ":/var/lib/docker"}
+		dindVolumes := []string{projectMount, in.dindVolume + ":" + dindDataRoot}
 		// Only the exclusion over-mounts are mirrored, so a container started through the
 		// sidecar cannot bind-mount a path the agent was meant not to see. Libraries and
-		// includes are deliberately *not* mirrored: the sidecar is privileged, and a
-		// privileged process can remount a read-only bind read-write, which would defeat the
-		// read-only default that makes `libraries` safe to hand to an agent. Build contexts do
-		// not need them — the docker client streams the context, so `docker build` and
-		// `buildx` work against paths the daemon cannot see.
+		// includes are deliberately *not* mirrored: the sidecar does not need them and there is
+		// no reason to widen what it can see. Build contexts do not need them either — the docker
+		// client streams the context, so `docker build` and `buildx` work against paths the
+		// daemon cannot see; only a run-time bind mount needs a daemon-side path.
 		dindVolumes = append(dindVolumes, mounts.exclusions...)
 
 		dindCommand := []string{}
@@ -216,7 +226,9 @@ func generateCompose(in composeInput) (string, error) {
 		}
 
 		file.Services["docker"] = &compose.Service{
-			Image:       "docker:dind",
+			Image: "docker:dind-rootless",
+			// The entrypoint injects the gateway route as root, then drops to the rootless user.
+			User:        "root",
 			Privileged:  true,
 			Entrypoint:  []string{"sh", "-c", dindEntrypoint, "--"},
 			Command:     dindCommand,
@@ -229,8 +241,10 @@ func generateCompose(in composeInput) (string, error) {
 			DependsOn: map[string]compose.Dependency{
 				"gateway": compose.ServiceHealthy,
 			},
+			// The rootless daemon has no /var/run/docker.sock, so the probe must reach it over
+			// the TCP endpoint the agent uses rather than the default socket path.
 			Healthcheck: &compose.Healthcheck{
-				Test:     []string{"CMD", "docker", "info"},
+				Test:     []string{"CMD", "docker", "-H", "tcp://127.0.0.1:2375", "info"},
 				Interval: "3s",
 				Timeout:  "5s",
 				Retries:  10,

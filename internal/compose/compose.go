@@ -36,6 +36,7 @@ type Service struct {
 	CapAdd       []string                   `yaml:"cap_add,omitempty"`
 	Sysctls      map[string]string          `yaml:"sysctls,omitempty"`
 	Privileged   bool                       `yaml:"privileged,omitempty"`
+	User         string                     `yaml:"user,omitempty"`
 	StdinOpen    bool                       `yaml:"stdin_open,omitempty"`
 	TTY          bool                       `yaml:"tty,omitempty"`
 	WorkingDir   string                     `yaml:"working_dir,omitempty"`

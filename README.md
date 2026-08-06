@@ -523,15 +523,15 @@ Or ad-hoc:
 hole start claude . --with-docker
 ```
 
-A privileged `docker:dind` sidecar starts on the internal sandbox network; the agent gets the Docker CLI with the compose and buildx plugins automatically, so `docker build`, `docker buildx build` and `docker compose` all work inside the sandbox.
+A `docker:dind-rootless` sidecar starts on the internal sandbox network; the agent gets the Docker CLI with the compose and buildx plugins automatically, so `docker build`, `docker buildx build` and `docker compose` all work inside the sandbox.
 
 - **Accessing services**: containers started inside DinD are reachable from the agent at hostname `docker`, not `localhost`. Bind ports to all interfaces (`3307:3306`, not `127.0.0.1:3307:3306`).
 - **Workspace bind mounts**: the project is mounted at the same absolute path in both containers, so bind mounts in your compose files resolve correctly.
 - **File exclusions** are mirrored onto the sidecar, so a container started inside the sandbox cannot bind-mount a path the agent was meant not to see.
-- **Libraries and inclusions are not** mounted into the sidecar. They stay available to the agent as always; only the sidecar does not get them, because it is privileged and a privileged process can remount a read-only bind read-write. Builds are unaffected — `docker build` and `buildx` stream the context from the client, so they work with paths the daemon cannot see. What does need a daemon-side path is a **bind mount at run time**: `docker run -v /libs/shared:/x` or a compose `volumes:` entry pointing at a library will not resolve. Use the project directory, or copy what you need into it.
+- **Libraries and inclusions are not** mounted into the sidecar. They stay available to the agent as always; the sidecar simply does not need them, and there is no reason to widen what it can see. Builds are unaffected — `docker build` and `buildx` stream the context from the client, so they work with paths the daemon cannot see. What does need a daemon-side path is a **bind mount at run time**: `docker run -v /libs/shared:/x` or a compose `volumes:` entry pointing at a library will not resolve. Use the project directory, or copy what you need into it.
 - **Image cache**: Hole runs a long-lived pull-through cache (`hole-registry`) so repeated pulls do not re-download. It caches **Docker Hub only** — other registries (ghcr.io, ECR, …) go through the gateway and need `network.allow` entries.
 - **Non-Hub registries**: allow their domains, e.g. `"network": { "allow": ["ghcr.io", "*.githubusercontent.com"] }`.
-- **Security**: the sidecar is privileged, which Docker-in-Docker requires. It has no internet route of its own — its traffic is filtered by the same gateway.
+- **Security**: the daemon runs **rootless** — as an unprivileged user in a user namespace — so a container the agent starts through it, even a `--privileged` one, cannot read the host's disks or files. It has no internet route of its own either; its traffic is filtered by the same gateway. The sidecar *container* is still privileged, because Docker-in-Docker requires it, so this is defense-in-depth rather than a hard boundary: a kernel or container-runtime escape from inside the sidecar could still reach the host. Keep your host's kernel and container runtime patched, and treat "the agent can run Docker" as a larger surface than the rest of the sandbox. If you do not need a real daemon, prefer leaving DinD off.
 
 ### Environment variables
 

@@ -181,26 +181,48 @@ re-read files that may have changed — and it runs without a TTY.
 
 ### Docker-in-Docker
 
-A privileged `docker:dind` sidecar on the internal sandbox network. Its stock entrypoint is
-wrapped to point the default route at the gateway and to clear the stale `meta.db-lock` and
-`docker.pid` a hard-killed daemon leaves in the instance volume. The agent gets
-`DOCKER_HOST=tcp://docker:2375` (no TLS — internal network only).
+A `docker:dind-rootless` sidecar on the internal sandbox network, in a **privileged** container
+(rootless dind still requires it — see below) whose **daemon runs unprivileged**. Its entrypoint
+runs as root (`user: root`) only to point the default route at the gateway — a route change needs
+`NET_ADMIN`, which the unprivileged user lacks — and to clear the stale `meta.db-lock` and
+`docker.pid` a hard-killed daemon leaves in the instance volume, then `exec su rootless` drops to
+the unprivileged user before starting dockerd. The agent gets `DOCKER_HOST=tcp://docker:2375` (no
+TLS — internal network only), and because the rootless daemon exposes no `/var/run/docker.sock`,
+the sidecar's own healthcheck reaches it over that same TCP endpoint rather than the default
+socket.
+
+**Why rootless.** A root dind daemon lets the agent start a nested `--privileged` container that
+reads the host's block devices directly, and lets a privileged process strip the exclusion
+over-mounts below — both verified escapes (see
+[analysis/security-audit.md](../analysis/security-audit.md), findings 1 and 3). Under
+`docker:dind-rootless` the daemon runs as an unprivileged user in a user namespace, so a nested
+container maps to a subuid that owns none of the host's device nodes: the same raw-disk read and
+the same over-mount `umount` both fail. The outer container stays privileged because rootlesskit
+needs it (unprivileged, or `SYS_ADMIN`+`NET_ADMIN` without `--privileged`, the daemon starts but
+cannot run a single container — it fails at the session-keyring and `/proc` mount steps), so this
+is defense-in-depth: a kernel or runtime escape from the privileged sidecar can still reach the
+host, and that residual risk is documented rather than closed. Data root, pid path and the
+privilege drop are the three things the rootless image changes from the root one; getting any of
+them wrong fails silently (a healthy-looking daemon that cannot run containers, or a sidecar with
+no route to the gateway), which is why they are called out here.
 
 The sidecar receives the project mount and **only the exclusion over-mounts**
 (`mountBuilder.exclusions`), never `files.include` targets or `libraries`. Mirroring an over-mount
-can only ever remove access; mirroring an exposed path hands it to a privileged container, where a
-read-only bind is not a boundary — a privileged process can remount it read-write, which would
-defeat the read-only default that makes `libraries` safe. Build contexts are not a
-counter-argument: the docker client streams the context to the daemon, so `docker build` and
-`buildx` work against paths the daemon cannot see. Only a run-time bind mount needs a daemon-side
-path.
+can only ever remove access; mirroring an exposed path would hand it to the sidecar for no reason —
+the daemon does not need it, since builds stream their context from the client (`docker build` and
+`buildx` work against paths the daemon cannot see) and only a run-time bind mount needs a
+daemon-side path. Keeping the sidecar's view minimal is the conservative default regardless of the
+daemon's privilege level.
 
 1.x passed the whole mount set here while its comment and README both said exclusions only — the
 wider set came from reusing one array, not from a decision. `TestDinDSidecarReceivesExclusionsOnly`
 pins the split.
 
-Each instance gets a fresh named volume for `/var/lib/docker`, since concurrent sandboxes must not
-share one. Caching comes from the pull-through mirror instead:
+Each instance gets a fresh named volume for the daemon's data root
+(`/home/rootless/.local/share/docker`, not `/var/lib/docker` — rootless stores under the
+unprivileged user's home), since concurrent sandboxes must not share one. A fresh volume inherits
+the image's `rootless:rootless` ownership of that path on first mount, so the daemon can write to
+it without a chown step. Caching comes from the pull-through mirror instead:
 `internal/dindregistry` runs a long-lived `hole-registry` container (upstream `registry:2` in
 proxy mode) on its own bridge network, attaches it to the sandbox network at start and detaches it
 at teardown so the network stays removable. Sandbox-internal traffic is not filtered — the gateway
