@@ -50,7 +50,7 @@ services:
         mem_limit: 8g
         memswap_limit: 8g
     docker:
-        image: docker:dind-rootless
+        image: docker@sha256:7451e3dc398b11ba2d8183bb7915402683e3d32e5ec8cef835c215f314a65fef
         entrypoint:
             - sh
             - -c

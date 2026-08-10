@@ -12,6 +12,14 @@ EXPOSE 53/tcp
 
 ARG COREDNS_VERSION=1.12.1
 
+# sha256 of the official release tarballs, as published next to them
+# (coredns_<version>_linux_<arch>.tgz.sha256). CoreDNS enforces the whole DNS policy, so it is
+# not installed unverified — the tarball arrives over the network from a GitHub redirect chain,
+# and these are the only reason to trust what comes back. They MUST be refreshed together with
+# COREDNS_VERSION; a mismatch fails the build, and so does a version bump that forgets them.
+ARG COREDNS_SHA256_AMD64=886206d686363cd7d71c62ac47287692b954da3dfc9bcbffedd80d4b69358001
+ARG COREDNS_SHA256_ARM64=f1c9030a7fbf3c9f5421894211b3bee62de7e77d260fc4282a0d8104376b6300
+
 # The base image is Ubuntu rather than Alpine for one hard reason: Hole's filtering depends
 # on dnsmasq's --nftset option, and Alpine's dnsmasq package is compiled with `no-nftset`
 # (verified via `dnsmasq --version`), so the gateway could not enforce anything there.
@@ -36,12 +44,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       bind9-dnsutils \
     && ARCH="$(dpkg --print-architecture)" \
     && case "${ARCH}" in \
-         amd64) GOARCH=amd64 ;; \
-         arm64) GOARCH=arm64 ;; \
+         amd64) GOARCH=amd64; COREDNS_SHA256="${COREDNS_SHA256_AMD64}" ;; \
+         arm64) GOARCH=arm64; COREDNS_SHA256="${COREDNS_SHA256_ARM64}" ;; \
          *)     echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;; \
        esac \
-    && curl -fsSL "https://github.com/coredns/coredns/releases/download/v${COREDNS_VERSION}/coredns_${COREDNS_VERSION}_linux_${GOARCH}.tgz" \
-       | tar -xz -C /usr/local/bin \
+    && curl -fsSL -o /tmp/coredns.tgz \
+       "https://github.com/coredns/coredns/releases/download/v${COREDNS_VERSION}/coredns_${COREDNS_VERSION}_linux_${GOARCH}.tgz" \
+    && echo "${COREDNS_SHA256}  /tmp/coredns.tgz" | sha256sum --check --strict - \
+    && tar -xzf /tmp/coredns.tgz -C /usr/local/bin coredns \
+    && rm /tmp/coredns.tgz \
     && chmod +x /usr/local/bin/coredns \
     && apt-get purge -y curl \
     && apt-get autoremove -y \

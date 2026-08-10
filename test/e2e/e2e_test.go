@@ -308,9 +308,19 @@ func TestNetworkAccessDumpIsWritten(t *testing.T) {
 		t.Fatalf("hole start exited with %d", code)
 	}
 
-	entries, err := filepath.Glob(filepath.Join(projectDir, ".hole", "logs", "network-access-test-agent-*.log"))
+	// Under `~/.hole/logs/<project>/`, never in the project: the project bind is writable with
+	// the host UID, so a dump written there let the agent pre-plant a symlink at the target and
+	// have teardown overwrite an arbitrary host file.
+	entries, err := filepath.Glob(filepath.Join(home, ".hole", "logs", "*", "network-access-test-agent-*.log"))
 	if err != nil || len(entries) != 1 {
-		t.Fatalf("expected exactly one network access log, got %v (%v)", entries, err)
+		t.Fatalf("expected exactly one network access log under ~/.hole/logs, got %v (%v)", entries, err)
+	}
+	inProject, err := filepath.Glob(filepath.Join(projectDir, ".hole", "logs", "*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inProject) != 0 {
+		t.Errorf("the dump reached the sandbox-writable project directory: %v", inProject)
 	}
 	content, err := os.ReadFile(entries[0])
 	if err != nil {

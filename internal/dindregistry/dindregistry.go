@@ -25,8 +25,13 @@ const (
 	// to a sandbox network it is also a dual-homed container inside that sandbox's trust
 	// boundary — which is why the caller attaches it only to sandboxes that allowed Docker Hub.
 	NetworkName = "hole-registry-net"
-	// Image is the upstream registry implementation.
-	Image = "registry:2"
+	// Image is the upstream registry implementation, pinned by digest so the mirror's content
+	// cannot change under a fixed Hole version. This is the `registry:2` multi-arch index as
+	// published on 2026-08-06; the tag is kept in this comment rather than in the reference,
+	// since the digest alone identifies the image and a tag beside it can drift out of sync.
+	// A bump only reaches an existing mirror once its container is removed — Ensure restarts a
+	// stopped `hole-registry` rather than recreating it, to keep the cache volume.
+	Image = "registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
 	// Port is the registry port inside the sandbox network.
 	Port = "5000"
 	// MirrorURL is what the DinD daemon is pointed at.

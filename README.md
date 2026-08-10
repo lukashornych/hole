@@ -568,7 +568,7 @@ Or ad-hoc:
 hole start claude . --with-docker
 ```
 
-A `docker:dind-rootless` sidecar starts on the internal sandbox network; the agent gets the Docker CLI with the compose and buildx plugins automatically, so `docker build`, `docker buildx build` and `docker compose` all work inside the sandbox.
+A `docker:dind-rootless` sidecar starts on the internal sandbox network; the agent gets the Docker CLI with the compose and buildx plugins automatically, so `docker build`, `docker buildx build` and `docker compose` all work inside the sandbox. The sidecar image is pinned to an exact digest rather than a moving tag, so the daemon version inside your sandboxes changes only when a Hole release bumps it — never silently under a version you already have.
 
 - **Accessing services**: containers started inside DinD are reachable from the agent at hostname `docker`, not `localhost`. Bind ports to all interfaces (`3307:3306`, not `127.0.0.1:3307:3306`).
 - **Workspace bind mounts**: the project is mounted at the same absolute path in both containers, so bind mounts in your compose files resolve correctly.

@@ -15,6 +15,15 @@ import (
 	"github.com/lukashornych/hole/internal/worktree"
 )
 
+// dindImage is the Docker-in-Docker sidecar, pinned by digest: a floating tag would let the
+// daemon inside every sandbox change under a fixed Hole version. This digest is the
+// `docker:dind-rootless` multi-arch index (linux/amd64 + linux/arm64) as published on
+// 2026-08-06. The reference deliberately carries no tag — the digest alone identifies the image,
+// and a tag beside it is redundant information that can silently drift out of sync — so the tag
+// lives in this comment instead. Refreshing it is a deliberate step, see
+// documentation/developer/build-and-release.md.
+const dindImage = "docker@sha256:7451e3dc398b11ba2d8183bb7915402683e3d32e5ec8cef835c215f314a65fef"
+
 // dindDataRoot is the rootless daemon's data directory. Unlike a root daemon's
 // /var/lib/docker, the rootless entrypoint stores everything under the unprivileged user's
 // home, so the instance volume and the stale-lock cleanup below both target this path.
@@ -226,7 +235,7 @@ func generateCompose(in composeInput) (string, error) {
 		}
 
 		file.Services["docker"] = &compose.Service{
-			Image: "docker:dind-rootless",
+			Image: dindImage,
 			// The entrypoint injects the gateway route as root, then drops to the rootless user.
 			User:        "root",
 			Privileged:  true,

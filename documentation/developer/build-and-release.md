@@ -11,6 +11,56 @@ The version is injected with `-ldflags -X github.com/lukashornych/hole/internal/
 An unstamped build reports `development`, skips update checks and refuses to self-update — so a
 checkout can never accidentally overwrite itself with a release.
 
+## Pinned third-party artifacts
+
+Three artifacts Hole downloads at runtime are pinned, because a floating reference lets their
+content change under a fixed Hole version — and two of them are security-relevant enough that the
+change would go unnoticed:
+
+| Artifact | Pinned in | Form |
+|---|---|---|
+| CoreDNS release tarball | `assets/gateway/Dockerfile` (`COREDNS_VERSION` + `COREDNS_SHA256_*`) | version + per-arch sha256, verified with `sha256sum --check --strict` before extraction |
+| Docker-in-Docker sidecar (`docker:dind-rootless`) | `internal/sandbox/composegen.go` (`dindImage`) | image digest |
+| Registry mirror (`registry:2`) | `internal/dindregistry/dindregistry.go` (`Image`) | image digest |
+
+CoreDNS is the DNS half of the filtering gateway, so installing it on nothing but TLS would hold
+the policy engine to a lower standard than `internal/update` holds Hole's own binary to. The
+checksums must move with `COREDNS_VERSION`: a bump that forgets them fails the build rather than
+installing an unverified tarball, and `TestGatewayDockerfileVerifiesCoreDNS` fails if the download
+is ever piped straight into `tar` again.
+
+Both image references carry a digest and **no tag**: the digest alone identifies the image, and a
+tag beside it is redundant information that can drift out of sync with the digest it accompanies —
+so the human-readable tag lives in the comment next to each constant instead.
+`TestPinnedImagesCarryNoTag` and `TestGeneratedComposePinsSidecarImageByDigest` pin both halves.
+Each digest was checked to be addressable as `…/manifests/sha256:<digest>` and to cover
+linux/amd64 and linux/arm64 before being written down.
+
+Refreshing a pin (from a host with a network and a container runtime):
+
+```sh
+# CoreDNS: bump the version, then take both sums from the release page
+for arch in amd64 arm64; do
+  curl -fsSL "https://github.com/coredns/coredns/releases/download/v${V}/coredns_${V}_linux_${arch}.tgz.sha256"
+done
+
+# Images: the multi-arch index digest, which must cover linux/amd64 and linux/arm64
+docker buildx imagetools inspect docker:dind-rootless
+docker buildx imagetools inspect registry:2
+```
+
+Consequences worth knowing before a bump:
+
+- The gateway tag is derived from `assets.BuildInputsHash()`, so editing the Dockerfile
+  invalidates every cached gateway image automatically — users get the verified build on their
+  next start without asking for `-r`.
+- Pinning `docker:dind-rootless` freezes the Docker Engine version inside sandboxes until the pin
+  moves. Treat it as a maintenance item, not a set-and-forget.
+- A new registry pin does **not** reach an existing mirror: `dindregistry.Ensure` restarts a
+  stopped `hole-registry` rather than recreating it, to keep its cache volume. Remove the
+  container to pick it up — `hole destroy` with no path (a full destroy takes the mirror too), or
+  `docker rm -f hole-registry`.
+
 ## Release pipeline
 
 Push to `main` triggers `.github/workflows/release.yml`:

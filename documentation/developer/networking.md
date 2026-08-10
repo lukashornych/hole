@@ -151,6 +151,12 @@ iptables variant of the generated ruleset.
 
 Since the agent image is Ubuntu 24.04 too, this shares layers instead of adding a base image.
 
+The apt-installed pieces (`dnsmasq-base`, `nftables`) come from signed repositories, but CoreDNS is
+a release tarball from GitHub, so the Dockerfile pins its version *and* a per-architecture sha256
+and verifies the download before extracting it. The policy engine is not installed on the strength
+of TLS alone — see
+[build & release](build-and-release.md#pinned-third-party-artifacts) for how to refresh the pin.
+
 ## Route injection
 
 The sandbox network is `internal: true`, so there is no route off it except through the gateway.

@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/lukashornych/hole/internal/agents"
 	"github.com/lukashornych/hole/internal/config"
+	"github.com/lukashornych/hole/internal/dindregistry"
 	"github.com/lukashornych/hole/internal/hostenv"
 	"github.com/lukashornych/hole/internal/network"
 )
@@ -206,6 +208,51 @@ func TestGenerateComposeMirrorsExclusionsOnDinD(t *testing.T) {
 	occurrences := strings.Count(content, "/dev/null:"+projectDir+"/.env:ro")
 	if occurrences != 2 {
 		t.Errorf("expected the .env exclusion on both the agent and the sidecar, found %d", occurrences)
+	}
+}
+
+var (
+	digestPinned = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
+	sidecarImage = regexp.MustCompile(`(?m)^\s+image: (docker[:@]\S+)$`)
+)
+
+// TestGeneratedComposePinsSidecarImageByDigest pins the generated artifact rather than the
+// constant: a floating tag would let the daemon inside every sandbox change under a fixed Hole
+// version, so the reference must carry a digest no matter how it is assembled.
+func TestGeneratedComposePinsSidecarImageByDigest(t *testing.T) {
+	projectDir, _ := fixture(t)
+	settings := &config.Settings{}
+	settings.Container.Docker = true
+
+	runTmpDir := t.TempDir()
+	path, err := generateCompose(testInput(t, projectDir, runTmpDir, settings, Options{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sidecar := sidecarImage.FindStringSubmatch(string(data))
+	if sidecar == nil {
+		t.Fatalf("no Docker-in-Docker sidecar image in the compose file:\n%s", data)
+	}
+	if !digestPinned.MatchString(sidecar[1]) {
+		t.Errorf("sidecar image %q is not pinned by digest", sidecar[1])
+	}
+}
+
+// TestPinnedImagesCarryNoTag guards the other half of the pin: the digest identifies the image on
+// its own, so a tag beside it is redundant information that can drift — it belongs in a comment.
+func TestPinnedImagesCarryNoTag(t *testing.T) {
+	for _, reference := range []string{dindImage, dindregistry.Image} {
+		if !digestPinned.MatchString(reference) {
+			t.Errorf("%q is not pinned by digest", reference)
+			continue
+		}
+		if repository, _, _ := strings.Cut(reference, "@"); strings.Contains(repository, ":") {
+			t.Errorf("%q carries both a tag and a digest", reference)
+		}
 	}
 }
 

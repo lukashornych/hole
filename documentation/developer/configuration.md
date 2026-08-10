@@ -237,7 +237,9 @@ re-read files that may have changed — and it runs without a TTY.
 
 ### Docker-in-Docker
 
-A `docker:dind-rootless` sidecar on the internal sandbox network, in a **privileged** container
+A `docker:dind-rootless` sidecar — referenced by digest, not by tag, so the daemon inside every
+sandbox cannot change under a fixed Hole version ([build & release](build-and-release.md#pinned-third-party-artifacts))
+— on the internal sandbox network, in a **privileged** container
 (rootless dind still requires it — see below) whose **daemon runs unprivileged**. Its entrypoint
 runs as root (`user: root`) only to point the default route at the gateway — a route change needs
 `NET_ADMIN`, which the unprivileged user lacks — and to clear the stale `meta.db-lock` and
@@ -280,7 +282,9 @@ unprivileged user's home), since concurrent sandboxes must not share one. A fres
 the image's `rootless:rootless` ownership of that path on first mount, so the daemon can write to
 it without a chown step. Caching comes from the pull-through mirror instead:
 `internal/dindregistry` runs a long-lived `hole-registry` container (upstream `registry:2` in
-proxy mode) on its own bridge network, attaches it to the sandbox network at start and detaches it
+proxy mode, also digest-pinned — and because `Ensure` restarts a stopped mirror rather than
+recreating it, a new pin only reaches it once the container is removed) on its own bridge network,
+attaches it to the sandbox network at start and detaches it
 at teardown so the network stays removable. Sandbox-internal traffic is not filtered — the gateway
 polices egress to the internet only — so the daemon reaches the mirror even under default-deny.
 Every failure here is non-fatal: DinD without a cache simply pulls from the internet.
