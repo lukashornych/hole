@@ -10,6 +10,8 @@ package dindregistry
 import (
 	"fmt"
 	"net/netip"
+	"strings"
+	"time"
 
 	"github.com/lukashornych/hole/internal/engine"
 	"github.com/lukashornych/hole/internal/logging"
@@ -41,6 +43,20 @@ const (
 	upstream = "https://registry-1.docker.io"
 	// networkSubnet keeps the mirror's own network out of Hole's sandbox pool.
 	networkSubnet = "10.223.254.0/24"
+	// restartPolicy is capped rather than `unless-stopped`: the registry exits during startup when
+	// its upstream is unreachable, and an uncapped policy turned that into a container restarting
+	// forever, outliving every sandbox that asked for it.
+	restartPolicy = "on-failure:5"
+)
+
+const (
+	// readyStable is how long the mirror has to stay up, without the runtime restarting it, before
+	// it counts as usable. The registry aborts during startup when it cannot reach its upstream,
+	// so staying up is the signal — a container that is merely `created` proves nothing.
+	readyStable = 2 * time.Second
+	// readyTimeout bounds the probe, and readyPoll is how often it samples the container's state.
+	readyTimeout = 15 * time.Second
+	readyPoll    = 250 * time.Millisecond
 )
 
 // Ensure starts the mirror if it is not already running, and returns whether it is usable.
@@ -58,14 +74,18 @@ func Ensure(containerEngine *engine.Engine) bool {
 		if container.Name != ContainerName {
 			continue
 		}
-		if container.Running() {
-			return true
-		}
 		// A stopped mirror is restarted rather than recreated: its volume holds the cache.
-		if err := containerEngine.RunQuiet("start", ContainerName); err != nil {
-			logging.Debug("could not restart %s, recreating it: %v", ContainerName, err)
-			_ = containerEngine.ContainerRemove(ContainerName)
-			break
+		if !container.Running() {
+			if err := containerEngine.RunQuiet("start", ContainerName); err != nil {
+				logging.Debug("could not restart %s, recreating it: %v", ContainerName, err)
+				discard(containerEngine)
+				break
+			}
+		}
+		if !waitUntilServing(containerEngine, ContainerName) {
+			reportUnusable(containerEngine, ContainerName)
+			discard(containerEngine)
+			return false
 		}
 		return true
 	}
@@ -81,7 +101,7 @@ func Ensure(containerEngine *engine.Engine) bool {
 	err := containerEngine.RunQuiet("run", "-d",
 		"--name", ContainerName,
 		"--network", NetworkName,
-		"--restart", "unless-stopped",
+		"--restart", restartPolicy,
 		"--label", engine.LabelManaged+"=true",
 		"-v", VolumeName+":/var/lib/registry",
 		"-e", "REGISTRY_PROXY_REMOTEURL="+upstream,
@@ -91,7 +111,73 @@ func Ensure(containerEngine *engine.Engine) bool {
 			"will fail unless the allow list covers Hub's endpoints directly: %v", err)
 		return false
 	}
+	if !waitUntilServing(containerEngine, ContainerName) {
+		reportUnusable(containerEngine, ContainerName)
+		discard(containerEngine)
+		return false
+	}
 	return true
+}
+
+// waitUntilServing reports whether a mirror container is usable.
+//
+// `docker run -d` succeeding says nothing about the registry: with its upstream unreachable it
+// aborts during startup, and accepting that container pointed the DinD daemon at a dead endpoint.
+// The signal is therefore that the container stays up and the runtime does not restart it — state
+// only, never a log string, so an upstream change of wording cannot fail a healthy mirror. It
+// catches a mirror that never came up; one that dies later still leaves the daemon a stale
+// `--registry-mirror`, which dockerd falls back from to the upstream registry.
+func waitUntilServing(containerEngine *engine.Engine, container string) bool {
+	// Restarts are counted from here, not from zero: a mirror that crashed once days ago and has
+	// been serving since is usable, and discarding it would throw away the cache.
+	restartsAtEntry, _ := containerEngine.ContainerRestartCount(container)
+	deadline := time.Now().Add(readyTimeout)
+	upSince := time.Now()
+	for {
+		if !containerEngine.ContainerRunning(container) {
+			return false
+		}
+		if restarts, ok := containerEngine.ContainerRestartCount(container); ok && restarts > restartsAtEntry {
+			return false
+		}
+		if time.Since(upSince) >= readyStable {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(readyPoll)
+	}
+}
+
+// reportUnusable names why the mirror was refused. The registry's own last line carries the cause
+// — an unreachable upstream, most often — which a warning about a missing cache would not.
+func reportUnusable(containerEngine *engine.Engine, container string) {
+	detail := ""
+	if code, ok := containerEngine.ContainerExitCode(container); ok && code != 0 {
+		detail = fmt.Sprintf(" (exit code %d)", code)
+	}
+	if logs, err := containerEngine.ContainerLogs(container); err == nil {
+		lines := strings.Split(strings.TrimSpace(logs), "\n")
+		if last := strings.TrimSpace(lines[len(lines)-1]); last != "" {
+			detail += ": " + last
+		}
+	}
+	logging.Warn("the Docker image cache did not come up%s, so Docker-in-Docker has none — Docker Hub "+
+		"pulls will go to the internet each time", detail)
+}
+
+// discard removes a mirror that cannot serve, so the next start makes a clean attempt instead of
+// finding a crash-looping container. The cache volume is kept: it is the part worth keeping, and
+// a fresh container re-uses it. A running container is never taken — a concurrent sandbox may be
+// pulling through it.
+func discard(containerEngine *engine.Engine) {
+	if containerEngine.ContainerRunning(ContainerName) {
+		return
+	}
+	if err := containerEngine.ContainerRemove(ContainerName); err != nil {
+		logging.Debug("could not remove the unusable image cache: %v", err)
+	}
 }
 
 // Attach connects the mirror to a sandbox network so the DinD daemon can reach it without

@@ -183,6 +183,23 @@ Entries containing `*`, `?` or `[` are globs, expanded by a custom matcher becau
 scanning everything. Overlapping matches are deduplicated by container target. Exclusions are
 mirrored onto the DinD sidecar.
 
+Three deliberate properties of the matching, all recorded because the failure direction favors
+exposure (see [analysis/security-audit.md](../analysis/security-audit.md), findings 9 and 10):
+
+- **A pattern that matches nothing warns and the start continues.** Exclusions are meant to be
+  written once, globally, for files only some projects have (`.env`, `**/*.pem`) — erroring would
+  make a shared default forbid every project that does not happen to contain the path. The cost is
+  that a typo hides nothing and only warns.
+- **Globs do not descend symlinked directories.** `config.ExpandGlob` classifies with `os.ReadDir` +
+  `entry.IsDir()`, i.e. Lstat semantics, which is what bash `globstar` does — the semantics the
+  matcher documents itself as implementing. So `secrets/**` matches nothing when `secrets` is a
+  symlink, and warns. A symlinked path named *directly* is excluded correctly: `addExclusions`
+  checks existence with `Lstat` (a dangling link still warns) but decides file-vs-directory with
+  `Stat`, because `/dev/null` over a directory is a mount the runtime rejects.
+- **`files.exclude` has no reach into `files.include` targets.** Patterns are resolved against the
+  project directory and, separately, against each library's own mount. An included path — `~/.claude`,
+  `~/.m2/repository` — is mounted whole or not at all.
+
 ### `files.include`, `libraries`, `git.worktreeLinks`, `--library`
 
 All three sources fold into one map keyed by the **resolved** host path, with precedence
@@ -288,6 +305,17 @@ attaches it to the sandbox network at start and detaches it
 at teardown so the network stays removable. Sandbox-internal traffic is not filtered — the gateway
 polices egress to the internet only — so the daemon reaches the mirror even under default-deny.
 Every failure here is non-fatal: DinD without a cache simply pulls from the internet.
+
+`Ensure` does not accept the mirror on the strength of `docker run -d` succeeding: the registry
+aborts during startup when it cannot reach its upstream, and the daemon was then pointed at a dead
+endpoint. `waitUntilServing` requires the container to stay up for a couple of seconds without the
+runtime restarting it — container state only, never a log line, so an upstream change of wording
+cannot fail a healthy mirror — and restarts are counted from the probe's start, so a mirror that
+crashed once days ago and has served since is still usable. A mirror that fails the probe is warned
+about (with the registry's own last log line) and removed, keeping the cache volume; the restart
+policy is `on-failure:5` rather than `unless-stopped`, so a crash-looping container cannot outlive
+the sandbox that asked for it. The probe catches a mirror that never came up, not one that dies
+later — for that case dockerd falls back from a failing `--registry-mirror` to the upstream registry.
 
 That same unfiltered reachability is why the attachment is gated: `start.go` attaches the mirror
 only when `policy.AllowsDockerHub()` holds, and otherwise warns and leaves `RegistryMirror` empty

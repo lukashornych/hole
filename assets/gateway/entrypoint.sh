@@ -1,6 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 
+# The container starts with net.ipv4.ip_forward=1 already set (compose `sysctls`; /proc/sys is
+# read-only in an unprivileged container, so it cannot be enabled from here instead), which makes
+# this container a router before anything below has run. Drop forwarded traffic first, so the
+# window between container start and the real ruleset is closed — and so an abort in any check
+# below leaves the sandbox with no route rather than an unfiltered one.
+#
+# The real ruleset re-creates this table in a single nft transaction, so replacing it opens no gap.
+nft -f - <<'EOF'
+table inet hole
+delete table inet hole
+table inet hole {
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+    }
+}
+EOF
+
 # Runtime-mounted, generated per run by internal/network.
 COREFILE_TEMPLATE=/etc/hole/Corefile
 DNSMASQ_CONF=/etc/hole/dnsmasq.conf

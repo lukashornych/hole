@@ -85,9 +85,16 @@ func (b *mountBuilder) addExclusions(sourceDir, mountPoint string, entries []str
 			continue
 		}
 		fullPath := filepath.Join(sourceDir, relative)
-		info, err := os.Lstat(fullPath)
-		if err != nil {
+		// Existence is checked with Lstat so a dangling symlink still warns, but the file/directory
+		// decision follows the link: over-mounting /dev/null onto a symlinked directory is a mount
+		// the runtime rejects, which would fail the start instead of hiding the path.
+		if _, err := os.Lstat(fullPath); err != nil {
 			logging.Warn("excluded path '%s' not found in %s, skipping", relative, sourceDir)
+			continue
+		}
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			logging.Warn("excluded path '%s' cannot be read in %s, skipping", relative, sourceDir)
 			continue
 		}
 		target := mountPoint + "/" + relative

@@ -438,6 +438,21 @@ func (e *Engine) ContainerExitCode(name string) (int, bool) {
 	return code, true
 }
 
+// ContainerRestartCount reports how often the runtime has restarted a container under its
+// restart policy, and whether the count could be read at all. A rising count is how a
+// crash-looping container is told apart from one that simply takes a while to come up.
+func (e *Engine) ContainerRestartCount(name string) (int, bool) {
+	raw, err := e.output("container", "inspect", "-f", "{{.RestartCount}}", name)
+	if err != nil {
+		return 0, false
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, false
+	}
+	return count, true
+}
+
 // ContainerStarted reports whether a container has left the `created` state: it is running, or
 // it ran and is now paused, restarting, exited or dead.
 //

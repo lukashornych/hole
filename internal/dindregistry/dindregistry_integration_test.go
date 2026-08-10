@@ -113,6 +113,49 @@ func TestEnsureAttachDetachRemove(t *testing.T) {
 	}
 }
 
+// startProbeContainer runs a throwaway container from the pinned mirror image under the same
+// restart policy Ensure uses, and returns its name. Both readiness cases below drive the real
+// registry entrypoint rather than a stand-in, without needing an upstream: `serve` with a
+// missing config file exits at once, and the default command serves locally and stays up.
+func startProbeContainer(t *testing.T, containerEngine *engine.Engine, name string, args ...string) string {
+	t.Helper()
+	_ = containerEngine.ContainerRemove(name)
+	runArgs := append([]string{"run", "-d", "--name", name, "--restart", restartPolicy, "--label",
+		engine.LabelManaged + "=true", Image}, args...)
+	if err := containerEngine.RunQuiet(runArgs...); err != nil {
+		t.Skipf("could not start the registry image (no network?): %v", err)
+	}
+	t.Cleanup(func() { _ = containerEngine.ContainerRemove(name) })
+	return name
+}
+
+// TestWaitUntilServingRejectsAContainerThatDies is the regression for a mirror that `docker run
+// -d` accepted and that then failed to come up: Ensure used to report it as usable and point the
+// DinD daemon at a dead endpoint.
+func TestWaitUntilServingRejectsAContainerThatDies(t *testing.T) {
+	containerEngine := testEngine(t)
+	name := startProbeContainer(t, containerEngine, "hole-registry-itest-dead",
+		"serve", "/nonexistent-config.yml")
+
+	start := time.Now()
+	if waitUntilServing(containerEngine, name) {
+		t.Error("a container that exits during startup was reported as a usable mirror")
+	}
+	if elapsed := time.Since(start); elapsed > readyTimeout {
+		t.Errorf("the readiness probe took %s, longer than its own timeout %s", elapsed, readyTimeout)
+	}
+}
+
+func TestWaitUntilServingAcceptsAContainerThatStaysUp(t *testing.T) {
+	containerEngine := testEngine(t)
+	name := startProbeContainer(t, containerEngine, "hole-registry-itest-alive")
+
+	if !waitUntilServing(containerEngine, name) {
+		logs, _ := containerEngine.ContainerLogs(name)
+		t.Errorf("a running registry was not accepted as a usable mirror; logs:\n%s", logs)
+	}
+}
+
 func TestEnsureRestartsAStoppedMirror(t *testing.T) {
 	containerEngine := testEngine(t)
 	Remove(containerEngine)

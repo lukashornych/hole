@@ -119,6 +119,25 @@ Two details that are easy to get wrong:
   intervals", which under the entrypoint's `set -euo pipefail` means no gateway at all.
   `auto-merge` collapses the pair into the union, which is what the entries mean.
 
+## Gateway startup is fail-closed
+
+The gateway container is created with `net.ipv4.ip_forward=1` (compose `sysctls`), so it routes from
+the moment it starts — before the entrypoint has read a single generated file. Forwarding cannot be
+deferred to the entrypoint instead: `/proc/sys` is read-only in an unprivileged container, so
+`sysctl -w` there fails with EROFS. The entrypoint's **first** action is therefore to install an
+`inet hole` table whose forward chain is `policy drop`, which the generated ruleset then replaces in
+a single `nft -f` transaction — the swap opens no window. Two consequences worth keeping:
+
+- The interval between container start and the real policy is a drop, not an accept. That matters
+  beyond first start, because `restart: on-failure` can bring the gateway back mid-run while the
+  agent is live.
+- Every check below the drop (`nftset` support, host gateway resolution, interface discovery) aborts
+  under `set -euo pipefail` with the drop in force, so a gateway that cannot configure itself leaves
+  the sandbox with no route rather than an unfiltered one.
+
+`TestGatewayEntrypointDropsForwardingFirst` (`assets/assets_test.go`) pins the order: the drop has
+to precede every other startup step and the generated ruleset.
+
 ## The gateway healthcheck
 
 The agent service waits on `service_healthy`, so the probe decides whether a sandbox starts at

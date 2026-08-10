@@ -281,6 +281,39 @@ func TestGenerateComposeExcludesDirectoriesWithEmptyDirs(t *testing.T) {
 	}
 }
 
+// TestGenerateComposeExcludesSymlinkedDirectoriesAsDirectories covers finding 9 of the security
+// audit: classifying with Lstat put a symlinked directory on the file branch, so it got a
+// /dev/null over-mount the runtime rejects — a failed start instead of a hidden path.
+func TestGenerateComposeExcludesSymlinkedDirectoriesAsDirectories(t *testing.T) {
+	projectDir, _ := fixture(t)
+	target := filepath.Join(t.TempDir(), "real-secrets")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(projectDir, "linked-secrets")); err != nil {
+		t.Skipf("symlinks are not available here: %v", err)
+	}
+	settings := &config.Settings{}
+	settings.Files.Exclude = []string{"linked-secrets"}
+
+	runTmpDir := t.TempDir()
+	path, err := generateCompose(testInput(t, projectDir, runTmpDir, settings, Options{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	placeholder := filepath.Join(runTmpDir, "excluded-dirs", projectDir, "linked-secrets")
+	if !strings.Contains(string(data), placeholder+":"+projectDir+"/linked-secrets") {
+		t.Errorf("a symlinked excluded directory is not backed by an empty host directory:\n%s", data)
+	}
+	if strings.Contains(string(data), "/dev/null:"+projectDir+"/linked-secrets") {
+		t.Error("a symlinked excluded directory was over-mounted with /dev/null")
+	}
+}
+
 func TestGenerateComposeSkipsMissingPaths(t *testing.T) {
 	projectDir, _ := fixture(t)
 	settings := &config.Settings{}

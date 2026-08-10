@@ -64,6 +64,42 @@ func TestGatewayDockerfileVerifiesCoreDNS(t *testing.T) {
 	}
 }
 
+// TestGatewayEntrypointDropsForwardingFirst pins the fail-closed startup order: the container is
+// already forwarding when the entrypoint begins, so the default-drop table has to be installed
+// before any check that can block or abort, and long before the generated ruleset arrives.
+func TestGatewayEntrypointDropsForwardingFirst(t *testing.T) {
+	data, err := FS.ReadFile("gateway/entrypoint.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entrypoint := string(data)
+
+	dropChain := regexp.MustCompile(`(?s)nft -f -.*?chain forward \{.*?policy drop;`)
+	dropIndex := dropChain.FindStringIndex(entrypoint)
+	if dropIndex == nil {
+		t.Fatal("the entrypoint does not install a default-drop forward chain before setup")
+	}
+	rulesetIndex := strings.Index(entrypoint, `nft -f /tmp/hole/nftables.rules`)
+	if rulesetIndex < 0 {
+		t.Fatal("the entrypoint no longer applies the generated ruleset")
+	}
+	// Any check that can abort or block must sit behind the drop, so the two markers below stand
+	// in for "the rest of startup".
+	for _, marker := range []string{"dnsmasq --version", "getent hosts host.internal", "ip -o -4 addr show"} {
+		markerIndex := strings.Index(entrypoint, marker)
+		if markerIndex < 0 {
+			t.Errorf("startup step %q is gone; check that the drop still precedes what replaced it", marker)
+			continue
+		}
+		if markerIndex < dropIndex[1] {
+			t.Errorf("%q runs before forwarding is dropped, leaving the sandbox unfiltered", marker)
+		}
+	}
+	if rulesetIndex < dropIndex[1] {
+		t.Error("the generated ruleset is applied before the default-drop table exists")
+	}
+}
+
 func TestSchemaIsReadable(t *testing.T) {
 	if len(Schema()) == 0 {
 		t.Error("embedded schema is empty")
