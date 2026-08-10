@@ -8,10 +8,10 @@ VERSION=2.0.0 make build    # stamped, as a release build is
 ```
 
 The version is injected with `-ldflags -X github.com/lukashornych/hole/v2/internal/version.Version`.
-A checkout build carries no version at all — it reports `development (<sha>, dirty)`, skips update
-checks, runs no migrations and refuses to self-update, so it can never overwrite itself with a
-release. A `go install` build is unstamped too but does have an identity; see
-[build identity](#build-identity).
+A checkout build carries no version of its own — it reports `development (<sha>)`, with `, dirty`
+appended when the tree has uncommitted changes, skips update checks, runs no migrations and refuses
+to self-update, so it can never overwrite itself with a release. A `go install` build is unstamped
+too but does have an identity; see [build identity](#build-identity).
 
 ## Pinned third-party artifacts
 
@@ -169,13 +169,27 @@ Consequences of that coupling, both of them one-way:
 - **A tag whose major does not match the path is invisible**, so the day a `v3.0.0` is cut, `go.mod`
   and every import have to move to `/v3` in the same commit the tag points at — otherwise
   `@latest` silently keeps serving the newest 2.x.
+- **The first tag of a major is what switches `go install` on.** Before any `v2.x` tag exists, *every*
+  query fails — `@latest`, `@<branch>` and even an explicit pseudo-version — because Go resolves
+  `@latest` for the module to look up its deprecation notice, and on a path with no matching versions
+  that lookup is fatal: `loading deprecation for github.com/lukashornych/hole/v2: no matching
+  versions for query "latest"`. Nothing is wrong with the module when this happens; it clears the
+  moment the first `/v2` tag is published, which is also why a `/v3` rename cannot be validated by
+  installing from a branch beforehand.
 
 ## Build identity
 
 `internal/version` classifies the running binary into one of three kinds, because "stamped or not"
 cannot answer the three questions Hole asks of its own version. A stamp wins outright; without one,
-the module version `runtime/debug` reports decides between the other two — `go install` records the
-resolved tag or pseudo-version, a checkout records `(devel)`.
+the **version-control settings** decide between the other two: a build from a working tree records
+`vcs.revision`, and a module install — which builds from the module cache — records none.
+
+That discriminator is not interchangeable with the module version, which is the trap here. Since Go
+1.24 a build from a *clean* checkout also gets a module version, derived from the repository
+(`v2.0.0-20260810132358-8014588bf523`), and only a dirty tree still falls back to `(devel)`. Reading
+the module version alone would therefore classify `make build` on a clean checkout as a `go install`
+build and let a working tree run migrations. `go version -m ./hole` shows the difference: both carry
+a `mod` line, only the local build carries `vcs.*`.
 
 | | `Release` (`-ldflags`) | `Source` (`go install`) | `Development` (`make build`) |
 |---|---|---|---|
@@ -205,6 +219,30 @@ Why each answer is what it is:
 
 `state.json` needs no special handling: a tagged source install records the same `2.1.4` a release
 would, and it has already run the cleanup, so a later release install correctly skips it.
+
+## Handing out a build before it is released
+
+`go install …@<branch>` is not an option before the major's first tag exists (see above), so a
+pre-release build reaches someone else one of two ways:
+
+```sh
+# 1. they build it themselves — needs a Go toolchain, reports `development (<sha>)`
+git clone -b <branch> https://github.com/lukashornych/hole && cd hole
+CGO_ENABLED=0 go install ./cmd/hole
+
+# 2. you build it and hand over the binary — needs nothing on their side
+VERSION=2.0.0-rc.1 make build
+```
+
+They differ in more than convenience. Route 1 produces a `Development` build: no update check, no
+self-update, and **no version-change migration**, so a colleague coming from a 1.x install keeps
+every 1.x image, volume and network. Route 2 produces a `Release` build that reports `2.0.0-rc.1`,
+migrates like a real install, and can later `hole update` itself — which makes it the better way to
+put a build in front of someone who is not developing Hole.
+
+Route 2 has one wart worth knowing before you promise anything: `GreaterThan` compares numeric
+components only, so `2.0.0` is *not* greater than `2.0.0-rc.1`. Someone on `2.0.0-rc.1` is told
+"already up to date" until 2.0.1 ships, and has to install the final 2.0.0 the normal way.
 
 ## Self-update
 

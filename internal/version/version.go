@@ -87,6 +87,13 @@ func resolve(stamped string, info *debug.BuildInfo) build {
 			resolved.modified = setting.Value == "true"
 		}
 	}
+	// Version-control settings are what identify a local build, not the absence of a module
+	// version: since Go 1.24 a build from a *clean* checkout also gets a module version derived
+	// from the repository, and only a dirty tree still falls back to `(devel)`. A module install
+	// builds from the module cache and therefore carries no VCS information at all.
+	if resolved.revision != "" {
+		return resolved
+	}
 	moduleVersion := strings.TrimPrefix(info.Main.Version, "v")
 	if moduleVersion == "" || moduleVersion == "(devel)" {
 		return resolved

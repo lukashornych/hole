@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # Define the Go version and architecture
-GO_VERSION="1.22.5"
+GO_VERSION="1.25.12"
 ARCH="arm64" # Change to arm64 if you are on an ARM-based machine (like Apple Silicon)
 
 # Define userspace paths

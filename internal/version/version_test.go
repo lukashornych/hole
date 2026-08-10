@@ -2,6 +2,7 @@ package version
 
 import (
 	"runtime/debug"
+	"strconv"
 	"testing"
 )
 
@@ -71,9 +72,20 @@ func TestResolveClassifiesEveryBuild(t *testing.T) {
 			wantVersion: DevelopmentVersion,
 		},
 		{
-			name:        "a local build reports (devel) and stays a development build",
+			name:        "a dirty checkout reports (devel) and stays a development build",
 			stamped:     DevelopmentVersion,
-			info:        buildInfo("(devel)"),
+			info:        checkoutBuildInfo("(devel)", true),
+			wantKind:    Development,
+			wantVersion: DevelopmentVersion,
+		},
+		{
+			// Go 1.24 and later derive a module version for a clean checkout too, so a
+			// `make build` binary looks exactly like a `go install` one except for its VCS
+			// settings. Classifying it as a source install would let a working tree run the
+			// version-change migrations.
+			name:        "a clean checkout keeps its VCS identity despite a module version",
+			stamped:     DevelopmentVersion,
+			info:        checkoutBuildInfo("v2.0.0-20260810132358-8014588bf523", false),
 			wantKind:    Development,
 			wantVersion: DevelopmentVersion,
 		},
@@ -224,9 +236,21 @@ func TestGoInstallCommandRewritesTheMajorElement(t *testing.T) {
 	}
 }
 
-// buildInfo is the minimum the resolver reads: the main module version.
+// buildInfo is what a module install records: a version, and no version-control settings.
 func buildInfo(mainVersion string) *debug.BuildInfo {
 	info := &debug.BuildInfo{Path: "github.com/lukashornych/hole/v2/cmd/hole"}
 	info.Main.Version = mainVersion
+	return info
+}
+
+// checkoutBuildInfo is what a build from a working tree records: the same version fields plus the
+// version-control settings that identify it as local.
+func checkoutBuildInfo(mainVersion string, modified bool) *debug.BuildInfo {
+	info := buildInfo(mainVersion)
+	info.Settings = []debug.BuildSetting{
+		{Key: "vcs", Value: "git"},
+		{Key: "vcs.revision", Value: "8014588bf523fbe3afe158ab38f4139721fa7ea7"},
+		{Key: "vcs.modified", Value: strconv.FormatBool(modified)},
+	}
 	return info
 }
