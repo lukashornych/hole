@@ -5,7 +5,7 @@
 
 BINARY  ?= hole
 VERSION ?= development
-LDFLAGS := -s -w -X github.com/lukashornych/hole/internal/version.Version=$(VERSION)
+LDFLAGS := -s -w -X github.com/lukashornych/hole/v2/internal/version.Version=$(VERSION)
 
 .PHONY: all build test itest e2e lint fmt golden clean
 

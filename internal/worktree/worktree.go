@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lukashornych/hole/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/logging"
 )
 
 // LinkMode controls what the derived libraries are mounted as.

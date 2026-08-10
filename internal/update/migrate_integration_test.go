@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lukashornych/hole/internal/engine"
-	"github.com/lukashornych/hole/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/engine"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
 )
 
 func testEngine(t *testing.T) *engine.Engine {

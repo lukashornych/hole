@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/lukashornych/hole/internal/logging"
-	"github.com/lukashornych/hole/internal/version"
+	"github.com/lukashornych/hole/v2/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/version"
 )
 
 // installOneLiner is the fallback when self-update cannot work — a read-only install
@@ -16,8 +16,8 @@ const installOneLiner = "curl -fsSL https://raw.githubusercontent.com/lukashorny
 
 // SelfUpdate replaces the running binary with the newest release.
 func SelfUpdate() error {
-	if version.IsDevelopment() {
-		return fmt.Errorf("cannot update a development build; build from source or install a release with:\n  %s", installOneLiner)
+	if !version.CanSelfUpdate() {
+		return fmt.Errorf("cannot update this build; %s", upgradeHint(version.BuildKind(), version.Version, ""))
 	}
 
 	logging.Info("Checking for updates...")
@@ -89,16 +89,49 @@ func resolveInstallPath(executable string) string {
 
 // CheckForUpdate prints a notice when a newer release exists. It is silent on any failure and
 // gives up after a second — it must never delay a sandbox start.
+//
+// The GitHub release is the single source for every build kind: it is always reachable, and unlike
+// the module proxy it also sees a release that crossed into a new major version.
 func CheckForUpdate() {
-	if version.IsDevelopment() {
+	if !version.CanCompare() {
 		return
 	}
 	release, err := FetchLatest(time.Second)
 	if err != nil {
 		return
 	}
-	if version.GreaterThan(release.Version(), version.Version) {
-		logging.Info("A new version of hole is available: %s (installed: %s). Run 'hole update' to upgrade.",
-			release.Version(), version.Version)
+	latest := release.Version()
+	if !version.GreaterThan(latest, version.Version) {
+		return
 	}
+	if version.CanSelfUpdate() {
+		logging.Info("A new version of hole is available: %s (installed: %s). Run 'hole update' to upgrade.",
+			latest, version.Version)
+		return
+	}
+	logging.Info("A new version of hole is available: %s (installed: %s) — %s",
+		latest, version.Version, upgradeHint(version.BuildKind(), version.Version, latest))
+}
+
+// upgradeHint names the way this particular build is upgraded. Self-update serves release binaries
+// only, so a `go install` build gets the command that actually upgrades it — including the changed
+// module path when the newest release crossed a major version, which `@latest` on the installed
+// path would never reach on its own. An empty latest means the newest release is not known, which
+// is the case when the caller has not asked GitHub.
+func upgradeHint(kind version.Kind, installed, latest string) string {
+	if kind != version.Source {
+		return "build from source or install a release with:\n  " + installOneLiner
+	}
+	major := version.Major(installed)
+	if latest != "" {
+		major = version.Major(latest)
+	}
+	command := version.GoInstallCommand(major)
+	if command == "" {
+		return "upgrade by re-running the go install command you used"
+	}
+	if major > version.Major(installed) {
+		return fmt.Sprintf("that is a new major version, so the module path changes too — upgrade with:\n  %s", command)
+	}
+	return "upgrade with:\n  " + command
 }

@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lukashornych/hole/internal/dindregistry"
-	"github.com/lukashornych/hole/internal/engine"
-	"github.com/lukashornych/hole/internal/hostenv"
-	"github.com/lukashornych/hole/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/dindregistry"
+	"github.com/lukashornych/hole/v2/internal/engine"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/logging"
 )
 
 // UninstallOptions controls what Uninstall removes.

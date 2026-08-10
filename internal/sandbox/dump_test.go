@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lukashornych/hole/internal/hostenv"
-	"github.com/lukashornych/hole/internal/state"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/state"
 )
 
 // TestWriteDumpFileStaysInHoleDir pins finding 4's fix: the network-access dump is written

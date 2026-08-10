@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lukashornych/hole/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
 )
 
 var holeBinary string

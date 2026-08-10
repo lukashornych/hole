@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lukashornych/hole/internal/network"
+	"github.com/lukashornych/hole/v2/internal/network"
 )
 
 func TestBuiltinAgentsAreComplete(t *testing.T) {

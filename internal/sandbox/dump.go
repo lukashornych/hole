@@ -8,11 +8,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lukashornych/hole/internal/engine"
-	"github.com/lukashornych/hole/internal/hostenv"
-	"github.com/lukashornych/hole/internal/logging"
-	"github.com/lukashornych/hole/internal/network"
-	"github.com/lukashornych/hole/internal/state"
+	"github.com/lukashornych/hole/v2/internal/engine"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/network"
+	"github.com/lukashornych/hole/v2/internal/state"
 )
 
 // coreDNSQuery matches the CoreDNS log plugin's query lines, e.g.

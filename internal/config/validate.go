@@ -9,7 +9,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
-	"github.com/lukashornych/hole/assets"
+	"github.com/lukashornych/hole/v2/assets"
 )
 
 // schemaResourceURL is the identifier the compiled schema is registered under. It is also

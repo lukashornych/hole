@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lukashornych/hole/internal/engine"
-	"github.com/lukashornych/hole/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/engine"
+	"github.com/lukashornych/hole/v2/internal/logging"
 )
 
 const (

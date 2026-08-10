@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lukashornych/hole/internal/engine"
+	"github.com/lukashornych/hole/v2/internal/engine"
 )
 
 func testEngine(t *testing.T) *engine.Engine {

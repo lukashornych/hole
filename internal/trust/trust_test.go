@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lukashornych/hole/internal/config"
+	"github.com/lukashornych/hole/v2/internal/config"
 )
 
 // document parses a settings document from JSON, as config.Load would.

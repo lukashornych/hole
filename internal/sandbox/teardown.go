@@ -5,13 +5,13 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/lukashornych/hole/internal/config"
-	"github.com/lukashornych/hole/internal/dindregistry"
-	"github.com/lukashornych/hole/internal/engine"
-	"github.com/lukashornych/hole/internal/hooks"
-	"github.com/lukashornych/hole/internal/hostenv"
-	"github.com/lukashornych/hole/internal/logging"
-	"github.com/lukashornych/hole/internal/state"
+	"github.com/lukashornych/hole/v2/internal/config"
+	"github.com/lukashornych/hole/v2/internal/dindregistry"
+	"github.com/lukashornych/hole/v2/internal/engine"
+	"github.com/lukashornych/hole/v2/internal/hooks"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/state"
 )
 
 // Teardown removes every resource of one instance and deregisters it.

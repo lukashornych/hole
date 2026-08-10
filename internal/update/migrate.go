@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lukashornych/hole/internal/engine"
-	"github.com/lukashornych/hole/internal/hostenv"
-	"github.com/lukashornych/hole/internal/logging"
-	"github.com/lukashornych/hole/internal/version"
+	"github.com/lukashornych/hole/v2/internal/engine"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/version"
 )
 
 // stateFile records what Hole knows about its own installation between runs.
@@ -69,7 +69,7 @@ func SaveState(host hostenv.Host, state State) error {
 // Everything here is best-effort: a leftover from an old version is untidy, not dangerous, and
 // no cleanup failure may stop a sandbox from starting.
 func OnVersionChange(host hostenv.Host, containerEngine *engine.Engine) {
-	if version.IsDevelopment() {
+	if !version.CanMigrate() {
 		return
 	}
 	state := LoadState(host)

@@ -14,7 +14,7 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/lukashornych/hole/assets"
+	"github.com/lukashornych/hole/v2/assets"
 )
 
 // NamePattern is the allowed agent name shape. It excludes `:` because the CLI splits the

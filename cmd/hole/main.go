@@ -4,8 +4,8 @@ package main
 import (
 	"os"
 
-	"github.com/lukashornych/hole/internal/cli"
-	"github.com/lukashornych/hole/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/cli"
+	"github.com/lukashornych/hole/v2/internal/logging"
 )
 
 func main() {

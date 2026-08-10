@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lukashornych/hole/internal/config"
-	"github.com/lukashornych/hole/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/config"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
 )
 
 func script(t *testing.T, dir, name, body string) string {

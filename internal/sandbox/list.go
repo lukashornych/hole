@@ -8,10 +8,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/lukashornych/hole/internal/engine"
-	"github.com/lukashornych/hole/internal/hostenv"
-	"github.com/lukashornych/hole/internal/logging"
-	"github.com/lukashornych/hole/internal/state"
+	"github.com/lukashornych/hole/v2/internal/engine"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/state"
 )
 
 // List prints the running sandboxes.

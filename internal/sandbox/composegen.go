@@ -6,13 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lukashornych/hole/internal/agents"
-	"github.com/lukashornych/hole/internal/compose"
-	"github.com/lukashornych/hole/internal/config"
-	"github.com/lukashornych/hole/internal/hostenv"
-	"github.com/lukashornych/hole/internal/logging"
-	"github.com/lukashornych/hole/internal/network"
-	"github.com/lukashornych/hole/internal/worktree"
+	"github.com/lukashornych/hole/v2/internal/agents"
+	"github.com/lukashornych/hole/v2/internal/compose"
+	"github.com/lukashornych/hole/v2/internal/config"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/network"
+	"github.com/lukashornych/hole/v2/internal/worktree"
 )
 
 // dindImage is the Docker-in-Docker sidecar, pinned by digest: a floating tag would let the

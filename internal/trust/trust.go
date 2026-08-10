@@ -22,8 +22,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/lukashornych/hole/internal/config"
-	"github.com/lukashornych/hole/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/config"
+	"github.com/lukashornych/hole/v2/internal/logging"
 )
 
 // grant is one capability a project settings document asks for.

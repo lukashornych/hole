@@ -3,9 +3,9 @@ package sandbox
 import (
 	"strings"
 
-	"github.com/lukashornych/hole/internal/engine"
-	"github.com/lukashornych/hole/internal/image"
-	"github.com/lukashornych/hole/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/engine"
+	"github.com/lukashornych/hole/v2/internal/image"
+	"github.com/lukashornych/hole/v2/internal/logging"
 )
 
 // collectImages bounds each agent image repository to the one tag in use.

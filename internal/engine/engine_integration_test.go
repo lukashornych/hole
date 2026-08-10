@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lukashornych/hole/internal/network"
+	"github.com/lukashornych/hole/v2/internal/network"
 )
 
 const testLabelValue = "hole-engine-integration"

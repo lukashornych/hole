@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lukashornych/hole/internal/config"
-	"github.com/lukashornych/hole/internal/hostenv"
-	"github.com/lukashornych/hole/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/config"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/logging"
 )
 
 // Script is a hook script resolved to an existing file on the host.

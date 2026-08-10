@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lukashornych/hole/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/logging"
 )
 
 // Labels Hole puts on every resource it creates. They are the ground truth for garbage

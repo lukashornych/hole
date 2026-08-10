@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lukashornych/hole/internal/config"
-	"github.com/lukashornych/hole/internal/engine"
-	"github.com/lukashornych/hole/internal/hostenv"
-	"github.com/lukashornych/hole/internal/logging"
-	"github.com/lukashornych/hole/internal/sandbox"
-	"github.com/lukashornych/hole/internal/update"
-	"github.com/lukashornych/hole/internal/version"
+	"github.com/lukashornych/hole/v2/internal/config"
+	"github.com/lukashornych/hole/v2/internal/engine"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/logging"
+	"github.com/lukashornych/hole/v2/internal/sandbox"
+	"github.com/lukashornych/hole/v2/internal/update"
+	"github.com/lukashornych/hole/v2/internal/version"
 )
 
 // runLogRetention is how long per-run debug logs are kept; cleanup rides sandbox startup.
@@ -164,7 +164,7 @@ func Run(args []string) int {
 		fmt.Print(helpText)
 		return 0
 	case "version":
-		fmt.Printf("hole %s\n", version.Version)
+		fmt.Printf("hole %s\n", version.Display())
 		update.CheckForUpdate()
 		return 0
 	case "update":

@@ -22,8 +22,8 @@ from 1.x, [MIGRATION.md](../../MIGRATION.md).
    image identity and scope, compose generation
 5. [Guidelines](guidelines.md) — toolchain, Go conventions, non-negotiable rules, git workflow
 6. [Recipes](recipes.md) — add an agent or a setting, debug a sandbox, pre-PR checklist
-7. [Build & release](build-and-release.md) — versioning, GoReleaser, installation, self-update,
-   uninstall, manual platform checklist
+7. [Build & release](build-and-release.md) — versioning, GoReleaser, installation (`install.sh` and
+   `go install`), build identity, self-update, uninstall, manual platform checklist
 
 ## Repository layout
 

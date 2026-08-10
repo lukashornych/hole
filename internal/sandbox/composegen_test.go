@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lukashornych/hole/internal/agents"
-	"github.com/lukashornych/hole/internal/config"
-	"github.com/lukashornych/hole/internal/dindregistry"
-	"github.com/lukashornych/hole/internal/hostenv"
-	"github.com/lukashornych/hole/internal/network"
+	"github.com/lukashornych/hole/v2/internal/agents"
+	"github.com/lukashornych/hole/v2/internal/config"
+	"github.com/lukashornych/hole/v2/internal/dindregistry"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/network"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite golden compose files")

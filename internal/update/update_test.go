@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lukashornych/hole/internal/hostenv"
-	"github.com/lukashornych/hole/internal/version"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/version"
 )
 
 func TestBinaryAssetNameMatchesThePlatform(t *testing.T) {
@@ -159,7 +159,7 @@ func TestReplaceBinaryIsAtomicAndKeepsMode(t *testing.T) {
 }
 
 func TestSelfUpdateRefusesOnADevelopmentBuild(t *testing.T) {
-	if !version.IsDevelopment() {
+	if version.BuildKind() != version.Development {
 		t.Skip("test binary was built with a stamped version")
 	}
 	err := SelfUpdate()
@@ -169,6 +169,50 @@ func TestSelfUpdateRefusesOnADevelopmentBuild(t *testing.T) {
 	// The message has to point somewhere useful rather than just failing.
 	if !strings.Contains(err.Error(), "install.sh") {
 		t.Errorf("error should suggest the installer: %v", err)
+	}
+}
+
+func TestUpgradeHintMatchesTheBuildKind(t *testing.T) {
+	tests := []struct {
+		name      string
+		kind      version.Kind
+		installed string
+		latest    string
+		want      string
+	}{
+		{
+			name:      "a development build is pointed at the installer",
+			kind:      version.Development,
+			installed: version.DevelopmentVersion,
+			want:      "build from source or install a release with:\n  " + installOneLiner,
+		},
+		{
+			// The command itself comes from the path recorded in the binary — which is the test
+			// binary here, so the expectation is built the same way; internal/version covers the
+			// path rewriting itself.
+			name:      "a go install build is told to re-run go install",
+			kind:      version.Source,
+			installed: "2.0.0",
+			latest:    "2.1.0",
+			want:      "upgrade with:\n  " + version.GoInstallCommand(2),
+		},
+		{
+			// `@latest` on the installed path stops at the major boundary, so the hint has to
+			// name the path that does not.
+			name:      "a new major tells the go install user the path moves",
+			kind:      version.Source,
+			installed: "2.1.4",
+			latest:    "3.0.0",
+			want:      "that is a new major version, so the module path changes too — upgrade with:\n  " + version.GoInstallCommand(3),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := upgradeHint(test.kind, test.installed, test.latest)
+			if got != test.want {
+				t.Errorf("upgradeHint = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

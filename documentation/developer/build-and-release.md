@@ -7,9 +7,11 @@ make build                  # ./hole, static, version "development"
 VERSION=2.0.0 make build    # stamped, as a release build is
 ```
 
-The version is injected with `-ldflags -X github.com/lukashornych/hole/internal/version.Version`.
-An unstamped build reports `development`, skips update checks and refuses to self-update — so a
-checkout can never accidentally overwrite itself with a release.
+The version is injected with `-ldflags -X github.com/lukashornych/hole/v2/internal/version.Version`.
+A checkout build carries no version at all — it reports `development (<sha>, dirty)`, skips update
+checks, runs no migrations and refuses to self-update, so it can never overwrite itself with a
+release. A `go install` build is unstamped too but does have an identity; see
+[build identity](#build-identity).
 
 ## Pinned third-party artifacts
 
@@ -59,7 +61,9 @@ Consequences worth knowing before a bump:
 - A new registry pin does **not** reach an existing mirror: `dindregistry.Ensure` restarts a
   stopped `hole-registry` rather than recreating it, to keep its cache volume. Remove the
   container to pick it up — `hole destroy` with no path (a full destroy takes the mirror too), or
-  `docker rm -f hole-registry`.
+  `docker rm -f hole-registry`. `Ensure` does remove a mirror that fails its readiness probe, but
+  that is a crash-recovery path, not a way to pick up a pin: a mirror that starts fine keeps
+  running whatever digest created it.
 
 ## Release pipeline
 
@@ -112,6 +116,95 @@ into `~/.local/bin/hole` in a single `mv`. An unverified binary is never written
 check is what makes downloading an executable over the network defensible.
 
 It also removes `~/.local/share/hole/` if a 1.x tarball install is still there.
+
+### `go install`
+
+`CGO_ENABLED=0 go install github.com/lukashornych/hole/v2/cmd/hole@latest` is the source alternative
+to the installer, and works because the module has no non-Go build step: every runtime file is
+`go:embed`-ed and the two dependencies are pure Go. `go.mod` declares `go 1.25`, which an older
+toolchain satisfies by downloading `go1.25.x` on the spot unless `GOTOOLCHAIN=local` forbids it.
+
+The `CGO_ENABLED=0` is not decoration. `make build` and GoReleaser both set it; `go install` instead
+inherits the environment, and on a machine with a C toolchain the default `CGO_ENABLED=1` gives
+`net` its cgo resolver — the resulting binary links against the system libc (`ldd` shows
+`libc.so.6`) and stops being the portable static binary every release ships.
+
+What it forfeits is the version stamp — but not its identity. See
+[build identity](#build-identity) for what such a build may and may not do.
+
+`go install` does accept `-ldflags` alongside a `pkg@version` query, so the stamp can be passed by
+hand — and there is no reason to: it turns the build into a `Release` as far as Hole is concerned,
+which means `hole update` will replace it in `GOBIN` with a downloaded release binary
+(`resolveInstallPath` only resolves symlinks, it does not redirect to `~/.local/bin`). Leave it
+unstamped and the identity is derived correctly on its own.
+
+### Why the module path carries `/v2`
+
+`go.mod` declares `module github.com/lukashornych/hole/v2`, and every internal import plus both
+ldflags paths carry the suffix. Nothing imports Hole as a library, so the suffix exists for exactly
+one reason: Go refuses to resolve a `v2.x` tag for a module path without it, and `+incompatible` is
+unavailable because a `go.mod` exists. Without the suffix `@latest` resolves the newest `v1` tag —
+the 1.x bash tree, which has no `cmd/hole` — and `@v2.0.0` is rejected outright, leaving branch and
+commit queries as the only installable ones. The suffix stays for the whole 2.x line; a 3.0 would
+have to move it to `/v3`.
+
+Two consequences to keep in mind: `install.sh` and `hole update` are unaffected, because they
+resolve GitHub *release assets* rather than module versions — and the version passed to `-ldflags`
+must keep going into `…/v2/internal/version.Version`, or the stamp silently lands nowhere and every
+release build reports `development`.
+
+Nothing extra has to be published for a module version to exist: the proxy reads the repository's
+**git tags**, and the release workflow already writes the form Go requires — `codacy/git-version`
+runs with `prefix: 'v'`, so the tag is `v2.1.4`, at the repository root, on a commit whose `go.mod`
+declares the `/v2` path. The GitHub release, its notes and its binaries are irrelevant to
+`go install`; the tag alone is the module version, and `{{ .Version }}` in `.goreleaser.yaml` is the
+same number without the `v`, which is what `Release.Version()` compares against.
+
+Consequences of that coupling, both of them one-way:
+
+- **A released tag must never move.** The proxy and `sum.golang.org` cache a version on first fetch
+  and keep serving it even if the tag is deleted or repointed, so a moved tag means two different
+  binaries under one version number. Withdraw a bad release by tagging a new patch and adding a
+  `retract` directive in `go.mod`, not by re-tagging.
+- **A tag whose major does not match the path is invisible**, so the day a `v3.0.0` is cut, `go.mod`
+  and every import have to move to `/v3` in the same commit the tag points at — otherwise
+  `@latest` silently keeps serving the newest 2.x.
+
+## Build identity
+
+`internal/version` classifies the running binary into one of three kinds, because "stamped or not"
+cannot answer the three questions Hole asks of its own version. A stamp wins outright; without one,
+the module version `runtime/debug` reports decides between the other two — `go install` records the
+resolved tag or pseudo-version, a checkout records `(devel)`.
+
+| | `Release` (`-ldflags`) | `Source` (`go install`) | `Development` (`make build`) |
+|---|---|---|---|
+| `hole version` | `2.1.4` | `2.1.4 (go install)` | `development (bc2a181, dirty)` |
+| `CheckForUpdate` | yes, offers `hole update` | yes, offers the `go install` command | no |
+| `SelfUpdate` | yes | refuses, naming the `go install` command | refuses, naming the installer |
+| `OnVersionChange` | yes | **yes** | no |
+
+Why each answer is what it is:
+
+- **Self-update is release-only.** Replacing a binary the user built from source with a downloaded
+  one changes its provenance behind their back, inside a directory the Go toolchain owns. The hint
+  they get instead is derived from the package path recorded in the binary, so it cannot drift from
+  the module path — and when the newest release crossed a major version it names the `/vN` path,
+  which `@latest` on the installed path would never reach.
+- **Migrations are not release-only.** Someone arriving from 1.x via `go install` needs the same
+  one-time cleanup as everyone else; gating it on the stamp meant they silently kept every 1.x
+  image, volume and network. A checkout still skips it, because iterating on the code must not sweep
+  Docker resources or rewrite `state.json`.
+- **A pseudo-version is an identity but not a number.** `@main` and `@<sha>` installs resolve to
+  `0.0.0-<ts>-<sha>`, which cannot be compared against a release, so `CanCompare` excludes them from
+  the update notice while `CanMigrate` still lets them migrate.
+- **The comparison tolerates a `v`.** `GreaterThan` strips a leading `v` and any pre-release suffix;
+  without that, `2.0.0` compared as *newer* than the `v2.0.0` a tagged `go install` reports, and
+  every run would announce an update to the version already installed. That case is a regression
+  test.
+
+`state.json` needs no special handling: a tagged source install records the same `2.1.4` a release
+would, and it has already run the cleanup, so a later release install correctly skips it.
 
 ## Self-update
 

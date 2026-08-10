@@ -1,4 +1,4 @@
-module github.com/lukashornych/hole
+module github.com/lukashornych/hole/v2
 
 go 1.25
 

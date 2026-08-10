@@ -127,6 +127,40 @@ everything else it needs.
 
 Supported platforms: Linux (amd64/arm64, including WSL) and macOS (Intel/Apple Silicon).
 
+### Install with `go install`
+
+With a Go 1.25+ toolchain you can build Hole from source instead of downloading a release:
+
+```sh
+CGO_ENABLED=0 go install github.com/lukashornych/hole/v2/cmd/hole@latest
+```
+
+The binary lands in `$(go env GOBIN)`, or `$(go env GOPATH)/bin` (usually `~/go/bin`) when `GOBIN`
+is unset — make sure that directory is on your `PATH`, and note it is *not* where the installer
+puts Hole, so having both means two `hole` binaries and `PATH` order decides which one runs.
+No other tooling is needed — every runtime asset is embedded in the binary. `CGO_ENABLED=0` is what
+keeps it static like the released binary; without it, a machine with a C toolchain links it against
+the system libc.
+
+Pin an exact release with its tag (`@v2.0.0`) or an arbitrary state with a commit SHA. The `/v2` in
+the path is the module's major version, not a typo — Go requires it for a 2.x module, and it stays
+there unchanged for every 2.x release, so `@latest` gives you the newest 2.x (a future 3.0 would
+live at `/v3` and `@latest` here would never cross to it).
+
+Such a build knows which version it is — `hole version` prints e.g. `2.0.0 (go install)` — and
+behaves like a release install in every respect but one: **`hole update` refuses**, because replacing
+a binary you built from source with a downloaded one is not its job. It still tells you when a newer
+release exists, with the command that upgrades you:
+
+```
+A new version of hole is available: 2.1.0 (installed: 2.0.0) — upgrade with:
+  go install github.com/lukashornych/hole/v2/cmd/hole@latest
+```
+
+An install pinned to a commit (`@<sha>`) has no comparable version number, so it gets no such notice.
+`hole uninstall` works either way — it removes whichever binary is running, wherever `go install` put
+it.
+
 ### Supported Docker runtimes
 
 Hole works with Docker Desktop, OrbStack, Colima, Rancher Desktop and rootless Podman. Set
@@ -388,7 +422,13 @@ Hide files and directories from the agent:
 }
 ```
 
-Files are replaced with `/dev/null` and directories with an empty directory, so the agent sees nothing. Patterns support `*`, `?`, `[...]` and `**` (recursive). A pattern matching nothing is a warning, not an error. Exclusions are mirrored onto the Docker-in-Docker sidecar, so a container started inside the sandbox cannot bind-mount its way to them either.
+Files are replaced with `/dev/null` and directories with an empty directory, so the agent sees nothing. Patterns support `*`, `?`, `[...]` and `**` (recursive). Exclusions are mirrored onto the Docker-in-Docker sidecar, so a container started inside the sandbox cannot bind-mount its way to them either.
+
+Three things to know about how patterns are matched:
+
+- **A pattern matching nothing is a warning, not an error.** That is deliberate: exclusions are meant to be written once in your global settings for files only *some* projects have (`.env`, `**/*.pem`), and erroring would make one shared default refuse to start every project without them. The cost is on you — a typo hides nothing and only warns, so check the warnings when a project holds something that matters.
+- **Patterns do not follow symlinked directories**, matching bash `globstar`: if `secrets` is a symlink, `secrets/**` matches nothing. Name the link itself (`"secrets"`) and the whole directory is hidden.
+- **`files.exclude` does not reach into `files.include` or library mounts.** Patterns apply to the project directory, and separately to each library's own mount (via that library's `.hole/settings.json`). An included path like `~/.claude` is mounted whole or not at all — there is no way to hide part of it.
 
 ### File inclusions
 
@@ -482,7 +522,9 @@ Every **enabled** agent's own domains are always allowed, so the agent CLI works
 
 Use `-n` to discover what a project needs: it writes every domain the sandbox resolved or was refused to `~/.hole/logs/{project}/network-access-{agent}-{id}.log`.
 
-Known limitation: once an allowed name resolves to an address, that address stays reachable for the sandbox's lifetime, so an agent could in principle reach a *different* site sharing that address (common with CDNs). Direct-IP attempts blocked by the firewall do not appear in the `-n` dump, because they never produce a DNS query.
+Known limitation: once an allowed name resolves to an address, that address stays reachable for the sandbox's lifetime, so an agent could in principle reach a *different* site sharing that address (common with CDNs).
+
+The `-n` dump is a record of what the gateway's resolver was asked, not of every egress attempt. Two things are missing from it: direct-IP attempts blocked by the firewall, because they never produce a DNS query, and names resolved through the container's own fallback resolver — Docker's embedded `127.0.0.11`, which answers container names on the sandbox network without consulting the gateway. Neither is a way out of the sandbox (the firewall still decides what is reachable); they are gaps in the log, so treat the dump as "what the project asked to resolve", not as an audit trail.
 
 ### Host gateway domains
 
@@ -579,7 +621,7 @@ A `docker:dind-rootless` sidecar starts on the internal sandbox network; the age
   { "container": { "docker": true }, "network": { "allow": ["docker.io"] } }
   ```
   Unrestricted mode (`-u`) already allows every host, so it needs no entry.
-- **Image cache**: with Hub allowed, Hole attaches a long-lived pull-through cache (`hole-registry`) to the sandbox so repeated pulls do not re-download. It caches **Docker Hub only**. Since the cache is the only Hub path `"docker.io"` opens, a cache that fails to start means no Hub pulls. To also allow direct pulls through the gateway, allow the endpoints themselves — `["*.docker.io", "*.cloudflare.docker.com"]` covers the registry, auth and the CDN blobs redirect to; if a pull is still denied, run with `-n` and the dump names the host to add.
+- **Image cache**: with Hub allowed, Hole attaches a long-lived pull-through cache (`hole-registry`) to the sandbox so repeated pulls do not re-download. It caches **Docker Hub only**. Since the cache is the only Hub path `"docker.io"` opens, a cache that fails to start means no Hub pulls. Hole waits for it to actually come up before the daemon is pointed at it: a cache that exits during startup (its upstream unreachable, most often) is reported with the reason and removed instead of left restarting in the background, and the sandbox starts without one. To also allow direct pulls through the gateway, allow the endpoints themselves — `["*.docker.io", "*.cloudflare.docker.com"]` covers the registry, auth and the CDN blobs redirect to; if a pull is still denied, run with `-n` and the dump names the host to add.
 - **Non-Hub registries**: not cached, and governed exactly like any other host — allow their domains, e.g. `"network": { "allow": ["ghcr.io", "*.githubusercontent.com"] }`.
 - **Trust**: a *project's* settings file asking for `container.docker` needs your confirmation, since it adds a privileged container — see [project trust](#project-trust). `--with-docker` and your global settings are your own choice and never prompt.
 - **Security**: the daemon runs **rootless** — as an unprivileged user in a user namespace — so a container the agent starts through it, even a `--privileged` one, cannot read the host's disks or files. It has no internet route of its own either; its traffic is filtered by the same gateway. The sidecar *container* is still privileged, because Docker-in-Docker requires it, so this is defense-in-depth rather than a hard boundary: a kernel or container-runtime escape from inside the sidecar could still reach the host. Keep your host's kernel and container runtime patched, and treat "the agent can run Docker" as a larger surface than the rest of the sandbox. If you do not need a real daemon, prefer leaving DinD off.

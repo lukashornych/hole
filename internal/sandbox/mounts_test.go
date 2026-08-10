@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/lukashornych/hole/internal/config"
-	"github.com/lukashornych/hole/internal/hostenv"
-	"github.com/lukashornych/hole/internal/worktree"
+	"github.com/lukashornych/hole/v2/internal/config"
+	"github.com/lukashornych/hole/v2/internal/hostenv"
+	"github.com/lukashornych/hole/v2/internal/worktree"
 )
 
 func TestParseLibraryFlag(t *testing.T) {

@@ -2,7 +2,10 @@
 
 ## Toolchain
 
-Go 1.25+, module `github.com/lukashornych/hole`, `CGO_ENABLED=0`. Two libraries, each replacing an
+Go 1.25+, module `github.com/lukashornych/hole/v2` (the suffix is required for a 2.x module and is
+what makes `go install` work — see
+[build & release](build-and-release.md#why-the-module-path-carries-v2)), `CGO_ENABLED=0`. Two
+libraries, each replacing an
 external tool the bash implementation needed:
 
 - `gopkg.in/yaml.v3` — compose file generation
