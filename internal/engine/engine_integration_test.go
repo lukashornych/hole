@@ -201,6 +201,42 @@ func TestVolumeLifecycle(t *testing.T) {
 	}
 }
 
+func TestImageTagLifecycle(t *testing.T) {
+	engine := testEngine(t)
+	source := "hole-sandbox/" + testLabelValue + "-source:tagtest"
+	target := "hole-sandbox/" + testLabelValue + "-target:tagtest"
+
+	if err := engine.RunQuiet("pull", "alpine:3.19"); err != nil {
+		t.Skipf("could not pull the stand-in image: %v", err)
+	}
+	if err := engine.ImageTag("alpine:3.19", source); err != nil {
+		t.Fatalf("ImageTag: %v", err)
+	}
+	t.Cleanup(func() { _ = engine.ImageRemove(source); _ = engine.ImageRemove(target) })
+
+	if err := engine.ImageTag(source, target); err != nil {
+		t.Fatalf("ImageTag onto an existing reference: %v", err)
+	}
+	if !engine.ImageExists(target) {
+		t.Fatal("tagged reference is not visible")
+	}
+	if refs := engine.ImagesByReference("hole-sandbox/" + testLabelValue + "-*:tagtest"); len(refs) != 2 {
+		t.Errorf("ImagesByReference found %v, want both tags", refs)
+	}
+
+	// Removing one of two references untags rather than deletes, which is what lets the image
+	// GC run unchanged over adopted images.
+	if err := engine.ImageRemove(source); err != nil {
+		t.Fatalf("ImageRemove: %v", err)
+	}
+	if engine.ImageExists(source) {
+		t.Error("source reference still exists after removal")
+	}
+	if !engine.ImageExists(target) {
+		t.Error("removing one tag took the image away from the other")
+	}
+}
+
 func TestNetworkRemoveFailsWhileContainerAttached(t *testing.T) {
 	engine := testEngine(t)
 	name := testLabelValue + "-attached"

@@ -337,6 +337,12 @@ func Start(opts Options) (exitCode int, err error) {
 		}
 	}
 
+	// Before compose looks: a sibling workspace of the same project holds a bit-identical image
+	// under its own path-keyed repository, and re-tagging it here turns the build into a no-op.
+	if !opts.Rebuild {
+		adoptExistingImage(containerEngine, imageIdentity)
+	}
+
 	logging.Info("Starting %s agent...", opts.Agent)
 	logging.Line()
 	if err := containerEngine.ComposeUp(instanceName, composeFile, runTmpDir, opts.Rebuild, "agent"); err != nil {

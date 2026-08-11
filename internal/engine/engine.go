@@ -301,6 +301,11 @@ func (e *Engine) ImageRemove(reference string) error {
 	return e.RunQuiet("rmi", reference)
 }
 
+// ImageTag points a second reference at an existing image.
+func (e *Engine) ImageTag(source, target string) error {
+	return e.RunQuiet("tag", source, target)
+}
+
 // ImagesByReference lists image references matching a reference filter.
 func (e *Engine) ImagesByReference(reference string) []string {
 	raw, err := e.output("images", "--filter", "reference="+reference, "--format", "{{.Repository}}:{{.Tag}}")

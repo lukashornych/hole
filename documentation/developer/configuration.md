@@ -378,10 +378,30 @@ Normalization **reuses the code paths the build uses** (the enabled-agents resol
 dependency list, the shared path pipeline for scripts). Otherwise the scope decision and the actual
 build context could diverge.
 
+**Adoption.** The repository name is keyed by path (`sanitize(basename)-sha1(absPath)[:8]`) and
+carries no content information, so sibling checkouts of one project land in different repositories
+even when their images would be bit-identical. Before starting the agent service, `adoptExistingImage`
+(`internal/sandbox/imageadopt.go`) looks for any `hole-sandbox/agent-*` image already carrying the
+target tag and re-tags it into this project's repository; compose then finds the image present and
+skips the build. The tag hashes the *closed* set of build inputs — every build argument and every
+piece of build context maps onto a manifest field — so a shared tag is a sufficient proof that two
+images were produced from identical inputs on the same host identity. The candidate glob deliberately
+includes `agent-global`, in both directions: the two repositories can only share a tag when their
+canonical configurations are genuinely identical. Adoption is skipped under `-r` and is entirely
+best-effort — any failure just leaves compose to build as before. The generated compose file does
+not change; only whether the image is already there when compose looks.
+
+The one input the tag does not capture is upstream drift, since `CACHEBUST` is excluded, so an
+adopted image may hold older apt/npm versions than a fresh build. That is not a new staleness class:
+the same tag in the *same* repository is already reused across days. `-r` remains the escape hatch.
+
 **Image GC** runs after the agent service is up — never before, or a failed build could have
 destroyed the last working image. It removes the other tags of the chosen repository, drops the
 project's own repository entirely when the shared image was chosen, and prunes dangling images
 restricted to Hole's `com.hole.image` label so a user's unrelated leftovers are never touched.
+Adoption needs no change here: removal goes through `rmi <repository>:<tag>`, which *untags* while
+another reference remains, so one project superseding its tag leaves an adopted image alive for the
+others, and the image only disappears once all of them have.
 
 ## Compose generation
 

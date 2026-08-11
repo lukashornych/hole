@@ -100,7 +100,10 @@ Services:
    instance is always recognisable by its network.
 8. Materialize the build contexts and gateway configuration; generate one compose file.
 9. `compose up -d` per service: gateway → docker (if enabled) → agent. Health gating comes from
-   compose `depends_on: condition: service_healthy`.
+   compose `depends_on: condition: service_healthy`. Just before the agent service — and only
+   without `-r` — an existing `hole-sandbox/agent-*` image carrying the target tag is re-tagged into
+   this project's repository, so a sibling checkout adopts a bit-identical image instead of
+   rebuilding it ([configuration](configuration.md#image-identity-and-scope)).
 10. `docker attach` the agent container. Raw mode, terminal resize and Ctrl-C proxying stay the
     runtime CLI's problem, which is the main reason Hole shells out rather than using the Engine
     API.
