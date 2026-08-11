@@ -122,6 +122,9 @@ curl -fsSL https://raw.githubusercontent.com/lukashornych/hole/main/install.sh |
 The installer detects your OS and architecture, downloads the release binary, verifies its
 checksum, and installs it to `~/.local/bin/hole`. Make sure that directory is on your `PATH`.
 
+Upgrading from 1.x is not just this command: exit your running sandboxes and uninstall 1.x first —
+see [upgrading](MIGRATION.md#upgrading).
+
 Requirements: **docker or podman with the compose plugin**. That is all — Hole embeds
 everything else it needs.
 
