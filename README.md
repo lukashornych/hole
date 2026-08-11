@@ -545,6 +545,8 @@ Each name resolves to the Docker host gateway. **The port list is required**: th
 
 For the same reason, the ports are unioned across *all* entries: with the example above the sandbox can reach the host gateway IP on 5432, 8080 and 8443, directly and without DNS. The names choose what resolves, not what the firewall permits. Don't use `localhost` or `127.0.0.1` — inside the container those are the container itself.
 
+**Subdomains work the opposite way from `network.allow` above.** There is no `*.` syntax here — `"*.mydb.local:5432"` is rejected — but each entry claims the whole name *and everything under it*: with `"mydb.local:5432"` the names `db.mydb.local` and `a.b.mydb.local` resolve to the host gateway too. That is not extra reach (the firewall matches the address and the port union regardless of name), but it does mean **an entry whose name overlaps a real domain hijacks that entire domain for the sandbox**. `"example.com:8080"` makes `api.example.com` resolve to your host gateway even when `api.example.com` is in `network.allow`, so the real site becomes unreachable from the sandbox. Use names you control, ideally under a suffix that cannot resolve publicly (`.local`, `.internal`, `.test`).
+
 ### Subnet pool
 
 Each sandbox takes two `/24` networks from Hole's own pool. Change it if the default collides with your VPN or LAN:

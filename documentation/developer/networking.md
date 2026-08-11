@@ -38,7 +38,7 @@ runs in: resolver and firewall must share a namespace.
 
 ```
 <host>[:<port>[,<port>...]]                  network.allow, agent allow.txt
-<domain>:<port>[,<port>...]                  network.hostGatewayDomains (ports mandatory)
+<domain>:<port>[,<port>...]                  network.hostGatewayDomains (ports mandatory, zone-wide)
 
 host  := exact domain     example.com
        | wildcard domain  *.example.com      (subdomains only, not the apex)
@@ -62,8 +62,28 @@ one flat union of all configured ports is emitted (`Generate`, `gateway.go`). Th
 the host gateway IP on that union directly, without DNS — the names choose what resolves, not what
 the firewall permits. Requiring ports is what bounds the union; a port-less entry used to emit a
 bare `ip daddr {HOST_GATEWAY_IP} accept`, i.e. every service on the developer's machine. Per-name
-enforcement would need a DNAT address per entry, which was considered and rejected
-([analysis](../analysis/host-gateway-mandatory-ports-plan.md)).
+enforcement would need a DNAT address per entry, which was considered and rejected (see #34).
+
+`hostGatewayDomains` matching is **zone-wide, and inverted relative to `network.allow`**: the entry
+grammar rejects `*.` (`domainPattern` has no `*`), yet every name *under* the entry resolves to the
+host gateway anyway. Two CoreDNS behaviors compose into that:
+
+- each entry renders a **server block** (`mydb.local:53 { … }`), and CoreDNS routes a query to the
+  block with the longest matching zone suffix — so `db.mydb.local` is handled there, never reaching
+  the `view allowed` block or the catch-all NXDOMAIN;
+- inside the block the `template` plugin is given no `match`, and its default is `.*` ("specifying
+  no regex matches everything"), so every qname in the zone is answered with `{{ .Name }} 60 IN A
+  {HOST_GATEWAY_IP}`.
+
+`BuildPolicy` never copies these names into `Exact`/`Wildcards`, so the zone block is the only
+reason they resolve at all, and they emit no `nftset` lines — the firewall side is name-blind, so a
+resolving subdomain reaches nothing the port union did not already open.
+
+What it does change is **shadowing**: an entry naming a real domain captures that whole zone, so
+`example.com:8080` makes `api.example.com` answer with the host gateway address even when
+`api.example.com` is in `network.allow` — the specific zone block wins over `.`. Documented in the
+README as "use names you control"; enforcing it (rejecting publicly resolvable suffixes) would need
+a PSL copy in the binary and is not attempted.
 
 A malformed entry is fatal. A wrong allow list makes the sandbox unsafe or broken, which is not a
 skippable warning.

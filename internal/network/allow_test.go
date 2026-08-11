@@ -129,7 +129,12 @@ func TestParseHostGatewayDomain(t *testing.T) {
 		t.Errorf("ports = %v, want [5432 8080]", withPorts.Ports)
 	}
 
-	for _, raw := range []string{"my db", "", "-bad.local", "mydb.local", "mydb.local:", "mydb.local:0", "mydb.local:https"} {
+	// `*.mydb.local` is rejected even though the rendered zone block is zone-wide anyway: a
+	// wildcard users can spell would promise per-name scoping the Corefile does not have.
+	for _, raw := range []string{
+		"my db", "", "-bad.local", "mydb.local", "mydb.local:", "mydb.local:0", "mydb.local:https",
+		"*.mydb.local:5432",
+	} {
 		if _, err := ParseHostGatewayDomain(raw); err == nil {
 			t.Errorf("invalid host gateway domain %q accepted", raw)
 		}
