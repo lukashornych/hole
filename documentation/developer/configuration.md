@@ -252,6 +252,18 @@ containing glob characters always failed the file-exists check and was warned ab
 `cleanupHost` runs from the settings snapshot in the state file, because the watchdog cannot
 re-read files that may have changed — and it runs without a TTY.
 
+`hookEnvironment` is shared by `setupHost` and `cleanupHost`; `cleanupHookEnvironment` wraps it
+with the teardown-only `HOLE_IS_LAST_INSTANCE`, so the variable cannot leak into startup, where
+nothing has exited and the answer would always be `false`.
+
+`isLastInstance` answers it from the registry, reusing `runningInstances` — the same
+`Abandoned` predicate as `hole list` and GC, not a PID check. Two details it has to get right:
+the exiting instance is still registered while its hooks run (deregistering is teardown's last
+act, `teardown.go`), so it is excluded **by name**; and abandoned instances are ignored, since
+counting one would pin a user's shared infrastructure until the next manual cleanup. A failed
+registry read reports `false` — withholding the signal delays a cleanup, whereas a wrong `true`
+tears down infrastructure that live sandboxes are still using.
+
 ### Docker-in-Docker
 
 A `docker:dind-rootless` sidecar — referenced by digest, not by tag, so the daemon inside every

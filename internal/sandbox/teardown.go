@@ -3,6 +3,7 @@ package sandbox
 import (
 	"encoding/json"
 	"os"
+	"strconv"
 	"syscall"
 
 	"github.com/lukashornych/hole/v2/internal/config"
@@ -72,7 +73,7 @@ func Teardown(containerEngine *engine.Engine, host hostenv.Host, store *state.St
 		}
 	}
 
-	runCleanupHostHooks(host, instance)
+	runCleanupHostHooks(host, store, instance)
 
 	if instance.RunTmpDir != "" {
 		if err := os.RemoveAll(instance.RunTmpDir); err != nil {
@@ -137,7 +138,7 @@ func withoutRegistryMirror(containers []string) []string {
 // project directory may be gone.
 //
 // In the watchdog path these scripts run without a TTY; output goes to the run log.
-func runCleanupHostHooks(host hostenv.Host, instance *state.Instance) {
+func runCleanupHostHooks(host hostenv.Host, store *state.Store, instance *state.Instance) {
 	if len(instance.Settings) == 0 {
 		return
 	}
@@ -154,7 +155,7 @@ func runCleanupHostHooks(host hostenv.Host, instance *state.Instance) {
 		return
 	}
 	scripts := hooks.Resolve(settings.Hooks.CleanupHost, host, instance.ProjectPath, "cleanupHost")
-	hooks.RunCleanupHost(scripts, hookEnvironment(host, instance))
+	hooks.RunCleanupHost(scripts, cleanupHookEnvironment(host, store, instance))
 }
 
 // verifyRemoved is the final check: anything still matching this instance is reported with
@@ -224,4 +225,43 @@ func hookEnvironment(host hostenv.Host, instance *state.Instance) []string {
 		env = append(env, "HOLE_SANDBOX_NETWORK="+instance.Networks[0])
 	}
 	return env
+}
+
+// cleanupHookEnvironment adds the teardown-only variables to the shared hook environment.
+//
+// HOLE_IS_LAST_INSTANCE belongs here rather than in hookEnvironment because setupHost shares
+// that base: nothing has exited when startup runs, so the question has no answer there and a
+// variable that is always "false" would invite hooks to act on it.
+func cleanupHookEnvironment(host hostenv.Host, store *state.Store, instance *state.Instance) []string {
+	return append(hookEnvironment(host, instance),
+		"HOLE_IS_LAST_INSTANCE="+strconv.FormatBool(isLastInstance(store, instance)))
+}
+
+// isLastInstance reports whether the sandbox being torn down is the only one left, so a
+// cleanupHost hook can release host-side infrastructure shared by all sandboxes.
+//
+// The instance is still registered while its hooks run — deregistering is teardown's last act,
+// after everything it will ever log — so it is excluded by name rather than by absence.
+// Abandoned instances do not count: their resources are already GC's to reclaim, and letting one
+// veto the answer would keep shared infrastructure alive until the next manual cleanup.
+//
+// Two sandboxes exiting at the same time each still see the other as live, so neither is told it
+// is last. That is the safe direction to fail in — the shared resource stays up and the next
+// solitary exit releases it — and ordering them would need coordination teardown deliberately
+// does not have.
+func isLastInstance(store *state.Store, instance *state.Instance) bool {
+	instances, err := store.List()
+	if err != nil {
+		// Guessing "last" here would hand a hook the go-ahead to tear down infrastructure other
+		// running sandboxes depend on. Withholding it only delays a cleanup.
+		logging.Warn("could not read the instance registry, reporting %s as not the last sandbox: %v",
+			instance.InstanceName, err)
+		return false
+	}
+	for _, other := range runningInstances(store, instances) {
+		if other.InstanceName != instance.InstanceName {
+			return false
+		}
+	}
+	return true
 }

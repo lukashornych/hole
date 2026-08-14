@@ -693,6 +693,16 @@ Every entry is a literal path or a glob. Matches run in lexicographic order, so 
 
 Hooks receive `HOLE_PROJECT_DIR`, `HOLE_PROJECT_NAME`, `HOLE_INSTANCE_NAME`, `HOLE_INSTANCE_ID` and `HOLE_SANDBOX_NETWORK` in their environment.
 
+`cleanupHost` additionally receives `HOLE_IS_LAST_INSTANCE`, `true` when the sandbox being torn down is the only one left. Use it to release host-side infrastructure that all your sandboxes share — a proxy, a tunnel, a database container — without stopping it out from under a sandbox still running in another terminal:
+
+```bash
+#!/usr/bin/env bash
+[[ "${HOLE_IS_LAST_INSTANCE}" == "true" ]] || exit 0
+bash ~/.hole/docker-proxy.sh stop >/dev/null 2>&1
+```
+
+Sandboxes that Hole has already given up on (both their CLI and their watchdog are gone, so the next garbage collection will reclaim them) do not count — otherwise one crashed sandbox would keep your shared resource alive indefinitely. Two sandboxes exiting at the very same moment each still see the other, so neither is told it is last; the resource stays up until the next single exit, which is the harmless way for this to be wrong.
+
 `setupHost`, `cleanupHost` and `setup` in a *project's* settings file need your confirmation before they run — see [project trust](#project-trust).
 
 `hooks.setup` scripts are part of the image identity, so editing one rebuilds the image.
