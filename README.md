@@ -697,8 +697,11 @@ Hooks receive `HOLE_PROJECT_DIR`, `HOLE_PROJECT_NAME`, `HOLE_INSTANCE_NAME`, `HO
 
 ```bash
 #!/usr/bin/env bash
-[[ "${HOLE_IS_LAST_INSTANCE}" == "true" ]] || exit 0
-bash ~/.hole/docker-proxy.sh stop >/dev/null 2>&1
+# Stop the shared docker proxy, but only once no other sandbox is still using it.
+
+if [[ "${HOLE_IS_LAST_INSTANCE}" == "true" ]]; then
+  bash ~/.hole/docker-proxy.sh stop
+fi
 ```
 
 Sandboxes that Hole has already given up on (both their CLI and their watchdog are gone, so the next garbage collection will reclaim them) do not count — otherwise one crashed sandbox would keep your shared resource alive indefinitely. Two sandboxes exiting at the very same moment each still see the other, so neither is told it is last; the resource stays up until the next single exit, which is the harmless way for this to be wrong.
