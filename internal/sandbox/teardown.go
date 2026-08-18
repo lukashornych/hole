@@ -73,7 +73,20 @@ func Teardown(containerEngine *engine.Engine, host hostenv.Host, store *state.St
 		}
 	}
 
-	runCleanupHostHooks(host, store, instance)
+	// One answer for both consumers, taken while this instance is still registered: Hole's own
+	// shared infrastructure below, and the user's cleanupHost hooks after it.
+	lastInstance := isLastInstance(store, instance)
+
+	// The mirror outlives individual sandboxes, but nothing needs it once the last one is gone —
+	// and leaving a container running after `hole list` reports nothing running is surprising. It
+	// is stopped rather than removed: the cache volume and the container are what make the next
+	// start cheap. A sandbox starting concurrently can still lose its mirror this way, which
+	// degrades exactly like a mirror that crashes — the daemon falls back to the upstream registry.
+	if lastInstance {
+		dindregistry.Stop(containerEngine)
+	}
+
+	runCleanupHostHooks(host, instance, lastInstance)
 
 	if instance.RunTmpDir != "" {
 		if err := os.RemoveAll(instance.RunTmpDir); err != nil {
@@ -138,7 +151,7 @@ func withoutRegistryMirror(containers []string) []string {
 // project directory may be gone.
 //
 // In the watchdog path these scripts run without a TTY; output goes to the run log.
-func runCleanupHostHooks(host hostenv.Host, store *state.Store, instance *state.Instance) {
+func runCleanupHostHooks(host hostenv.Host, instance *state.Instance, lastInstance bool) {
 	if len(instance.Settings) == 0 {
 		return
 	}
@@ -155,7 +168,7 @@ func runCleanupHostHooks(host hostenv.Host, store *state.Store, instance *state.
 		return
 	}
 	scripts := hooks.Resolve(settings.Hooks.CleanupHost, host, instance.ProjectPath, "cleanupHost")
-	hooks.RunCleanupHost(scripts, cleanupHookEnvironment(host, store, instance))
+	hooks.RunCleanupHost(scripts, cleanupHookEnvironment(host, instance, lastInstance))
 }
 
 // verifyRemoved is the final check: anything still matching this instance is reported with
@@ -231,10 +244,11 @@ func hookEnvironment(host hostenv.Host, instance *state.Instance) []string {
 //
 // HOLE_IS_LAST_INSTANCE belongs here rather than in hookEnvironment because setupHost shares
 // that base: nothing has exited when startup runs, so the question has no answer there and a
-// variable that is always "false" would invite hooks to act on it.
-func cleanupHookEnvironment(host hostenv.Host, store *state.Store, instance *state.Instance) []string {
+// variable that is always "false" would invite hooks to act on it. The value is the one Teardown
+// already acted on for Hole's own shared infrastructure, so a hook cannot be told the opposite.
+func cleanupHookEnvironment(host hostenv.Host, instance *state.Instance, lastInstance bool) []string {
 	return append(hookEnvironment(host, instance),
-		"HOLE_IS_LAST_INSTANCE="+strconv.FormatBool(isLastInstance(store, instance)))
+		"HOLE_IS_LAST_INSTANCE="+strconv.FormatBool(lastInstance))
 }
 
 // isLastInstance reports whether the sandbox being torn down is the only one left, so a

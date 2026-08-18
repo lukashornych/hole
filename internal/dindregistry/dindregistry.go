@@ -202,6 +202,22 @@ func Detach(containerEngine *engine.Engine, sandboxNetwork string) {
 	}
 }
 
+// Stop shuts the mirror down while keeping the container and its cache volume, so `Ensure`
+// brings the same cache back on the next start instead of re-downloading into a new one.
+//
+// The caller decides when nothing needs the mirror any more — teardown does, once the sandbox
+// leaving is the last one. Best-effort like the rest of teardown: a mirror that stays up costs
+// idle memory, nothing more.
+func Stop(containerEngine *engine.Engine) {
+	if !containerEngine.ContainerRunning(ContainerName) {
+		return
+	}
+	logging.Info("Stopping the Docker image cache (no sandboxes left)...")
+	if err := containerEngine.ContainerStop(ContainerName); err != nil {
+		logging.Warn("could not stop %s: %v", ContainerName, err)
+	}
+}
+
 // Remove deletes the mirror and its cache. It is only a cache, so `hole destroy` (with no
 // path) and uninstall may take it.
 func Remove(containerEngine *engine.Engine) {

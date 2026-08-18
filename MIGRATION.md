@@ -254,8 +254,10 @@ and says whether it is shared or project-specific, and why.
 **The Docker-in-Docker cache changed.** 1.x seeded a per-instance volume from a shared cache
 volume and synced it back on exit. 2.0 runs a long-lived pull-through mirror instead, so the
 first pull after upgrading re-downloads and later ones come from the mirror. The old
-`hole-sandbox-docker-cache` volume is removed on first run. The mirror caches Docker Hub only;
-other registries need `network.allow` entries as before.
+`hole-sandbox-docker-cache` volume is removed on first run. The mirror container is stopped once
+the last sandbox exits and restarted with its cache by the next start, so no Hole container is
+left running between sessions. The mirror caches Docker Hub only; other registries need
+`network.allow` entries as before.
 
 **Docker Hub now needs an allow entry too.** In 1.x, enabling Docker-in-Docker made Hub reachable
 with no `network.allow` entry at all. In 2.0 the mirror is attached to a sandbox only when its

@@ -264,6 +264,10 @@ counting one would pin a user's shared infrastructure until the next manual clea
 registry read reports `false` — withholding the signal delays a cleanup, whereas a wrong `true`
 tears down infrastructure that live sandboxes are still using.
 
+Hole is its own first consumer of that answer: `Teardown` computes it once and uses it to stop the
+shared registry mirror (`dindregistry.Stop`) before passing the same value to the hooks, so a hook
+can never be told the opposite of what Hole just acted on.
+
 ### Docker-in-Docker
 
 A `docker:dind-rootless` sidecar — referenced by digest, not by tag, so the daemon inside every
@@ -314,7 +318,11 @@ it without a chown step. Caching comes from the pull-through mirror instead:
 proxy mode, also digest-pinned — and because `Ensure` restarts a stopped mirror rather than
 recreating it, a new pin only reaches it once the container is removed) on its own bridge network,
 attaches it to the sandbox network at start and detaches it
-at teardown so the network stays removable. Sandbox-internal traffic is not filtered — the gateway
+at teardown so the network stays removable. The teardown that finds itself last
+(`isLastInstance`, [hooks](#hooks)) also stops the container — stops, never removes: the cache
+volume and the container are what make the next start cheap, and `Ensure` restarts it. A sandbox
+starting at that exact moment can lose its mirror to the race, which degrades exactly like a
+mirror that crashes later — the daemon falls back to the upstream registry. Sandbox-internal traffic is not filtered — the gateway
 polices egress to the internet only — so the daemon reaches the mirror even under default-deny.
 Every failure here is non-fatal: DinD without a cache simply pulls from the internet.
 

@@ -81,12 +81,10 @@ func TestCleanupHookEnvironmentExportsIsLastInstance(t *testing.T) {
 	host, store := newTestStore(t)
 	instance := register(t, store, "hole-sandbox-demo-1a2b3c4d-self00", true)
 
-	if got := valueOf(t, cleanupHookEnvironment(host, store, instance), "HOLE_IS_LAST_INSTANCE"); got != "true" {
+	if got := valueOf(t, cleanupHookEnvironment(host, instance, true), "HOLE_IS_LAST_INSTANCE"); got != "true" {
 		t.Errorf("HOLE_IS_LAST_INSTANCE = %q, want \"true\"", got)
 	}
-
-	register(t, store, "hole-sandbox-demo-1a2b3c4d-other0", true)
-	if got := valueOf(t, cleanupHookEnvironment(host, store, instance), "HOLE_IS_LAST_INSTANCE"); got != "false" {
+	if got := valueOf(t, cleanupHookEnvironment(host, instance, false), "HOLE_IS_LAST_INSTANCE"); got != "false" {
 		t.Errorf("HOLE_IS_LAST_INSTANCE = %q, want \"false\"", got)
 	}
 }
@@ -103,7 +101,7 @@ func TestSetupHostEnvironmentOmitsIsLastInstance(t *testing.T) {
 		}
 	}
 	// The teardown environment is the base plus that one variable, so the base keeps its entries.
-	base, cleanup := hookEnvironment(host, instance), cleanupHookEnvironment(host, store, instance)
+	base, cleanup := hookEnvironment(host, instance), cleanupHookEnvironment(host, instance, true)
 	for _, entry := range base {
 		if !slices.Contains(cleanup, entry) {
 			t.Errorf("cleanupHookEnvironment dropped %q from the shared hook environment", entry)

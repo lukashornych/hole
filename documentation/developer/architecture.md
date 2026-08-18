@@ -199,8 +199,13 @@ started earlier holds a snapshot with no networks in it.
 
 Phases: `-n` dump → `compose down --remove-orphans` (fileless, `-p` only, so teardown never
 depends on generated files) → registry mirror detach → explicit removal of both networks with an
-attached-container force fallback → DinD volume → `cleanupHost` hooks → run directory → state
-file → a final verification pass that names any leftover and prints the command to remove it.
+attached-container force fallback → DinD volume → registry mirror stop when this was the last
+instance → `cleanupHost` hooks → run directory → state file → a final verification pass that
+names any leftover and prints the command to remove it.
+
+`isLastInstance` ([configuration](configuration.md#hooks)) is evaluated once, between the volume
+and the hooks, and serves both: Hole stops the shared mirror (kept, not removed — `Ensure`
+restarts it with its cache) and the hooks get the same value in `HOLE_IS_LAST_INSTANCE`.
 
 The force fallback exempts the registry mirror: it is shared by every sandbox, and the fallback
 is reached exactly when the recorded detach did not happen (the CLI killed between `Attach` and

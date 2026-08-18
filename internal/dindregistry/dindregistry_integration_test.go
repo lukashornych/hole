@@ -156,6 +156,9 @@ func TestWaitUntilServingAcceptsAContainerThatStaysUp(t *testing.T) {
 	}
 }
 
+// TestEnsureRestartsAStoppedMirror also pins the round trip teardown depends on: the last
+// sandbox to exit stops the mirror, and the next start must get the same cache back rather than
+// a fresh container.
 func TestEnsureRestartsAStoppedMirror(t *testing.T) {
 	containerEngine := testEngine(t)
 	Remove(containerEngine)
@@ -165,9 +168,18 @@ func TestEnsureRestartsAStoppedMirror(t *testing.T) {
 	if !Ensure(containerEngine) {
 		t.Skip("could not start the registry image (no network?)")
 	}
-	if err := containerEngine.ContainerStop(ContainerName); err != nil {
-		t.Fatalf("stop mirror: %v", err)
+	Stop(containerEngine)
+	if containerEngine.ContainerRunning(ContainerName) {
+		t.Fatal("the mirror is still running after Stop")
 	}
+	if len(containerEngine.Containers(ContainerName)) == 0 {
+		t.Fatal("Stop removed the mirror container instead of stopping it")
+	}
+	if !containerEngine.VolumeExists(VolumeName) {
+		t.Error("Stop took the cache volume")
+	}
+	// Stopping an already stopped mirror must not warn or fail.
+	Stop(containerEngine)
 
 	// A stopped mirror is restarted rather than recreated, because its volume holds the cache.
 	if !Ensure(containerEngine) {
