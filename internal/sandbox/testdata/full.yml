@@ -68,6 +68,7 @@ services:
         volumes:
             - <PROJECT>:<PROJECT>
             - hole-sandbox-docker-data-hole-sandbox-demo-abcd1234-xyz123:/home/rootless/.local/share/docker
+            - <LIBRARY>:/libs/shared:ro
             - /dev/null:<PROJECT>/.env:ro
             - <RUN>/excluded-dirs<PROJECT>/secrets:<PROJECT>/secrets
             - /dev/null:<PROJECT>/config/app.yaml:ro

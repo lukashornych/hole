@@ -210,6 +210,10 @@ builder, where first-wins-by-target quietly keeps whichever sorts first.
 
 `--library PATH[:MOUNT][:rw]` defaults to `/libs/<basename>`, read-only unless `:rw`.
 
+The two categories differ in one runtime respect: libraries (including the worktree-derived ones)
+are mirrored onto the DinD sidecar, `files.include` targets are not — see
+[Docker-in-Docker](#docker-in-docker).
+
 Worktree derivation (`internal/worktree`): in a linked worktree the main repository is mounted — a
 linked worktree's `.git` is only a pointer, so git would not work without it — and in a main
 repository every linked worktree outside the project directory is mounted, each at its own
@@ -297,17 +301,34 @@ privilege drop are the three things the rootless image changes from the root one
 them wrong fails silently (a healthy-looking daemon that cannot run containers, or a sidecar with
 no route to the gateway), which is why they are called out here.
 
-The sidecar receives the project mount and **only the exclusion over-mounts**
-(`mountBuilder.exclusions`), never `files.include` targets or `libraries`. Mirroring an over-mount
-can only ever remove access; mirroring an exposed path would hand it to the sidecar for no reason —
-the daemon does not need it, since builds stream their context from the client (`docker build` and
-`buildx` work against paths the daemon cannot see) and only a run-time bind mount needs a
-daemon-side path. Keeping the sidecar's view minimal is the conservative default regardless of the
-daemon's privilege level.
+The sidecar receives the project mount, then `mountBuilder.libraries`, then
+`mountBuilder.exclusions` — never `files.include` targets. Libraries have to be there: the daemon
+resolves `-v` paths in its own filesystem, and an unmirrored one is not an error but a silently
+empty directory in the nested container. Exclusions have to be there so that path cannot become a
+way to read what the agent was meant not to see. `files.include` is left out for a practical reason
+rather than a principled one — its entries are single files like `~/.npmrc` or `~/.gitconfig`, where
+a nested bind mount has no plausible use; a case that needs one belongs in `libraries`. Builds need
+none of it, since they stream their context from the client (`docker build` and `buildx` work
+against paths the daemon cannot see) and only a run-time bind mount needs a daemon-side path.
+
+**The order is load-bearing.** A library with its own `.hole/settings.json` contributes exclusion
+over-mounts *inside* its mount point; emitting the library bind after them would let it land on top
+and unhide the excluded file. Moby does sort mounts by destination depth, but that is the engine's
+implementation detail, not something to lean on.
+
+A mirrored `:ro` library keeps its read-only-ness for the same reason a mirrored over-mount cannot
+be unmounted: the daemon is rootless, so mounts it inherits into its user namespace are
+`MNT_LOCKED` and the kernel refuses to clear `MS_RDONLY`. Measured against a real sandbox — a
+nested `--privileged` container's `mount -o remount,rw,bind` is refused with `permission denied`
+and the write still fails with `EROFS`, while the same probe against a `readwrite: true` library
+succeeds, so the refusal is the mount being enforced rather than the probe being broken. The
+residual is the sidecar *container* itself: an escape from it lands outside that namespace, as
+real root, where the remount works again. Defense-in-depth, not a hard boundary.
 
 1.x passed the whole mount set here while its comment and README both said exclusions only — the
-wider set came from reusing one array, not from a decision. `TestDinDSidecarReceivesExclusionsOnly`
-pins the split.
+`files.include` half of that came from reusing one array, not from a decision.
+`TestDinDSidecarReceivesExclusionsAndLibraries`, `TestDinDSidecarMountsLibraryBeforeItsExclusions`
+and `TestDinDSidecarKeepsALibraryReadOnly` pin the split, the order and the options.
 
 Each instance gets a fresh named volume for the daemon's data root
 (`/home/rootless/.local/share/docker`, not `/var/lib/docker` — rootless stores under the

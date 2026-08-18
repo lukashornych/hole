@@ -473,6 +473,14 @@ hole start claude . --library ~/projects/other-lib:/libs/other:rw
 
 If a library has its own `.hole/settings.json`, only its `files.exclude` entries are honored, scoped to that library's mount.
 
+With [Docker-in-Docker](#docker-in-docker) on, libraries are also mounted into the sidecar at the same paths, so a container the agent starts can bind-mount one:
+
+```sh
+docker run -v /libs/shared-lib:/x alpine ls /x
+```
+
+A read-only library stays read-only there. Builds never needed this — `docker build` and `buildx` stream the context from the client — only a run-time bind mount does.
+
 ### Git worktrees
 
 If your project is a git worktree, Hole mounts the related checkouts automatically — the main repository when you are in a linked worktree (a linked worktree's `.git` is only a pointer, so git would not work without it), and every linked worktree when you are in the main repository. Each is mounted at its own absolute path.
@@ -620,7 +628,8 @@ A `docker:dind-rootless` sidecar starts on the internal sandbox network; the age
 - **Accessing services**: containers started inside DinD are reachable from the agent at hostname `docker`, not `localhost`. Bind ports to all interfaces (`3307:3306`, not `127.0.0.1:3307:3306`).
 - **Workspace bind mounts**: the project is mounted at the same absolute path in both containers, so bind mounts in your compose files resolve correctly.
 - **File exclusions** are mirrored onto the sidecar, so a container started inside the sandbox cannot bind-mount a path the agent was meant not to see.
-- **Libraries and inclusions are not** mounted into the sidecar. They stay available to the agent as always; the sidecar simply does not need them, and there is no reason to widen what it can see. Builds are unaffected — `docker build` and `buildx` stream the context from the client, so they work with paths the daemon cannot see. What does need a daemon-side path is a **bind mount at run time**: `docker run -v /libs/shared:/x` or a compose `volumes:` entry pointing at a library will not resolve. Use the project directory, or copy what you need into it.
+- **Libraries** are mirrored too, at the same paths, so `docker run -v /libs/shared:/x` and compose `volumes:` entries pointing at a library resolve. A `:ro` library stays read-only inside the nested container: the daemon is rootless, and the kernel refuses to lift the read-only flag off a mount inherited into its user namespace. That guarantee is defense-in-depth, not a hard boundary — an escape from the privileged sidecar container lands outside that namespace, where the remount works again.
+- **`files.include` targets are not** mounted into the sidecar. They stay available to the agent as always; a single file like `~/.npmrc` has no plausible use as a nested bind mount, so there is no reason to widen what the sidecar can see. If you need one there, move the entry to `libraries`. Builds are unaffected either way — `docker build` and `buildx` stream the context from the client, so they work with paths the daemon cannot see.
 - **Docker Hub must be allowed explicitly**: `network.allow` has to contain `"docker.io"` or `"*.docker.io"`, or the sandbox cannot pull from Hub at all. No other spelling counts — not `index.docker.io`, not `registry-1.docker.io`. Allowing it is a real decision, not a formality: Hub is a platform anyone can publish to, so the whole of it becomes reachable, and the cache reaches it over a channel the gateway does not filter.
   ```json
   { "container": { "docker": true }, "network": { "allow": ["docker.io"] } }

@@ -219,12 +219,20 @@ func generateCompose(in composeInput) (string, error) {
 		dindEnv = append(dindEnv, userEnvironment(in.settings.Environment, in.host)...)
 
 		dindVolumes := []string{projectMount, in.dindVolume + ":" + dindDataRoot}
-		// Only the exclusion over-mounts are mirrored, so a container started through the
-		// sidecar cannot bind-mount a path the agent was meant not to see. Libraries and
-		// includes are deliberately *not* mirrored: the sidecar does not need them and there is
-		// no reason to widen what it can see. Build contexts do not need them either — the docker
+		// Libraries are mirrored so a container the agent starts through the sidecar can
+		// bind-mount one — the daemon resolves `-v` paths in its own filesystem, and an
+		// unmirrored path is silently an empty directory there. A `:ro` library stays read-only
+		// because the daemon is rootless (see mountBuilder). The exclusion over-mounts are
+		// mirrored so that path cannot be used to read what the agent was meant not to see.
+		// `files.include` targets are not mirrored: they are single files like ~/.npmrc, with no
+		// plausible use as a nested bind mount. Build contexts need none of this — the docker
 		// client streams the context, so `docker build` and `buildx` work against paths the
 		// daemon cannot see; only a run-time bind mount needs a daemon-side path.
+		//
+		// Libraries must come before exclusions: a library with its own .hole/settings.json
+		// contributes over-mounts *inside* its mount point, and the parent bind has to be
+		// emitted first or it would land on top of them and unhide the excluded paths.
+		dindVolumes = append(dindVolumes, mounts.libraries...)
 		dindVolumes = append(dindVolumes, mounts.exclusions...)
 
 		dindCommand := []string{}

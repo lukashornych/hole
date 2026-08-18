@@ -18,11 +18,15 @@ type mountBuilder struct {
 	host      hostenv.Host
 	runTmpDir string
 	mounts    []string
-	// exclusions holds the subset of mounts that hide a path rather than expose one. The DinD
-	// sidecar receives only these: mirroring an over-mount can only ever remove access, while
-	// mirroring an exposed path hands it to a privileged container — where a read-only bind is
-	// no boundary, since a privileged process can remount it read-write.
+	// exclusions holds the subset of mounts that hide a path rather than expose one, and
+	// libraries the library mounts. Both are mirrored onto the DinD sidecar; nothing else is.
+	// The daemon resolves `-v` paths in its own filesystem, so without the mirror a nested
+	// container gets a silently empty directory. A mirrored `:ro` library stays read-only
+	// because the daemon runs rootless: mounts it inherits into a child user namespace are
+	// MNT_LOCKED, so the kernel refuses to clear MS_RDONLY. The same property is what keeps a
+	// mirrored over-mount from being unmounted — being an over-mount is no boundary on its own.
 	exclusions []string
+	libraries  []string
 	seen       map[string]bool
 }
 
@@ -227,7 +231,9 @@ func (b *mountBuilder) addLibraries(libraries map[string]config.Library, project
 		if library.ReadWrite {
 			options = ""
 		}
-		b.add(hostPath, containerPath, options)
+		if b.add(hostPath, containerPath, options) {
+			b.libraries = append(b.libraries, b.mounts[len(b.mounts)-1])
+		}
 
 		librarySettingsPath := filepath.Join(hostPath, ".hole", "settings.json")
 		if _, err := os.Stat(librarySettingsPath); err != nil {

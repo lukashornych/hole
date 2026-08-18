@@ -287,7 +287,9 @@ must be privileged (rootlesskit will not start otherwise), so it is the one plac
 container holds the capabilities a container escape needs. The daemon inside it runs **rootless** so
 the agent cannot use it to read the host — a nested `--privileged` container maps to a subuid that
 owns none of the host's devices, verified against both the raw-disk read and the exclusion-strip
-escapes ([analysis/security-audit.md](../analysis/security-audit.md), findings 1 and 3). What
-remains is a kernel- or runtime-level escape from the privileged sidecar, which is why DinD is
-off by default and documented as a larger surface than the rest of the sandbox. See
+escapes. The sidecar sees the project directory read-write, the exclusion over-mounts and the
+libraries — the libraries because a nested container has to be able to bind-mount them, and a `:ro`
+one stays read-only on the same user-namespace property the exclusions rely on. What remains is a
+kernel- or runtime-level escape from the privileged sidecar, which is why DinD is off by default
+and documented as a larger surface than the rest of the sandbox. See
 [configuration](configuration.md#docker-in-docker).

@@ -445,12 +445,13 @@ func writeSettingsFile(t *testing.T, path, content string) {
 	}
 }
 
-// The sidecar is privileged, and a privileged process can remount a read-only bind read-write —
-// so a path exposed to it is effectively writable, which would defeat the read-only default that
-// makes `libraries` safe to hand to an agent. Exclusions are the opposite: mirroring an
-// over-mount can only remove access. Build contexts do not need any of it, because the docker
-// client streams the context to the daemon.
-func TestDinDSidecarReceivesExclusionsOnly(t *testing.T) {
+// The sidecar resolves `-v` paths in its own filesystem, so a library has to be mirrored onto it
+// or a nested container gets a silently empty directory; the read-only default survives the mirror
+// because the daemon is rootless. Exclusions are mirrored so that path cannot be turned into a way
+// to read what the agent was meant not to see. `files.include` targets stay off it — single files
+// like ~/.npmrc have no use as a nested bind mount. Build contexts need none of it, because the
+// docker client streams the context to the daemon.
+func TestDinDSidecarReceivesExclusionsAndLibraries(t *testing.T) {
 	projectDir, libraryDir := fixture(t)
 	// A real file, so the include is actually mounted rather than warned away — otherwise the
 	// assertion that it stays off the sidecar would pass for the wrong reason.
@@ -464,7 +465,78 @@ func TestDinDSidecarReceivesExclusionsOnly(t *testing.T) {
 	settings.Libraries = map[string]config.Library{libraryDir: {Path: "/libs/shared"}}
 	settings.Container.Docker = true
 
-	in := testInput(t, projectDir, t.TempDir(), settings, Options{})
+	sidecar := dindService(t, testInput(t, projectDir, t.TempDir(), settings, Options{}))
+
+	for _, exposed := range []string{includedFile, "/opt/included-secret.txt"} {
+		if strings.Contains(sidecar, exposed) {
+			t.Errorf("the privileged sidecar is given the include target %q", exposed)
+		}
+	}
+	if !strings.Contains(sidecar, libraryDir+":/libs/shared") {
+		t.Error("the library is not mirrored onto the sidecar; `docker run -v` would see an empty directory")
+	}
+	// Every exclusion must still reach it, or `docker run -v` inside the sandbox could read a
+	// path the agent itself cannot see.
+	for _, hidden := range []string{"/dev/null:" + projectDir + "/.env:ro", projectDir + "/secrets"} {
+		if !strings.Contains(sidecar, hidden) {
+			t.Errorf("exclusion %q is not mirrored onto the sidecar", hidden)
+		}
+	}
+	if !strings.Contains(sidecar, projectDir+":"+projectDir) {
+		t.Error("the project mount is missing from the sidecar; bind mounts in user compose files need it")
+	}
+}
+
+// A library's own files.exclude produces over-mounts inside the library's mount point. Emitted the
+// other way round, the library bind would land on top of them and hand the sidecar the excluded
+// file. Moby happens to sort mounts by destination depth, but that is the engine's business.
+func TestDinDSidecarMountsLibraryBeforeItsExclusions(t *testing.T) {
+	projectDir, libraryDir := fixture(t)
+	writeSettingsFile(t, filepath.Join(libraryDir, ".hole", "settings.json"), `{"files":{"exclude":[".env"]}}`)
+	settings := &config.Settings{}
+	settings.Libraries = map[string]config.Library{libraryDir: {Path: "/libs/shared"}}
+	settings.Container.Docker = true
+
+	sidecar := dindService(t, testInput(t, projectDir, t.TempDir(), settings, Options{}))
+
+	library := strings.Index(sidecar, libraryDir+":/libs/shared")
+	exclusion := strings.Index(sidecar, "/libs/shared/.env")
+	if library == -1 || exclusion == -1 {
+		t.Fatalf("sidecar is missing the library (%d) or its exclusion (%d):\n%s", library, exclusion, sidecar)
+	}
+	if library > exclusion {
+		t.Error("the library mount is emitted after its own exclusion over-mount, which would unhide it")
+	}
+}
+
+// Mirroring must hand the sidecar the same options the agent gets: a default library is `:ro` on
+// both, and the read-only-ness of the mirrored one is what the rootless daemon enforces.
+func TestDinDSidecarKeepsALibraryReadOnly(t *testing.T) {
+	projectDir, libraryDir := fixture(t)
+	writableDir := filepath.Join(t.TempDir(), "writable-lib")
+	if err := os.MkdirAll(writableDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settings := &config.Settings{}
+	settings.Libraries = map[string]config.Library{
+		libraryDir:  {Path: "/libs/shared"},
+		writableDir: {Path: "/libs/writable", ReadWrite: true},
+	}
+	settings.Container.Docker = true
+
+	sidecar := dindService(t, testInput(t, projectDir, t.TempDir(), settings, Options{}))
+
+	if !strings.Contains(sidecar, libraryDir+":/libs/shared:ro") {
+		t.Errorf("the read-only library lost its :ro on the sidecar:\n%s", sidecar)
+	}
+	if !strings.Contains(sidecar, writableDir+":/libs/writable\n") {
+		t.Errorf("the read-write library is not mirrored as read-write:\n%s", sidecar)
+	}
+}
+
+// dindService generates the compose file and returns the docker service block from it.
+func dindService(t *testing.T, in composeInput) string {
+	t.Helper()
 	path, err := generateCompose(in)
 	if err != nil {
 		t.Fatalf("generateCompose: %v", err)
@@ -481,22 +553,7 @@ func TestDinDSidecarReceivesExclusionsOnly(t *testing.T) {
 	if end := strings.Index(sidecar, "\n    agent:"); end != -1 {
 		sidecar = sidecar[:end]
 	}
-
-	for _, exposed := range []string{libraryDir, "/libs/shared", includedFile, "/opt/included-secret.txt"} {
-		if strings.Contains(sidecar, exposed) {
-			t.Errorf("the privileged sidecar is given %q; only exclusion over-mounts may be mirrored", exposed)
-		}
-	}
-	// Every exclusion must still reach it, or `docker run -v` inside the sandbox could read a
-	// path the agent itself cannot see.
-	for _, hidden := range []string{"/dev/null:" + projectDir + "/.env:ro", projectDir + "/secrets"} {
-		if !strings.Contains(sidecar, hidden) {
-			t.Errorf("exclusion %q is not mirrored onto the sidecar", hidden)
-		}
-	}
-	if !strings.Contains(sidecar, projectDir+":"+projectDir) {
-		t.Error("the project mount is missing from the sidecar; bind mounts in user compose files need it")
-	}
+	return sidecar
 }
 
 // 1.x resolved these through Compose's interpolation of the generated file. Escaping `$` to stop
