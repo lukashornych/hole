@@ -277,9 +277,8 @@ otherwise.
 
 ## Manual platform checklist
 
-CI covers Linux with Docker, plus a rootless-podman parity job for the engine call sites. These
-need checking by hand per release, because the gateway depends on kernel and packaging details CI
-cannot vary:
+CI covers Linux with Docker only. These need checking by hand per release, because the gateway
+depends on kernel and packaging details CI does not vary:
 
 - **Docker Desktop, OrbStack, Colima (macOS)** and **WSL**: `hole start claude . -d`, then from
   inside the sandbox confirm an allowed domain resolves and an unlisted one gives NXDOMAIN.

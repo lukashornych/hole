@@ -197,8 +197,8 @@ refresh.
   HOLE_RUNTIME=podman go test -tags integration -count=1 -timeout 20m -p 1 ./internal/engine/
   ```
 
-  CI has a podman job that does exactly this, marked `continue-on-error: true` — podman parity is
-  tracked, not gated.
+  CI does not run this. Podman parity is checked by hand when someone has a reason to, which is
+  why the differences below are written down rather than left to a job to rediscover.
 
   Differences `internal/engine` already absorbs, so that callers can stay runtime-agnostic:
 
@@ -209,13 +209,13 @@ refresh.
 
   Known and unhandled: `ContainerHealthProbeOutput` returns nothing under podman, so an unhealthy
   gateway reports *that* it is unhealthy but not what the probe said. `TestContainerHealthProbeOutput`
-  fails in the parity job for this reason.
+  is the test that shows it, if you run the suite above.
 - `HOLE_TEST_LIVENESS_DIR` / `HOLE_TEST_LIVENESS_NAME` are internal: `internal/state` re-execs its
   own test binary as a lock-holding helper through them. Never set them by hand.
 
 ## Matching CI locally
 
-CI (`.github/workflows/ci.yml`) has six jobs. Their local equivalents:
+CI (`.github/workflows/ci.yml`) has five jobs. Their local equivalents:
 
 | CI job | Local command |
 |---|---|
@@ -223,7 +223,6 @@ CI (`.github/workflows/ci.yml`) has six jobs. Their local equivalents:
 | Unit (ubuntu, macos) | `go test -race ./...` |
 | Integration (docker) | `make itest` |
 | E2E (docker) | `make e2e` |
-| Podman parity (non-blocking) | `HOLE_RUNTIME=podman go test -tags integration -count=1 -p 1 ./internal/engine/` |
 | Release config | `goreleaser check` and `bash -n install.sh` |
 
 The `release-config` job is the one developers most often forget — why it exists is covered in

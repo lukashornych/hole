@@ -35,7 +35,7 @@ test/e2e/                 end-to-end suite
 Makefile                  build, test, itest, e2e, lint, golden (see development.md)
 install.sh                standalone installer (downloads the release binary, verifies it)
 .goreleaser.yaml          release build configuration
-.github/workflows/ci.yml       lint + unit (linux, macos) + integration + e2e + podman parity
+.github/workflows/ci.yml       lint + release config + unit (linux, macos) + integration + e2e
 .github/workflows/release.yml  version resolution, tagging, release notes, GoReleaser
 documentation/developer/  this documentation
 documentation/analysis/   design analyses and the rewrite plan this implementation followed

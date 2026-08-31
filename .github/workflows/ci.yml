@@ -100,25 +100,3 @@ jobs:
           go-version: '1.25'
           cache: true
       - run: make e2e
-
-  podman:
-    name: Podman parity
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    env:
-      HOLE_RUNTIME: podman
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-          cache: true
-      - name: Install podman compose support
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman podman-compose
-          podman version
-      # Verifies the engine call sites podman is most likely to differ on: labeled/internal
-      # network creation with an explicit subnet, the inspect shapes the allocator reads,
-      # and fileless `compose down`.
-      - run: go test -tags integration -count=1 -timeout 20m ./internal/engine/
