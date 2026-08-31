@@ -85,7 +85,7 @@ func TestGatewayEntrypointDropsForwardingFirst(t *testing.T) {
 	}
 	// Any check that can abort or block must sit behind the drop, so the two markers below stand
 	// in for "the rest of startup".
-	for _, marker := range []string{"dnsmasq --version", "getent hosts host.internal", "ip -o -4 addr show"} {
+	for _, marker := range []string{"dnsmasq --version", "/etc/hosts", "ip -o -4 addr show"} {
 		markerIndex := strings.Index(entrypoint, marker)
 		if markerIndex < 0 {
 			t.Errorf("startup step %q is gone; check that the drop still precedes what replaced it", marker)
@@ -97,6 +97,47 @@ func TestGatewayEntrypointDropsForwardingFirst(t *testing.T) {
 	}
 	if rulesetIndex < dropIndex[1] {
 		t.Error("the generated ruleset is applied before the default-drop table exists")
+	}
+}
+
+// TestGatewayEntrypointResolvesHostGatewayFromHostsFile pins the host gateway lookup against the
+// regression it fixes: `getent hosts host.internal` answers AF_INET6 first, so on a runtime that
+// injects both an IPv4 and an IPv6 entry (OrbStack) an IPv4-only filter got nothing and the feature
+// silently pointed every configured name at the sandbox container itself.
+func TestGatewayEntrypointResolvesHostGatewayFromHostsFile(t *testing.T) {
+	data, err := FS.ReadFile("gateway/entrypoint.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entrypoint := string(data)
+
+	if strings.Contains(entrypoint, "getent hosts host.internal") {
+		t.Error("the host gateway address is looked up through getent again, which answers IPv6 first")
+	}
+	if !strings.Contains(entrypoint, "/etc/hosts") {
+		t.Fatal("the host gateway address is no longer read from /etc/hosts")
+	}
+	// Both names the runtimes use, or Podman's gateway would resolve to nothing.
+	for _, name := range []string{"host.internal", "host.containers.internal"} {
+		if !strings.Contains(entrypoint, name) {
+			t.Errorf("the lookup does not consider %q", name)
+		}
+	}
+	if !strings.Contains(entrypoint, `$1 !~ /:/`) {
+		t.Error("the lookup no longer rejects IPv6 addresses, which cannot be substituted into the ruleset")
+	}
+
+	// The hard failure is what turns a silently broken feature into a message the user sees, and
+	// it must fire only when a zone actually references the address.
+	guard := regexp.MustCompile(`(?s)grep -q '\{HOST_GATEWAY_IP\}'.*?exit 1`)
+	if !guard.MatchString(entrypoint) {
+		t.Error("an unusable host gateway address no longer aborts startup, or the abort is not gated " +
+			"on the generated Corefile carrying the placeholder")
+	}
+	// Empty, loopback and the unspecified address are the three answers that mean "no host
+	// gateway"; substituting any of them points the configured names at the sandbox itself.
+	if !strings.Contains(entrypoint, `""|127.*|0.0.0.0)`) {
+		t.Error("the set of unusable host gateway addresses changed; empty, loopback and 0.0.0.0 must all abort")
 	}
 }
 

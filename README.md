@@ -573,7 +573,7 @@ Use `-n` to discover what a project needs: it writes every domain the sandbox re
 
 Known limitation: once an allowed name resolves to an address, that address stays reachable for the sandbox's lifetime, so an agent could in principle reach a *different* site sharing that address (common with CDNs).
 
-The `-n` dump is a record of what the gateway's resolver was asked, not of every egress attempt. Two things are missing from it: direct-IP attempts blocked by the firewall, because they never produce a DNS query, and names resolved through the container's own fallback resolver — Docker's embedded `127.0.0.11`, which answers container names on the sandbox network without consulting the gateway. Neither is a way out of the sandbox (the firewall still decides what is reachable); they are gaps in the log, so treat the dump as "what the project asked to resolve", not as an audit trail.
+The `-n` dump is a record of what the gateway's resolver was asked, not of every egress attempt. Two things are missing from it: direct-IP attempts blocked by the firewall, because they never produce a DNS query, and names the container's own resolver answers by itself — Docker's embedded `127.0.0.11` is what the sandbox asks first, with the gateway as its upstream, and it answers container names on the sandbox network without forwarding the query. Neither is a way out of the sandbox (the firewall still decides what is reachable); they are gaps in the log, so treat the dump as "what the project asked to resolve", not as an audit trail.
 
 ### Host gateway domains
 
@@ -590,9 +590,20 @@ Let the sandbox reach services running on your host under a stable name:
 }
 ```
 
-Each name resolves to the Docker host gateway. **The port list is required**: the firewall matches the host gateway *address*, not the name, so a port-less entry would expose every service on your machine — SSH, a TCP-exposed Docker socket, databases, anything bound to `0.0.0.0`. Several entries for the same name merge into one, opening the union of their ports.
+Each name resolves to the Docker host gateway — the address your container runtime gives containers for the machine Hole runs on.
 
-For the same reason, the ports are unioned across *all* entries: with the example above the sandbox can reach the host gateway IP on 5432, 8080 and 8443, directly and without DNS. The names choose what resolves, not what the firewall permits. Don't use `localhost` or `127.0.0.1` — inside the container those are the container itself.
+Four things trip people up, in the order they bite:
+
+- **The host service must not be bound to loopback only.** On native Linux a service on `127.0.0.1` is unreachable from any container, whatever the DNS says — bind it to `0.0.0.0` (`kubectl port-forward --address 0.0.0.0 …`, `--host 0.0.0.0`, and so on). Docker Desktop and OrbStack proxy loopback, so it works there without the change.
+- **The port list is required.** The firewall matches the host gateway *address*, not the name, so a port-less entry would expose every service on your machine — SSH, a TCP-exposed Docker socket, databases, anything bound to `0.0.0.0`. Several entries for the same name merge into one, opening the union of their ports.
+- **A project-file entry needs the trust prompt.** `hostGatewayDomains` in `<project>/.hole/settings.json` only takes effect once you have accepted that project's settings; see [Project trust](#project-trust).
+- **A settings change needs a restart.** The gateway reads its configuration once at startup, so exit the sandbox and run `hole start` again — a running sandbox will not pick the new entry up.
+
+Pick a name **nothing else already resolves**, ideally under a suffix that cannot resolve publicly (`myhost.local`, `db.internal.test`). Explicitly *not* `localhost` or `127.0.0.1` — inside the container those are the container itself — and not `host.internal` or `host.docker.internal`, which your container runtime may answer itself instead of letting Hole's resolver see the query.
+
+The ports are unioned across *all* entries: with the example above the sandbox can reach the host gateway IP on 5432, 8080 and 8443, directly and without DNS. The names choose what resolves, not what the firewall permits.
+
+If the runtime offers no usable host gateway address at all, the sandbox refuses to start and says so, rather than starting with the feature quietly broken.
 
 **Subdomains work the opposite way from `network.allow` above.** There is no `*.` syntax here — `"*.mydb.local:5432"` is rejected — but each entry claims the whole name *and everything under it*: with `"mydb.local:5432"` the names `db.mydb.local` and `a.b.mydb.local` resolve to the host gateway too. That is not extra reach (the firewall matches the address and the port union regardless of name), but it does mean **an entry whose name overlaps a real domain hijacks that entire domain for the sandbox**. `"example.com:8080"` makes `api.example.com` resolve to your host gateway even when `api.example.com` is in `network.allow`, so the real site becomes unreachable from the sandbox. Use names you control, ideally under a suffix that cannot resolve publicly (`.local`, `.internal`, `.test`).
 

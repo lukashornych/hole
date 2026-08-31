@@ -73,6 +73,15 @@ subnet allocation race, every GC pass including its keep-conditions, teardown co
 idempotence, the registry mirror lifecycle, and the version-change migration. They fabricate the
 resources a sandbox would own instead of building images, so they finish in seconds.
 
+The one exception is `internal/sandbox/gateway_integration_test.go`, which builds the real gateway
+image and runs its entrypoint against a fabricated `/etc/hosts` — the only way to reproduce how a
+runtime hands over the host gateway address. It reuses an already-built image and otherwise needs
+network access for the build (GitHub for CoreDNS, the Ubuntu mirrors for packages); without it the
+two cases skip with a message naming the build, which is what happens inside the agent sandbox. The
+builder cache survives the uninstall test's image sweep, so a rebuild costs seconds. The generated
+configuration is `docker cp`'d in rather than bind-mounted, so the cases also work against a remote
+daemon.
+
 Three traps:
 
 - **The suite destroys Hole resources on the host daemon.**

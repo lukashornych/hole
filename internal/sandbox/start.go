@@ -528,8 +528,14 @@ func buildPolicy(settings *config.Settings, enabledAgents []*agents.Agent, unres
 		if err != nil {
 			return network.Policy{}, err
 		}
-		if parsed.Domain == "localhost" || parsed.Domain == "127.0.0.1" {
-			logging.Warn("hostGatewayDomains entry '%s' resolves locally inside the container and cannot reach the host; use a different domain name", raw)
+		switch parsed.Domain {
+		case "localhost", "127.0.0.1":
+			logging.Warn("hostGatewayDomains entry '%s' cannot work: inside the container that name is "+
+				"the container itself. Use a name nothing else resolves — 'myhost.local:%d', say.", raw, parsed.Ports[0])
+		case "host.internal", "host.docker.internal", "host.containers.internal":
+			logging.Warn("hostGatewayDomains entry '%s' may not work: the container runtime injects '%s' "+
+				"itself and may answer it instead of Hole. Use a name nothing else resolves — "+
+				"'myhost.local:%d', say.", raw, parsed.Domain, parsed.Ports[0])
 		}
 		hostGateway = append(hostGateway, parsed)
 	}

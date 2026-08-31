@@ -212,6 +212,15 @@ entry (`"mydb.local"`) fails validation at startup with a message naming it — 
 `"mydb.local:5432"` instead. The firewall matches the host gateway *address* rather than the name,
 so a port-less entry opened every TCP and UDP port on your machine for the sandbox's lifetime.
 
+**A broken `network.hostGatewayDomains` now refuses to start.** 1.x — and 2.0 before this
+release — substituted `127.0.0.1` when the container runtime offered no usable host gateway
+address, so the sandbox started and every configured name resolved to the sandbox container
+itself: "connection refused", with a warning buried in the gateway's log. The address is now read
+from the gateway container's `/etc/hosts`, which fixes the case where the runtime injects both an
+IPv4 and an IPv6 entry (OrbStack, where the feature never worked), and a runtime that provides
+nothing usable fails the start with a message naming the cause. Nothing changes where the feature
+already worked.
+
 **No more proxy environment variables.** `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` are gone from the
 sandbox, because filtering no longer happens at the HTTP layer. Anything that needed proxy
 awareness can drop it:
@@ -354,6 +363,12 @@ there, because it never asks DNS.
 
 **A tool that worked in 1.x now fails on a non-standard port.** Ports are per host now. Add the
 port: `"db.example.com:5432"`.
+
+**"no usable IPv4 host gateway address in /etc/hosts"** — the gateway refuses to start because
+your container runtime gave it nothing it could use for `network.hostGatewayDomains`. Drop the
+setting to start without the feature, or check that the runtime supports `host-gateway` extra
+hosts. Reaching a host service also needs it bound to `0.0.0.0` rather than `127.0.0.1` on native
+Linux.
 
 **Sandbox networks collide with a VPN.** Point Hole's pool somewhere else:
 

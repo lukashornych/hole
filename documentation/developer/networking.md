@@ -85,6 +85,18 @@ What it does change is **shadowing**: an entry naming a real domain captures tha
 README as "use names you control"; enforcing it (rejecting publicly resolvable suffixes) would need
 a PSL copy in the binary and is not attempted.
 
+The address itself is read from the gateway container's **`/etc/hosts`**, where the runtime writes
+the entry compose asks for (`extra_hosts: host.internal:host-gateway`), plus Podman's built-in
+`host.containers.internal`. Not through `getent hosts`: that goes through nsswitch, which answers
+AF_INET6 first, and a runtime injecting both an IPv4 and an IPv6 entry for the name (OrbStack does)
+then leaves an IPv4-only filter with nothing — the bug that made the whole feature resolve to
+`127.0.0.1` there. When no usable IPv4 address is found and the generated Corefile carries the
+`{HOST_GATEWAY_IP}` placeholder, the entrypoint aborts; the Corefile is the signal, so the check
+cannot drift out of sync with the policy. `TestGatewayEntrypointResolvesHostGatewayFromHostsFile`
+(`assets/assets_test.go`) pins the lookup, and two integration tests
+(`internal/sandbox/gateway_integration_test.go`) run the real entrypoint against a fabricated
+`/etc/hosts` — one dual-stack, one loopback-only.
+
 A malformed entry is fatal. A wrong allow list makes the sandbox unsafe or broken, which is not a
 skippable warning.
 
@@ -152,8 +164,10 @@ a single `nft -f` transaction — the swap opens no window. Two consequences wor
   beyond first start, because `restart: on-failure` can bring the gateway back mid-run while the
   agent is live.
 - Every check below the drop (`nftset` support, host gateway resolution, interface discovery) aborts
-  under `set -euo pipefail` with the drop in force, so a gateway that cannot configure itself leaves
-  the sandbox with no route rather than an unfiltered one.
+  with the drop in force, so a gateway that cannot configure itself leaves the sandbox with no route
+  rather than an unfiltered one. Host gateway resolution is an explicit `exit 1` rather than a
+  `set -euo pipefail` casualty — an unresolved address used to be substituted with `127.0.0.1`
+  instead, which started the sandbox with the feature silently pointing at the container itself.
 
 `TestGatewayEntrypointDropsForwardingFirst` (`assets/assets_test.go`) pins the order: the drop has
 to precede every other startup step and the generated ruleset.

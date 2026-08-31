@@ -39,12 +39,29 @@ if ! grep -q '[^-]nftset' <<<"${dnsmasq_version}"; then
   exit 1
 fi
 
-host_gateway_ip="$(getent hosts host.internal | awk '$1 !~ /:/ {print $1; exit}' || true)"
-if [[ -z "${host_gateway_ip}" ]]; then
+# The address the runtime injects for `host-gateway` lives in /etc/hosts, and it is read from there
+# rather than through getent: a runtime that injects both an IPv4 and an IPv6 entry (OrbStack) makes
+# glibc answer with the IPv6 one, and an IPv4-only filter is then left with nothing.
+# `host.containers.internal` is Podman's built-in name for the same address.
+host_gateway_ip="$(awk '$1 !~ /:/ {
+    for (i = 2; i <= NF; i++)
+      if ($i == "host.internal" || $i == "host.containers.internal") { print $1; exit }
+  }' /etc/hosts)"
+
+# A host gateway zone exists exactly when the generated Corefile carries the placeholder, so the
+# entrypoint needs no extra signal from compose — and cannot drift out of sync with the policy.
+if grep -q '{HOST_GATEWAY_IP}' "${COREFILE_TEMPLATE}"; then
+  case "${host_gateway_ip}" in
+    ""|127.*|0.0.0.0)
+      echo "ERROR: no usable IPv4 host gateway address in /etc/hosts (found '${host_gateway_ip:-none}');" >&2
+      echo "       network.hostGatewayDomains cannot work on this container runtime" >&2
+      exit 1
+      ;;
+  esac
+elif [[ -z "${host_gateway_ip}" ]]; then
   # Never leave the placeholder in the rules: an unresolved host gateway must not turn into
   # a syntactically valid rule pointing somewhere unintended.
   host_gateway_ip="127.0.0.1"
-  echo "WARNING: could not resolve host.internal; host gateway domains will not work" >&2
 fi
 
 subnet_prefix="$(echo "${HOLE_SANDBOX_SUBNET}" | cut -d/ -f1 | cut -d. -f1-3)"
