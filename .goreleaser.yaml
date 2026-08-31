@@ -1,0 +1,52 @@
+# GoReleaser builds the release binaries. Raw binaries rather than archives: both the
+# installer and `hole update` then download exactly one file per platform and verify it
+# against checksums.txt, with no unpacking step anywhere.
+version: 2
+
+project_name: hole
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: hole
+    main: ./cmd/hole
+    binary: hole
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/lukashornych/hole/v2/internal/version.Version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      # linux/arm64 also covers WSL on ARM hosts.
+      - arm64
+
+archives:
+  # `hole_<os>_<arch>` is the name the installer and self-update look for; keep the two in
+  # sync with internal/update.BinaryAssetName.
+  - id: binaries
+    formats: [binary]
+    name_template: "hole_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  # Release notes come from release-drafter, which the release workflow already maintains.
+  disable: true
+
+release:
+  prerelease: auto
+  # release-drafter has already published the release and owns its notes; GoReleaser must only
+  # add the binaries, not rewrite the body with its own (disabled, therefore empty) changelog.
+  mode: keep-existing

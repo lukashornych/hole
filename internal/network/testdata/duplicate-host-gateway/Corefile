@@ -1,0 +1,36 @@
+health.hole.internal:53 {
+    template IN A health.hole.internal {
+        answer "{{ .Name }} 0 IN A 127.0.0.1"
+    }
+    template IN AAAA health.hole.internal {
+        rcode NOERROR
+    }
+    errors
+}
+
+app.test:53 {
+    template IN A app.test {
+        answer "{{ .Name }} 60 IN A {HOST_GATEWAY_IP}"
+    }
+    template IN AAAA app.test {
+      rcode NOERROR
+    }
+    log
+    errors
+}
+
+. {
+    view allowed {
+        expr name() matches '(?i)^(?:api\\.github\\.com)\\.?$'
+    }
+    forward . 127.0.0.1:5353
+    log
+    errors
+}
+. {
+    template IN ANY . {
+        rcode NXDOMAIN
+    }
+    log
+    errors
+}

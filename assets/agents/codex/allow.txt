@@ -1,0 +1,6 @@
+# Domains the Codex CLI needs at runtime.
+# Format: <host>[:<port>[,<port>...]] — ports default to 443,80.
+api.openai.com
+auth.openai.com
+chatgpt.com
+*.chatgpt.com

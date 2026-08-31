@@ -1,0 +1,15 @@
+health.hole.internal:53 {
+    template IN A health.hole.internal {
+        answer "{{ .Name }} 0 IN A 127.0.0.1"
+    }
+    template IN AAAA health.hole.internal {
+        rcode NOERROR
+    }
+    errors
+}
+
+. {
+    forward . 127.0.0.1:5353
+    log
+    errors
+}

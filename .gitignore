@@ -1,2 +1,13 @@
 # JetBrains IDEs (IntelliJ IDEA, PyCharm, WebStorm, etc.)
 .idea/
+
+# macOS
+.DS_Store
+
+# Go build output
+/hole
+*.test
+coverage.out
+
+# Local test run logs
+*.log

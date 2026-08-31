@@ -1,0 +1,25 @@
+health.hole.internal:53 {
+    template IN A health.hole.internal {
+        answer "{{ .Name }} 0 IN A 127.0.0.1"
+    }
+    template IN AAAA health.hole.internal {
+        rcode NOERROR
+    }
+    errors
+}
+
+. {
+    view allowed {
+        expr name() matches '(?i)^(?:api\\.anthropic\\.com|claude\\.ai|([^.]+\\.)+claude\\.ai)\\.?$'
+    }
+    forward . 127.0.0.1:5353
+    log
+    errors
+}
+. {
+    template IN ANY . {
+        rcode NXDOMAIN
+    }
+    log
+    errors
+}

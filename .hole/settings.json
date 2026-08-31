@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/lukashornych/hole/main/assets/schema/settings.schema.json",
+  "hooks": {
+    "setup": [
+      {
+        "script": ".hole/setup.sh"
+      }
+    ]
+  },
+  "environment": {
+    "GOPROXY": "https://proxy.golang.org"
+  },
+  "network": {
+    "allow": [
+      "golang.org",
+      "*.golang.org",
+      "go.dev",
+      "storage.googleapis.com",
+      "github.com",
+      "raw.githubusercontent.com",
+      "objects.githubusercontent.com"
+    ]
+  },
+  "git": {
+    "worktreePool": true
+  }
+}
