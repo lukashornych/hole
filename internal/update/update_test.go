@@ -300,3 +300,20 @@ func TestConfirmRemoveSettingsPromptNamesTheDirectory(t *testing.T) {
 		t.Errorf("prompt = %q, want it to name the directory", out.String())
 	}
 }
+
+// A container runtime that cannot be resolved must not keep Hole installed: the uninstall
+// carries on and removes the user directory it was asked to remove.
+func TestUninstallWithoutAContainerEngine(t *testing.T) {
+	host := hostenv.Host{Home: t.TempDir(), Username: "tester"}
+	agentDir := filepath.Join(host.UserAgentsDir(), "mine")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// KeepBinary, or this would delete the test binary itself.
+	Uninstall(host, nil, UninstallOptions{RemoveSettings: true, KeepBinary: true})
+
+	if _, err := os.Stat(host.HoleDir()); err == nil {
+		t.Error("uninstall without a container runtime left the user directory behind")
+	}
+}
