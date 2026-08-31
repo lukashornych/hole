@@ -23,7 +23,7 @@ internal/sandbox/      orchestration: startup, mounts, compose generation, teard
                        the watchdog handoff, garbage collection, `hole list`
 internal/state/        instance registry under ~/.hole/instances
 internal/trust/        per-project consent for host-affecting project settings
-internal/worktree/     git worktree detection and the libraries it implies
+internal/worktree/     git worktree detection: the libraries it implies and the worktree pool
 internal/dindregistry/ the long-lived pull-through image cache
 internal/update/       release discovery, self-update, version-change migration, uninstall
 internal/logging/      slog setup: console handler + per-run JSON file handler

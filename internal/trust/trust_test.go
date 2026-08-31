@@ -49,6 +49,7 @@ func TestGrants(t *testing.T) {
 				"dependencies": ["maven"],
 				"container": {"docker": true},
 				"libraries": {"~/lib": {"path": "/libs/lib", "readwrite": true}},
+				"git": {"worktreePool": true},
 				"files": {"include": {"~/.ssh": "~/.ssh"}},
 				"network": {"allow": ["registry.npmjs.org"], "hostGatewayDomains": ["db.local:5432"]},
 				"hooks": {
@@ -63,6 +64,7 @@ func TestGrants(t *testing.T) {
 				{Key: "files.include", Values: []string{"~/.ssh -> ~/.ssh"}},
 				{Key: "libraries", Values: []string{"~/lib -> /libs/lib (read-write)"}},
 				{Key: "container.docker", Values: []string{"true"}},
+				{Key: "git.worktreePool", Values: []string{"true"}},
 				{Key: "network.hostGatewayDomains", Values: []string{"db.local:5432"}},
 				{Key: "hooks.setup", Values: []string{".hole/setup.sh"}},
 				{Key: "dependencies", Values: []string{"maven"}},
@@ -84,6 +86,20 @@ func TestGrants(t *testing.T) {
 		{
 			name:     "docker disabled explicitly asks for nothing",
 			document: `{"container": {"docker": false}}`,
+		},
+		{
+			// The pool creates a directory on the host and mounts it read-write, so it is
+			// gated — while worktreeLinks, which only mounts checkouts that already exist,
+			// is not, and must not start prompting existing users.
+			name:     "the worktree pool is gated, worktreeLinks is not",
+			document: `{"git": {"worktreeLinks": "rw", "worktreePool": true}}`,
+			want: []grant{
+				{Key: "git.worktreePool", Values: []string{"true"}},
+			},
+		},
+		{
+			name:     "the worktree pool disabled explicitly asks for nothing",
+			document: `{"git": {"worktreeLinks": "ro", "worktreePool": false}}`,
 		},
 		{
 			// A profile is part of the same file, so its grants are shown whether or not the
@@ -168,6 +184,20 @@ func TestDigest(t *testing.T) {
 	if digestOf(`{"network": {"allow": ["a.example.com"]}}`) ==
 		digestOf(`{"network": {"allow": ["a.example.com", "b.example.com"]}}`) {
 		t.Error("adding a domain to network.allow kept the same digest")
+	}
+	// worktreeLinks grants nothing on its own, so every project already using it keeps its
+	// recorded decision.
+	if digestOf(base) != digestOf(`{
+		"hooks": {"setupHost": [{"script": "a.sh"}]},
+		"git": {"worktreeLinks": "rw"}
+	}`) {
+		t.Error("git.worktreeLinks changed the digest")
+	}
+	if digestOf(base) == digestOf(`{
+		"hooks": {"setupHost": [{"script": "a.sh"}]},
+		"git": {"worktreePool": true}
+	}`) {
+		t.Error("git.worktreePool kept the same digest")
 	}
 	if digestOf(base) == digestOf(`{"hooks": {"cleanupHost": [{"script": "a.sh"}]}}`) {
 		t.Error("the same value under a different key kept the same digest")

@@ -45,19 +45,19 @@ func run(t *testing.T, dir string, args ...string) {
 }
 
 func TestDeriveNothingOutsideAGitRepository(t *testing.T) {
-	if links := Derive(t.TempDir(), LinkReadOnly); links != nil {
+	if links := Derive(t.TempDir(), LinkReadOnly, false).Links; links != nil {
 		t.Errorf("a plain directory yielded %v", links)
 	}
 }
 
 func TestDeriveNothingWhenOff(t *testing.T) {
-	if links := Derive(repo(t), LinkOff); links != nil {
+	if links := Derive(repo(t), LinkOff, false).Links; links != nil {
 		t.Errorf("worktreeLinks=off yielded %v", links)
 	}
 }
 
 func TestDeriveNothingForAPlainRepositoryWithoutWorktrees(t *testing.T) {
-	if links := Derive(repo(t), LinkReadOnly); len(links) != 0 {
+	if links := Derive(repo(t), LinkReadOnly, false).Links; len(links) != 0 {
 		t.Errorf("a repository with no linked worktrees yielded %v", links)
 	}
 }
@@ -67,7 +67,7 @@ func TestDeriveLinksSiblingWorktreeFromTheMainRepository(t *testing.T) {
 	sibling := filepath.Join(tempDir(t), "feature")
 	run(t, main, "worktree", "add", "-q", "-b", "feature", sibling)
 
-	links := Derive(main, LinkReadOnly)
+	links := Derive(main, LinkReadOnly, false).Links
 	if len(links) != 1 {
 		t.Fatalf("expected the sibling worktree, got %v", links)
 	}
@@ -86,7 +86,7 @@ func TestDeriveLinksMainRepositoryFromALinkedWorktree(t *testing.T) {
 
 	// A linked worktree's .git is only a pointer, so without the main repository the agent
 	// cannot run git at all.
-	links := Derive(linked, LinkReadOnly)
+	links := Derive(linked, LinkReadOnly, false).Links
 	if len(links) != 1 {
 		t.Fatalf("expected the main repository, got %v", links)
 	}
@@ -100,7 +100,7 @@ func TestDeriveReadWriteMode(t *testing.T) {
 	sibling := filepath.Join(tempDir(t), "feature")
 	run(t, main, "worktree", "add", "-q", "-b", "feature", sibling)
 
-	links := Derive(main, LinkReadWrite)
+	links := Derive(main, LinkReadWrite, false).Links
 	if len(links) != 1 || !links[0].ReadWrite {
 		t.Errorf("links = %+v, want one read-write link", links)
 	}
@@ -112,7 +112,7 @@ func TestDeriveSkipsWorktreesInsideTheProject(t *testing.T) {
 	inside := filepath.Join(main, "nested", "feature")
 	run(t, main, "worktree", "add", "-q", "-b", "feature", inside)
 
-	if links := Derive(main, LinkReadOnly); len(links) != 0 {
+	if links := Derive(main, LinkReadOnly, false).Links; len(links) != 0 {
 		t.Errorf("a worktree inside the project yielded %v", links)
 	}
 }
@@ -128,19 +128,119 @@ func TestDeriveThroughASymlinkedProjectDirectory(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	if links := Derive(link, LinkReadOnly); len(links) != 0 {
+	if links := Derive(link, LinkReadOnly, false).Links; len(links) != 0 {
 		t.Errorf("a symlinked plain repository yielded %v", links)
 	}
 
 	sibling := filepath.Join(tempDir(t), "feature")
 	run(t, main, "worktree", "add", "-q", "-b", "feature", sibling)
 
-	links := Derive(link, LinkReadOnly)
+	links := Derive(link, LinkReadOnly, false).Links
 	if len(links) != 1 {
 		t.Fatalf("expected only the sibling worktree, got %v", links)
 	}
 	if !sameDir(links[0].HostPath, sibling) {
 		t.Errorf("linked %s, want %s", links[0].HostPath, sibling)
+	}
+}
+
+// linkFor returns the derived link for a host path, or fails the test.
+func linkFor(t *testing.T, links []Link, hostPath string) Link {
+	t.Helper()
+	for _, link := range links {
+		if sameDir(link.HostPath, hostPath) {
+			return link
+		}
+	}
+	t.Fatalf("no link for %s in %v", hostPath, links)
+	return Link{}
+}
+
+func TestDerivePoolNamesTheProjectSiblingAndIsReadWrite(t *testing.T) {
+	main := repo(t)
+	derivation := Derive(main, LinkReadOnly, true)
+
+	// The pool is named before it exists: nothing creates it here.
+	want := main + "-worktrees"
+	if derivation.Pool != want {
+		t.Fatalf("pool = %q, want %q", derivation.Pool, want)
+	}
+	if _, err := os.Stat(want); err == nil {
+		t.Error("Derive must not create the pool directory")
+	}
+	if link := linkFor(t, derivation.Links, want); !link.ReadWrite {
+		t.Error("the pool must be mounted read-write")
+	}
+	if len(derivation.Links) != 1 {
+		t.Errorf("links = %v, want the pool only", derivation.Links)
+	}
+}
+
+func TestDerivePoolCoversTheWorktreesInsideIt(t *testing.T) {
+	main := repo(t)
+	pool := main + "-worktrees"
+	inside := filepath.Join(pool, "feature")
+	run(t, main, "worktree", "add", "-q", "-b", "feature", inside)
+	outside := filepath.Join(tempDir(t), "hotfix")
+	run(t, main, "worktree", "add", "-q", "-b", "hotfix", outside)
+
+	derivation := Derive(main, LinkReadOnly, true)
+
+	// A checkout inside the pool must not get a second, read-only mount nested in the pool's.
+	for _, link := range derivation.Links {
+		if isInside(link.HostPath, pool) && !sameDir(link.HostPath, pool) {
+			t.Errorf("worktree inside the pool was linked individually: %+v", link)
+		}
+	}
+	if len(derivation.PoolWorktrees) != 1 || !sameDir(derivation.PoolWorktrees[0], inside) {
+		t.Errorf("pool worktrees = %v, want [%s]", derivation.PoolWorktrees, inside)
+	}
+	// A checkout outside it is still linked individually, honoring the ro/rw mode.
+	if link := linkFor(t, derivation.Links, outside); link.ReadWrite {
+		t.Error("an outside worktree must stay read-only under worktreeLinks=ro")
+	}
+	if len(derivation.Links) != 2 {
+		t.Errorf("links = %v, want the pool and the outside worktree", derivation.Links)
+	}
+}
+
+func TestDerivePoolReadWriteModeKeepsOutsideWorktreesWritable(t *testing.T) {
+	main := repo(t)
+	outside := filepath.Join(tempDir(t), "hotfix")
+	run(t, main, "worktree", "add", "-q", "-b", "hotfix", outside)
+
+	derivation := Derive(main, LinkReadWrite, true)
+	if link := linkFor(t, derivation.Links, outside); !link.ReadWrite {
+		t.Error("worktreeLinks=rw must still apply to worktrees outside the pool")
+	}
+}
+
+// The load-bearing rule: without it the pool could be a parent of the project directory, and the
+// pool mount would nest with the project mount.
+func TestDeriveNoPoolInALinkedWorktree(t *testing.T) {
+	main := repo(t)
+	linked := filepath.Join(tempDir(t), "feature")
+	run(t, main, "worktree", "add", "-q", "-b", "feature", linked)
+
+	derivation := Derive(linked, LinkReadOnly, true)
+	if derivation.Pool != "" {
+		t.Errorf("pool = %q, want none in a linked worktree", derivation.Pool)
+	}
+	if len(derivation.Links) != 1 || !sameDir(derivation.Links[0].HostPath, main) {
+		t.Errorf("links = %v, want the main repository only", derivation.Links)
+	}
+}
+
+func TestDeriveNoPoolWhenLinksAreOff(t *testing.T) {
+	derivation := Derive(repo(t), LinkOff, true)
+	if derivation.Pool != "" || derivation.Links != nil {
+		t.Errorf("worktreeLinks=off yielded %+v", derivation)
+	}
+}
+
+func TestDeriveNoPoolOutsideAGitRepository(t *testing.T) {
+	if derivation := Derive(t.TempDir(), LinkReadOnly, true); derivation.Pool != "" {
+		t.Errorf("a plain directory yielded pool %q", derivation.Pool)
 	}
 }
 

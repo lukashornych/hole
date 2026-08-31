@@ -392,11 +392,12 @@ Answering no starts nothing at all — no container, and none of the scripts abo
 | `hooks.setupHost`, `hooks.cleanupHost` | run a script **on your host**, as you |
 | `files.include`, `libraries` | mount host paths into the sandbox |
 | `container.docker` | add the privileged Docker-in-Docker sidecar |
+| `git.worktreePool` | create a worktree directory next to your project and mount it read-write |
 | `network.hostGatewayDomains` | reach services running on your host |
 | `hooks.setup`, `dependencies` | run during the image build, which uses your host's network rather than the gateway |
 | `network.allow` | widen the network allow-list — every destination the sandbox may reach is also somewhere it can send the project's contents |
 
-Everything else in a project file is confined to the sandbox and never prompts — `files.exclude` only takes access away, and `environment`, `agents.*.args`, `container.baseImage`, `hooks.prestart` and `network.subnetPool` act inside the container, which is the boundary.
+Everything else in a project file is confined to the sandbox and never prompts — `files.exclude` only takes access away, and `environment`, `agents.*.args`, `container.baseImage`, `hooks.prestart` and `network.subnetPool` act inside the container, which is the boundary. `git.worktreeLinks` is not gated either: it mounts checkouts of the repository you already pointed Hole at, and creates nothing.
 
 A yes is remembered in `~/.hole/trust.json`, keyed by project path and by *what* you accepted: editing an ungated setting later changes nothing, but a project that starts asking for more asks again. Delete the file (or the project's entry) to be asked afresh.
 
@@ -488,12 +489,49 @@ If your project is a git worktree, Hole mounts the related checkouts automatical
 ```json
 {
   "git": {
-    "worktreeLinks": "ro"
+    "worktreeLinks": "ro",
+    "worktreePool": false
   }
 }
 ```
 
-`"ro"` (default), `"rw"`, or `"off"`. Explicit `libraries`/`--library` entries for the same path win. If `git` is not installed, this is skipped silently.
+`worktreeLinks` is `"ro"` (default), `"rw"`, or `"off"`. Explicit `libraries`/`--library` entries for the same path win. If `git` is not installed, this is skipped silently.
+
+#### A place to create worktrees
+
+The checkouts above are the ones that already existed when the sandbox started. A worktree the agent creates *during* a session lands in the container's writable layer and is lost at exit — while the admin entry it wrote into your repository survives, pointing at a directory that is no longer there.
+
+`"worktreePool": true` fixes that. Started in the main repository, Hole creates a sibling directory of your project and mounts it read-write:
+
+```
+~/projects/myapp             # your project
+~/projects/myapp-worktrees   # the pool
+```
+
+so `git worktree add ~/projects/myapp-worktrees/feature-x` inside the sandbox produces a checkout that is still valid on the host afterwards. Hole creates the directory and **never** deletes it — the checkouts in it are yours. Remove them with `git worktree remove` (or `git worktree prune`), not `rm -rf`, so the repository's admin files stay consistent.
+
+The two mechanisms divide the work by location: a checkout inside the project comes with the project mount, one inside the pool with the pool mount, and any other one gets its own `worktreeLinks` mount. So `"worktreeLinks": "ro"` plus a pool means existing outside checkouts stay read-only while the pool — whose whole purpose is to be written to — is read-write.
+
+The pool is only mounted when you start the sandbox **in the main repository**: from a linked worktree `git worktree add` cannot write the main repository's admin files anyway. `"worktreeLinks": "off"` switches the pool off too, and in a project settings file the pool needs your confirmation once, because it creates a host directory outside the project.
+
+Tell your agent about it in the project's own instructions (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md` — Hole does not write these for you):
+
+````markdown
+## Git worktrees
+
+If `$HOLE_WORKTREES_DIR` is set, create git worktrees inside it:
+
+```sh
+git worktree add "$HOLE_WORKTREES_DIR/<branch>" <branch>
+```
+
+Worktrees created anywhere else exist only inside the sandbox and are lost when it exits. If the
+variable is not set, use the project's usual location.
+````
+
+Keep the `if` — that file is read by agents running on your host too, and inside a sandbox the variable is unset whenever the pool is not mounted (started in a linked worktree, `worktreeLinks: "off"`, or the pool disabled). Unconditional instructions would degrade into `git worktree add /<branch>` in every one of those cases.
+
+**A worktree created mid-session gets no `files.exclude` over-mounts.** The mount set is fixed when the sandbox starts, so only checkouts that already existed then have their secrets hidden — each according to its own `.hole/settings.json`, exactly as a library does. This is the sharp edge of the mode's benefit: the sandbox cannot hide what did not exist yet.
 
 ### Network access
 

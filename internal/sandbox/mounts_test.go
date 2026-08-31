@@ -124,3 +124,142 @@ func TestMergeLibrariesConfiguredOnly(t *testing.T) {
 		t.Errorf("libraries = %v", libraries)
 	}
 }
+
+// poolFixture builds a project with a worktree pool beside it: one checkout in the pool that
+// hides its own `.env` through its own settings file, and one that has no settings file.
+func poolFixture(t *testing.T) (host hostenv.Host, projectDir, poolDir, hiding, plain string) {
+	t.Helper()
+	host = hostenv.Host{Username: "dev", Home: t.TempDir()}
+	projectDir = filepath.Join(host.Home, "myapp")
+	poolDir = projectDir + "-worktrees"
+	hiding = filepath.Join(poolDir, "feature")
+	plain = filepath.Join(poolDir, "hotfix")
+
+	for _, file := range []string{
+		filepath.Join(projectDir, ".env"),
+		filepath.Join(hiding, ".env"),
+		filepath.Join(hiding, ".hole", "settings.json"),
+		filepath.Join(plain, ".env"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := "x"
+		if filepath.Base(file) == "settings.json" {
+			content = `{"files": {"exclude": [".env"]}}`
+		}
+		if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return host, projectDir, poolDir, hiding, plain
+}
+
+// The pool is one read-write mount at its root: a checkout inside it must not get a library
+// mount of its own, which would nest a read-only mount inside the read-write pool.
+func TestPoolIsASingleReadWriteMount(t *testing.T) {
+	host, projectDir, poolDir, _, _ := poolFixture(t)
+
+	libraries, err := mergeLibraries(host, projectDir, nil,
+		[]worktree.Link{{HostPath: poolDir, ReadWrite: true}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	builder := newMountBuilder(host, t.TempDir())
+	if err := builder.addLibraries(libraries, projectDir); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{poolDir + ":" + poolDir}; !reflect.DeepEqual(builder.mounts, want) {
+		t.Errorf("mounts = %v, want %v", builder.mounts, want)
+	}
+	if !reflect.DeepEqual(builder.libraries, []string{poolDir + ":" + poolDir}) {
+		t.Errorf("libraries = %v, want the pool mirrored onto the sidecar", builder.libraries)
+	}
+}
+
+// Every checkout Hole exposes hides what its own settings file asks to hide. Inside the pool that
+// is the only thing that can: the pool is mounted at its root, so `addLibraries` never looks at
+// the children, and without this the project's secrets would be visible in every checkout below it.
+func TestPoolWorktreeExclusionsComeFromEachWorktreesOwnSettings(t *testing.T) {
+	host, projectDir, poolDir, hiding, plain := poolFixture(t)
+
+	builder := newMountBuilder(host, t.TempDir())
+	// The same order generateCompose uses: project exclusions, libraries (the pool), then the
+	// over-mounts inside the pool.
+	if err := builder.addExclusions(projectDir, projectDir, []string{".env"}); err != nil {
+		t.Fatal(err)
+	}
+	libraries, err := mergeLibraries(host, projectDir, nil,
+		[]worktree.Link{{HostPath: poolDir, ReadWrite: true}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.addLibraries(libraries, projectDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.addPoolWorktreeExclusions([]string{hiding, plain}); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		"/dev/null:" + filepath.Join(projectDir, ".env") + ":ro",
+		poolDir + ":" + poolDir,
+		"/dev/null:" + filepath.Join(hiding, ".env") + ":ro",
+	}
+	if !reflect.DeepEqual(builder.mounts, want) {
+		t.Errorf("mounts = %v, want %v (a checkout without settings inherits nothing)", builder.mounts, want)
+	}
+	// Over-mounts inside the pool must reach the sidecar too, or `docker build` there sees the file.
+	if !reflect.DeepEqual(builder.exclusions, []string{want[0], want[2]}) {
+		t.Errorf("exclusions = %v, want both over-mounts mirrored onto the sidecar", builder.exclusions)
+	}
+}
+
+// The refactor that gave the pool children their exclusions must not have cost the library — and
+// the derived worktrees outside the pool — theirs.
+func TestLibraryExclusionsSurviveOnItsOwnMount(t *testing.T) {
+	host := hostenv.Host{Username: "dev", Home: t.TempDir()}
+	libraryDir := filepath.Join(host.Home, "sibling-worktree")
+	for _, file := range []string{
+		filepath.Join(libraryDir, ".env"),
+		filepath.Join(libraryDir, ".hole", "settings.json"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := "x"
+		if filepath.Base(file) == "settings.json" {
+			content = `{"files": {"exclude": [".env"]}}`
+		}
+		if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	builder := newMountBuilder(host, t.TempDir())
+	if err := builder.addLibraries(
+		map[string]config.Library{libraryDir: {Path: libraryDir}}, host.Home); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		libraryDir + ":" + libraryDir + ":ro",
+		"/dev/null:" + filepath.Join(libraryDir, ".env") + ":ro",
+	}
+	if !reflect.DeepEqual(builder.mounts, want) {
+		t.Errorf("mounts = %v, want %v", builder.mounts, want)
+	}
+}
+
+// The pool is a derived source like any other, so an explicit entry for the same path wins.
+func TestExplicitLibraryBeatsThePool(t *testing.T) {
+	poolDir := "/home/dev/myapp-worktrees"
+	libraries, err := mergeLibraries(testHost(), "/home/dev/myapp",
+		map[string]config.Library{poolDir: {Path: "/libs/pool", ReadWrite: false}},
+		[]worktree.Link{{HostPath: poolDir, ReadWrite: true}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := libraries[poolDir]; got.Path != "/libs/pool" || got.ReadWrite {
+		t.Errorf("pool library = %+v, want the configured entry to win", got)
+	}
+}

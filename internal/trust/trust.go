@@ -49,6 +49,9 @@ type capability struct {
 // first. Settings whose effect is confined to the sandbox are absent on purpose: `files.exclude`
 // only removes access, and `environment`, `agents.*.args`, `container.baseImage`,
 // `hooks.prestart` and `network.subnetPool` act inside the container, which is the boundary.
+// `git.worktreeLinks` is absent too, and deliberately asymmetric with `git.worktreePool`: it
+// mounts checkouts of the repository Hole was already pointed at, while the pool *creates* a
+// directory beside the project.
 var capabilities = []capability{
 	{
 		key:    "hooks.setupHost",
@@ -74,6 +77,16 @@ var capabilities = []capability{
 		key:    "container.docker",
 		effect: "adds the privileged Docker-in-Docker sidecar",
 		values: dockerValues,
+	},
+	{
+		key:    "git.worktreePool",
+		effect: "creates a worktree directory next to your project and mounts it read-write",
+		values: func(s *config.Settings) []string {
+			if s.Git.WorktreePool {
+				return []string{"true"}
+			}
+			return nil
+		},
 	},
 	{
 		key:    "network.hostGatewayDomains",

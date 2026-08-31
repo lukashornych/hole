@@ -20,5 +20,8 @@
       "raw.githubusercontent.com",
       "objects.githubusercontent.com"
     ]
+  },
+  "git": {
+    "worktreePool": true
   }
 }

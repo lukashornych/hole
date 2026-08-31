@@ -235,20 +235,46 @@ func (b *mountBuilder) addLibraries(libraries map[string]config.Library, project
 			b.libraries = append(b.libraries, b.mounts[len(b.mounts)-1])
 		}
 
-		librarySettingsPath := filepath.Join(hostPath, ".hole", "settings.json")
-		if _, err := os.Stat(librarySettingsPath); err != nil {
-			continue
-		}
-		label := fmt.Sprintf("library settings (%s)", librarySettingsPath)
-		document, err := config.LoadAndValidate(librarySettingsPath, label)
-		if err != nil {
+		if err := b.addOwnExclusions(hostPath, containerPath); err != nil {
 			return err
 		}
-		librarySettings, err := config.Decode(document)
-		if err != nil {
-			return err
-		}
-		if err := b.addExclusions(hostPath, containerPath, librarySettings.Files.Exclude); err != nil {
+	}
+	return nil
+}
+
+// addOwnExclusions applies the `files.exclude` of a directory's own `.hole/settings.json`,
+// scoped to the mount it is exposed through. A directory without that file gets nothing: the
+// project's own exclusions deliberately do not reach outside the project mount.
+//
+// Every checkout Hole exposes that is not the project goes through here — a library, a derived
+// worktree, or a worktree inside the pool — so "the same way" is one implementation.
+func (b *mountBuilder) addOwnExclusions(hostPath, containerPath string) error {
+	settingsPath := filepath.Join(hostPath, ".hole", "settings.json")
+	if _, err := os.Stat(settingsPath); err != nil {
+		return nil
+	}
+	label := fmt.Sprintf("library settings (%s)", settingsPath)
+	document, err := config.LoadAndValidate(settingsPath, label)
+	if err != nil {
+		return err
+	}
+	settings, err := config.Decode(document)
+	if err != nil {
+		return err
+	}
+	return b.addExclusions(hostPath, containerPath, settings.Files.Exclude)
+}
+
+// addPoolWorktreeExclusions hides what the checkouts inside the worktree pool ask to hide.
+//
+// The pool is a single mount at its root, so `addLibraries` only ever looks for
+// `<pool>/.hole/settings.json` — every secret in every checkout below it would otherwise be
+// visible, where an equivalent checkout mounted as its own library is protected. Because the
+// pool is mounted at its host path, source and mount point are the same absolute path, so
+// these land as over-mounts *inside* the pool mount, exactly like the project's own exclusions.
+func (b *mountBuilder) addPoolWorktreeExclusions(worktrees []string) error {
+	for _, checkout := range worktrees {
+		if err := b.addOwnExclusions(checkout, checkout); err != nil {
 			return err
 		}
 	}

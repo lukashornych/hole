@@ -1,5 +1,6 @@
 // Package worktree derives the libraries implied by a git worktree layout, so an agent
-// working in one worktree can still read the repository's other checkouts.
+// working in one worktree can still read the repository's other checkouts, and names the
+// pool directory the agent may create new worktrees in.
 package worktree
 
 import (
@@ -30,22 +31,45 @@ type Link struct {
 	ReadWrite bool
 }
 
-// Derive returns the worktree-implied libraries for a project directory.
+// poolSuffix names the pool directory beside the project: `~/projects/myapp` gets
+// `~/projects/myapp-worktrees`.
+const poolSuffix = "-worktrees"
+
+// Derivation is everything a project's git layout implies for the sandbox.
+type Derivation struct {
+	// Links are the directories to mount as libraries.
+	Links []Link
+	// Pool is the worktree pool directory, empty unless pool mode applies. The directory may
+	// not exist yet — naming it is this package's job, creating it the caller's.
+	Pool string
+	// PoolWorktrees are the checkouts that already exist inside the pool. The pool mount
+	// covers them, so they get no mount of their own — only their own `files.exclude`, which
+	// nothing else would apply for them.
+	PoolWorktrees []string
+}
+
+// Derive returns what a project directory's git layout implies.
 //
 // If the project is a linked worktree, the main repository is added — a linked worktree's
 // `.git` file only points at it, so without the main repo the agent cannot run git at all.
 // If the project is the main repository, its linked worktrees outside the project directory
-// are added.
+// are added, and with pool set the `<project>-worktrees` sibling is named as a read-write
+// pool for worktrees the agent creates during the session.
+//
+// Pool mode deliberately never activates in a linked worktree: that keeps the pool a sibling
+// of the project, so the pool mount can never nest with the project mount. It is also what
+// git allows — from a linked worktree, `git worktree add` cannot write the main repository's
+// admin files unless that repository is mounted read-write.
 //
 // git is an optional dependency: a missing binary, a non-repository, or any git failure means
 // no links, never a failed start.
-func Derive(projectDir string, mode LinkMode) []Link {
+func Derive(projectDir string, mode LinkMode, pool bool) Derivation {
 	if mode == LinkOff {
-		return nil
+		return Derivation{}
 	}
 	if _, err := exec.LookPath("git"); err != nil {
 		logging.Debug("git is not on PATH, skipping worktree links")
-		return nil
+		return Derivation{}
 	}
 
 	// git reports physical paths, so every comparison here has to be against the resolved
@@ -57,7 +81,7 @@ func Derive(projectDir string, mode LinkMode) []Link {
 	commonDir, err := git(project, "rev-parse", "--git-common-dir")
 	if err != nil {
 		logging.Debug("%s is not a git repository, skipping worktree links", projectDir)
-		return nil
+		return Derivation{}
 	}
 	if !filepath.IsAbs(commonDir) {
 		commonDir = filepath.Join(project, commonDir)
@@ -70,17 +94,26 @@ func Derive(projectDir string, mode LinkMode) []Link {
 	// In a linked worktree the common directory belongs to another checkout.
 	if !sameDir(mainRepo, project) {
 		if isInside(mainRepo, project) {
-			return nil
+			return Derivation{}
 		}
 		logging.Debug("project is a linked worktree of %s", mainRepo)
-		return []Link{{HostPath: mainRepo, ReadWrite: readWrite}}
+		return Derivation{Links: []Link{{HostPath: mainRepo, ReadWrite: readWrite}}}
+	}
+
+	var derivation Derivation
+	if pool {
+		// Built from the already-resolved project directory, so it is resolved by
+		// construction. Always read-write: a pool nobody can write to is worktreeLinks="ro"
+		// with extra steps.
+		derivation.Pool = project + poolSuffix
+		derivation.Links = append(derivation.Links, Link{HostPath: derivation.Pool, ReadWrite: true})
 	}
 
 	raw, err := git(project, "worktree", "list", "--porcelain")
 	if err != nil {
-		return nil
+		// The pool does not depend on the listing, so it survives a failed one.
+		return derivation
 	}
-	var links []Link
 	for _, line := range strings.Split(raw, "\n") {
 		path, found := strings.CutPrefix(strings.TrimSpace(line), "worktree ")
 		if !found {
@@ -91,9 +124,16 @@ func Derive(projectDir string, mode LinkMode) []Link {
 		if sameDir(path, project) || isInside(path, project) {
 			continue
 		}
-		links = append(links, Link{HostPath: path, ReadWrite: readWrite})
+		// A checkout inside the pool is covered by the pool mount. Mounting it individually
+		// too would put a read-only mount inside a read-write one, where which of the two the
+		// agent sees depends on runtime mount ordering.
+		if derivation.Pool != "" && isInside(path, derivation.Pool) {
+			derivation.PoolWorktrees = append(derivation.PoolWorktrees, path)
+			continue
+		}
+		derivation.Links = append(derivation.Links, Link{HostPath: path, ReadWrite: readWrite})
 	}
-	return links
+	return derivation
 }
 
 func git(dir string, args ...string) (string, error) {

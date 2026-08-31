@@ -41,11 +41,17 @@ settings in it whose effect **leaves the sandbox** are gated behind a per-projec
 (`internal/trust`):
 
 `hooks.setupHost`, `hooks.cleanupHost` (host code), `files.include`, `libraries` (host paths into
-the sandbox), `container.docker` (privileged sidecar), `network.hostGatewayDomains` (services on
+the sandbox), `container.docker` (privileged sidecar), `git.worktreePool` (creates a host directory
+next to the project and mounts it read-write), `network.hostGatewayDomains` (services on
 the developer's machine), `hooks.setup`, `dependencies` (code during the image build, which uses
 the host's unfiltered network), `network.allow` (egress widening). Nothing else is gated:
 `files.exclude` only removes access, and `environment`, `agents.*.args`, `container.baseImage`,
 `hooks.prestart` and `network.subnetPool` act inside the container, which is the boundary.
+
+The asymmetry inside `git` is deliberate. `worktreePool` is gated because it *creates* a directory
+outside the project; `worktreeLinks: "rw"` mounts checkouts of the repository Hole was already
+pointed at, and gating it now would re-prompt every project already using it. The capability
+contributes nothing when the setting is false or absent, so no existing recorded digest changes.
 
 The network keys are gated for the same reason as the rest: the test is whether an effect **leaves
 the sandbox**, and egress does. The gateway still polices `network.allow` at L3/L4, but it polices
@@ -200,7 +206,7 @@ exposure (see [analysis/security-audit.md](../analysis/security-audit.md), findi
   project directory and, separately, against each library's own mount. An included path — `~/.claude`,
   `~/.m2/repository` — is mounted whole or not at all.
 
-### `files.include`, `libraries`, `git.worktreeLinks`, `--library`
+### `files.include`, `libraries`, `git.worktreeLinks`, `git.worktreePool`, `--library`
 
 All three sources fold into one map keyed by the **resolved** host path, with precedence
 **derived → configured → flag**: an explicit entry always beats one Hole worked out on its own.
@@ -226,6 +232,67 @@ and a plain repository would look like a linked worktree of itself. `hostenv.Res
 already resolves the path for CLI callers, so `worktree.Derive` resolving again is belt-and-braces —
 but it is what keeps the function correct on its own terms, and on macOS every path under `/tmp` or
 `/var/folders` is symlinked.
+
+`git.worktreePool` adds a place for the agent to *create* worktrees in, on top of the mechanism
+above, which only exposes the ones that already existed. `Derive` returns a `Derivation`: the links,
+the pool directory, and the checkouts that already exist inside it. The decision tree, in order:
+
+```
+project is a linked worktree
+    └─ worktreeLinks == off  → nothing
+       otherwise             → link the main repository (ro/rw); no pool
+
+project is the main repository
+    ├─ worktreeLinks == off  → nothing (one master switch for the whole mechanism)
+    ├─ worktreePool == false → link every linked worktree outside the project
+    └─ worktreePool == true  → mount `<project>-worktrees` read-write
+                             + link every linked worktree outside the project *and* the pool
+```
+
+Four things carry that design:
+
+- **Pool mode never activates in a linked worktree.** That is what keeps the pool a *sibling* of the
+  project, so the pool mount and the project mount can never nest, and makes the path trivially
+  `project + "-worktrees"`. It costs nothing git allows anyway: from a linked worktree whose main
+  repository is mounted read-only, `git worktree add` cannot write `.git/worktrees/` either.
+- **A checkout inside the pool gets no individual link.** With both unfiltered, a pool holding two
+  checkouts would produce `ro` library mounts nested inside the `rw` pool mount, and `mountBuilder.add`
+  keys on the container target — the targets differ, so which mount the agent ends up seeing would come
+  down to runtime mount ordering. Excluding them partitions the space instead: project mount, pool
+  mount, individual link, by location.
+- **The pool directory is named in `internal/worktree` and created in `start.go`** (`ensureWorktreePool`,
+  before `generateCompose`). `Derive` stays side-effect free — it is unit-tested with no runtime and
+  writes nothing — while the creation has to happen host-side and as the invoking user: a bind source
+  the daemon creates is root-owned, and against a remote daemon a missing one silently resolves to an
+  empty directory. It is the rare mount failure that is fatal rather than a warning, because the agent
+  would be told it has a pool and would write into a directory that dies with the sandbox.
+- **`HOLE_WORKTREES_DIR` is the whole interface.** `composegen` exports it only when the pool is really
+  mounted, so its absence is a reliable signal, and nothing generates instructions for the agent: the
+  convention belongs in the project's own `CLAUDE.md`/`AGENTS.md`/`GEMINI.md`, which is already mounted.
+  Writing into the project would dirty the user's checkout, and appending to `$HOME/.claude/CLAUDE.md`
+  would edit the user's real global memory whenever they mount their agent config — which is the
+  documented pattern.
+
+Exclusions follow one rule: **every checkout Hole exposes hides what its own `.hole/settings.json`
+asks to hide, scoped to its own mount** (`mountBuilder.addOwnExclusions`, used by `addLibraries` and by
+`addPoolWorktreeExclusions`). For a library or an individual worktree link that is what
+`addLibraries` always did. Inside the pool it is load-bearing: the pool is a *single* mount at its
+root, so without it `<pool>/feature/.env` would be visible while the same checkout mounted as its own
+library is protected. The children get over-mounts, not mounts of their own — source and target are
+the same absolute path, so they land inside the pool mount exactly like the project's own exclusions.
+The child list comes from `git worktree list`, so unrelated directories a user parked in the pool are
+left alone. The project's own `files.exclude` deliberately does not reach into them, for the same
+reason it does not reach into a library: a pool child and a sibling checkout must hide the same files.
+
+Consequences, accepted: a worktree created *mid-session* gets no exclusions at all, because the mount
+set is fixed at start — the sharp edge of the mode's benefit, documented in the README — and a
+checkout on a branch whose `.hole/settings.json` predates an exclusion does not hide what that
+exclusion hides, exactly like a library in that state.
+
+The bare-clone layout has no pool: `Derive` currently takes the linked-worktree branch for a bare
+main repository ([analysis](../analysis/git-bare-repo-worktree-link-fix-plan.md)), and when that is
+fixed the pool must stay switched off for `core.bare` repositories — a repository with no working
+tree has no working-tree convention for a pool to belong to.
 
 ### `dependencies`
 

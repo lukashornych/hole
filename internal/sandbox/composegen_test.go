@@ -15,6 +15,7 @@ import (
 	"github.com/lukashornych/hole/v2/internal/dindregistry"
 	"github.com/lukashornych/hole/v2/internal/hostenv"
 	"github.com/lukashornych/hole/v2/internal/network"
+	"github.com/lukashornych/hole/v2/internal/worktree"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite golden compose files")
@@ -655,5 +656,49 @@ func TestGenerateComposeRejectsCollidingIncludeTargets(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "/work/config") {
 		t.Errorf("error should name the colliding container path: %v", err)
+	}
+}
+
+// HOLE_WORKTREES_DIR is the whole mechanism by which the agent learns about the pool, and its
+// absence has to stay a reliable signal: a project's own agent instructions guard on it, because
+// they are read on the host too and in every sandbox started without a pool.
+func TestGenerateComposeExportsThePoolDirectoryOnlyWhenMounted(t *testing.T) {
+	projectDir, _ := fixture(t)
+	poolDir := projectDir + "-worktrees"
+	if err := os.MkdirAll(poolDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	withPool := testInput(t, projectDir, t.TempDir(), &config.Settings{}, Options{})
+	withPool.gitLayout = worktree.Derivation{
+		Links: []worktree.Link{{HostPath: poolDir, ReadWrite: true}},
+		Pool:  poolDir,
+	}
+	path, err := generateCompose(withPool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "HOLE_WORKTREES_DIR="+poolDir) {
+		t.Errorf("the pool directory is not exported to the agent:\n%s", data)
+	}
+	// Mounted read-write: the point of the pool is that the agent can create checkouts in it.
+	if !strings.Contains(string(data), "- "+poolDir+":"+poolDir+"\n") {
+		t.Errorf("the pool is not mounted read-write at its host path:\n%s", data)
+	}
+
+	path, err = generateCompose(testInput(t, projectDir, t.TempDir(), &config.Settings{}, Options{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "HOLE_WORKTREES_DIR") {
+		t.Errorf("the variable is set without a pool:\n%s", data)
 	}
 }

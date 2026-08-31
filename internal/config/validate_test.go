@@ -23,6 +23,9 @@ func TestValidateAcceptsKnownSettings(t *testing.T) {
 		`{"libraries":{"/host/lib":"/container/lib","~/other":{"path":"~/other","readwrite":true}}}`,
 		`{"environment":{"KEY":"value"}}`,
 		`{"agents":{"claude":{"args":["--model","opus"]}}}`,
+		`{"git":{"worktreeLinks":"rw","worktreePool":true}}`,
+		// The pool is a per-profile decision too, which is why it lives in $defs/settings.
+		`{"profiles":{"p":{"git":{"worktreePool":true}}}}`,
 		// A profile accepts exactly the root settings keys, plus extends in either form.
 		`{"profiles":{"research":{"network":{"allow":["*.wikipedia.org"]}}}}`,
 		`{"profiles":{"a":{},"b":{"extends":"a"},"c":{"extends":["a","b"]}}}`,
@@ -52,15 +55,17 @@ func TestValidateRejectsUnknownAndMalformedSettings(t *testing.T) {
 		"malformed subnet pool":   `{"network":{"subnetPool":"not-a-cidr"}}`,
 		"hook entry without path": `{"hooks":{"prestart":[{}]}}`,
 		// Profiles cannot nest, cannot redeclare $schema, and are strict about their keys.
-		"nested profiles":         `{"profiles":{"p":{"profiles":{"q":{}}}}}`,
-		"schema inside a profile": `{"profiles":{"p":{"$schema":"x"}}}`,
-		"unknown key in profile":  `{"profiles":{"p":{"nope":true}}}`,
-		"bad profile name":        `{"profiles":{"Bad Name":{}}}`,
-		"bad extends name":        `{"profiles":{"p":{"extends":"Bad Name"}}}`,
-		"extends wrong type":      `{"profiles":{"p":{"extends":42}}}`,
-		"unknown agent arg key":   `{"agents":{"claude":{"nope":true}}}`,
-		"agent args wrong type":   `{"agents":{"claude":{"args":"--model"}}}`,
-		"bad agent name":          `{"agents":{"Not An Agent":{"args":[]}}}`,
+		"nested profiles":          `{"profiles":{"p":{"profiles":{"q":{}}}}}`,
+		"schema inside a profile":  `{"profiles":{"p":{"$schema":"x"}}}`,
+		"unknown key in profile":   `{"profiles":{"p":{"nope":true}}}`,
+		"bad profile name":         `{"profiles":{"Bad Name":{}}}`,
+		"bad extends name":         `{"profiles":{"p":{"extends":"Bad Name"}}}`,
+		"extends wrong type":       `{"profiles":{"p":{"extends":42}}}`,
+		"unknown agent arg key":    `{"agents":{"claude":{"nope":true}}}`,
+		"agent args wrong type":    `{"agents":{"claude":{"args":"--model"}}}`,
+		"bad agent name":           `{"agents":{"Not An Agent":{"args":[]}}}`,
+		"worktree pool not a bool": `{"git":{"worktreePool":"yes"}}`,
+		"unknown git key":          `{"git":{"worktreesDir":"~/wt"}}`,
 	}
 	for name, document := range invalid {
 		t.Run(name, func(t *testing.T) {

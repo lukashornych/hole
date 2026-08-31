@@ -64,7 +64,9 @@ type composeInput struct {
 	dockerEnabled  bool
 	dindVolume     string
 	registryMirror string
-	worktreeLinks  []worktree.Link
+	// gitLayout is what the project's git worktree layout implies: the libraries to mount and,
+	// in pool mode, the pool directory (already created on the host by then).
+	gitLayout worktree.Derivation
 	// interactive is whether the CLI has a terminal to hand to the agent. Without one the agent
 	// service gets no TTY and no open stdin, so its process reads EOF and exits instead of
 	// waiting forever for input nobody can send.
@@ -85,14 +87,18 @@ func generateCompose(in composeInput) (string, error) {
 	if err := mounts.addIncludes(in.settings.Files.Include, in.projectDir()); err != nil {
 		return "", err
 	}
-	libraries, err := mergeLibraries(in.host, in.projectDir(), in.settings.Libraries, in.worktreeLinks, in.opts.Libraries)
+	libraries, err := mergeLibraries(in.host, in.projectDir(), in.settings.Libraries, in.gitLayout.Links, in.opts.Libraries)
 	if err != nil {
 		return "", err
 	}
 	if err := mounts.addLibraries(libraries, in.projectDir()); err != nil {
 		return "", err
 	}
-	for _, link := range in.worktreeLinks {
+	// After the libraries, so the pool mount is recorded before the over-mounts inside it.
+	if err := mounts.addPoolWorktreeExclusions(in.gitLayout.PoolWorktrees); err != nil {
+		return "", err
+	}
+	for _, link := range in.gitLayout.Links {
 		logging.Debug("git worktree library: %s (read-write=%v)", link.HostPath, link.ReadWrite)
 	}
 
@@ -115,6 +121,11 @@ func generateCompose(in composeInput) (string, error) {
 	)
 	if in.dockerEnabled {
 		agentEnv = append(agentEnv, "DOCKER_HOST=tcp://docker:2375")
+	}
+	// Set only when the pool is really mounted, so its absence is a reliable signal for the
+	// convention a project's own agent instructions describe.
+	if in.gitLayout.Pool != "" {
+		agentEnv = append(agentEnv, "HOLE_WORKTREES_DIR="+in.gitLayout.Pool)
 	}
 
 	buildArgs := map[string]string{

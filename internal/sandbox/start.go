@@ -291,6 +291,11 @@ func Start(opts Options) (exitCode int, err error) {
 		return 1, err
 	}
 
+	gitLayout := worktree.Derive(opts.ProjectDir, worktreeMode(settings), settings.Git.WorktreePool)
+	if err := ensureWorktreePool(gitLayout.Pool); err != nil {
+		return 1, err
+	}
+
 	composeFile, err := generateCompose(composeInput{
 		instanceName:   instanceName,
 		projectName:    projectName,
@@ -312,7 +317,7 @@ func Start(opts Options) (exitCode int, err error) {
 		dockerEnabled:  dockerEnabled,
 		dindVolume:     instance.DinDVolume,
 		registryMirror: instance.RegistryMirror,
-		worktreeLinks:  worktree.Derive(opts.ProjectDir, worktreeMode(settings)),
+		gitLayout:      gitLayout,
 		interactive:    engine.IsTerminal(os.Stdin),
 		opts:           opts,
 	})
@@ -846,6 +851,27 @@ func worktreeMode(settings *config.Settings) worktree.LinkMode {
 	default:
 		return worktree.LinkReadOnly
 	}
+}
+
+// ensureWorktreePool creates the pool directory the agent puts new worktrees in.
+//
+// It has to exist before compose runs, and be created here rather than by the daemon: a bind
+// source the daemon creates is owned by root, and against a remote daemon a missing source
+// silently resolves to an empty directory. Failing is right where warning is not — the agent
+// would be told it has a pool and would write checkouts into a container-local directory that
+// dies with the sandbox.
+func ensureWorktreePool(pool string) error {
+	if pool == "" {
+		return nil
+	}
+	if info, err := os.Stat(pool); err == nil && !info.IsDir() {
+		return fmt.Errorf("git worktree pool '%s' exists but is not a directory", pool)
+	}
+	if err := os.MkdirAll(pool, 0o755); err != nil {
+		return fmt.Errorf("create git worktree pool '%s': %w", pool, err)
+	}
+	logging.Debug("git worktree pool: %s", pool)
+	return nil
 }
 
 func containsAgent(list []*agents.Agent, name string) bool {

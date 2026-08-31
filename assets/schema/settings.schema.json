@@ -276,6 +276,10 @@
                 "rw",
                 "off"
               ]
+            },
+            "worktreePool": {
+              "description": "In the main repository, create and mount a read-write '<project>-worktrees' sibling directory for worktrees the agent creates. Ignored in a linked worktree and when worktreeLinks is off",
+              "type": "boolean"
             }
           }
         }
