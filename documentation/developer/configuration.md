@@ -244,6 +244,7 @@ project is a linked worktree
 
 project is the main repository
     ├─ worktreeLinks == off  → nothing (one master switch for the whole mechanism)
+    ├─ core.bare == true     → link every linked worktree outside the project; no pool
     ├─ worktreePool == false → link every linked worktree outside the project
     └─ worktreePool == true  → mount `<project>-worktrees` read-write
                              + link every linked worktree outside the project *and* the pool
@@ -289,10 +290,19 @@ set is fixed at start — the sharp edge of the mode's benefit, documented in th
 checkout on a branch whose `.hole/settings.json` predates an exclusion does not hide what that
 exclusion hides, exactly like a library in that state.
 
-The bare-clone layout has no pool: `Derive` currently takes the linked-worktree branch for a bare
-main repository ([analysis](../analysis/git-bare-repo-worktree-link-fix-plan.md)), and when that is
-fixed the pool must stay switched off for `core.bare` repositories — a repository with no working
-tree has no working-tree convention for a pool to belong to.
+The bare-clone layout (`repos/proj.git` plus per-branch worktrees beside it) is the one case where
+the common directory is not a `.git` *inside* a working tree but the repository itself, so
+`filepath.Dir` on it lands on an unrelated parent — every sibling the user parked in `repos/` would
+be mounted. `Derive` therefore probes `git config --get core.bare` and, when it is true, takes the
+common directory as the main repository unchanged. **The probe has to be `config --get core.bare`,
+not `rev-parse --is-bare-repository`**: the latter answers for the *current* worktree and returns
+false from a linked worktree of a bare repository, which is exactly the case that matters. Stripping
+a trailing `.git` element lexically would be wrong twice over — a bare repository need not be named
+`*.git`, and a normal repository has a `.git` directory whose parent *is* what we want.
+
+Consequently a bare project directory takes the main-repository branch, and the bare-clone layout has
+no pool: `<project>-worktrees` would be named after the `.git` suffix, and a repository with no
+working tree has no working-tree convention for a pool to belong to.
 
 ### `dependencies`
 

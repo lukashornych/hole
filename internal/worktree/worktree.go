@@ -59,7 +59,8 @@ type Derivation struct {
 // Pool mode deliberately never activates in a linked worktree: that keeps the pool a sibling
 // of the project, so the pool mount can never nest with the project mount. It is also what
 // git allows — from a linked worktree, `git worktree add` cannot write the main repository's
-// admin files unless that repository is mounted read-write.
+// admin files unless that repository is mounted read-write. It never activates for a bare
+// repository either, which has no working tree for a pool of checkouts to be a convention of.
 //
 // git is an optional dependency: a missing binary, a non-repository, or any git failure means
 // no links, never a failed start.
@@ -89,7 +90,15 @@ func Derive(projectDir string, mode LinkMode, pool bool) Derivation {
 	commonDir = resolveDir(commonDir)
 
 	readWrite := mode == LinkReadWrite
-	mainRepo := filepath.Dir(commonDir)
+
+	// For a bare repository the common directory is the repository itself, not a `.git`
+	// inside a working tree, so its parent is an unrelated directory that merely happens to
+	// contain it.
+	bare := isBare(project)
+	mainRepo := commonDir
+	if !bare {
+		mainRepo = filepath.Dir(commonDir)
+	}
 
 	// In a linked worktree the common directory belongs to another checkout.
 	if !sameDir(mainRepo, project) {
@@ -101,7 +110,9 @@ func Derive(projectDir string, mode LinkMode, pool bool) Derivation {
 	}
 
 	var derivation Derivation
-	if pool {
+	// A bare repository has no working tree, so a pool of checkouts beside it has no
+	// convention to belong to.
+	if pool && !bare {
 		// Built from the already-resolved project directory, so it is resolved by
 		// construction. Always read-write: a pool nobody can write to is worktreeLinks="ro"
 		// with extra steps.
@@ -134,6 +145,17 @@ func Derive(projectDir string, mode LinkMode, pool bool) Derivation {
 		derivation.Links = append(derivation.Links, Link{HostPath: path, ReadWrite: readWrite})
 	}
 	return derivation
+}
+
+// isBare reports whether dir belongs to a bare repository. `config --get core.bare` is the
+// only reliable probe: `rev-parse --is-bare-repository` answers for the *current* worktree and
+// returns false from a linked worktree of a bare repository, which is the case that matters.
+func isBare(dir string) bool {
+	value, err := git(dir, "config", "--get", "core.bare")
+	if err != nil {
+		return false
+	}
+	return value == "true"
 }
 
 func git(dir string, args ...string) (string, error) {

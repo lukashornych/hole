@@ -255,3 +255,108 @@ func TestIsInside(t *testing.T) {
 		t.Error("/a is not inside /a/b")
 	}
 }
+
+// bareRepo returns a bare clone at `<parent>/proj.git` together with the parent directory it
+// lives in. A bare repository cannot be committed to directly, so the history comes from a
+// normal repo built by repo(t); the parent also holds an unrelated checkout, which is the
+// directory the old derivation used to mount.
+func bareRepo(t *testing.T) (bare, parent string) {
+	t.Helper()
+	source := repo(t)
+	parent = tempDir(t)
+	bare = filepath.Join(parent, "proj.git")
+	run(t, parent, "clone", "--bare", "-q", source, bare)
+	run(t, parent, "clone", "-q", source, filepath.Join(parent, "seed"))
+	return bare, parent
+}
+
+// notLinked fails when any derived link is at or above hostPath's directory.
+func notLinked(t *testing.T, links []Link, hostPath string) {
+	t.Helper()
+	for _, link := range links {
+		if sameDir(link.HostPath, hostPath) {
+			t.Errorf("%s must not be linked, got %v", hostPath, links)
+		}
+	}
+}
+
+// In a linked worktree of a bare clone the common directory *is* the repository, so taking its
+// parent used to mount the whole directory the bare repo happens to live in.
+func TestDeriveLinksTheBareRepositoryNotItsParent(t *testing.T) {
+	bare, parent := bareRepo(t)
+	linked := filepath.Join(parent, "wt-feature")
+	run(t, bare, "worktree", "add", "-q", "-b", "feature", linked)
+
+	links := Derive(linked, LinkReadOnly, false).Links
+	if len(links) != 1 {
+		t.Fatalf("expected the bare repository, got %v", links)
+	}
+	if !sameDir(links[0].HostPath, bare) {
+		t.Errorf("linked %s, want %s", links[0].HostPath, bare)
+	}
+	notLinked(t, links, parent)
+}
+
+func TestDeriveFromTheBareRepositoryLinksItsWorktrees(t *testing.T) {
+	bare, parent := bareRepo(t)
+	linked := filepath.Join(parent, "wt-feature")
+	run(t, bare, "worktree", "add", "-q", "-b", "feature", linked)
+
+	// The bare directory is the main repository: it is already the project mount, and its
+	// parent is unrelated.
+	links := Derive(bare, LinkReadOnly, false).Links
+	if len(links) != 1 {
+		t.Fatalf("expected the linked worktree, got %v", links)
+	}
+	if !sameDir(links[0].HostPath, linked) {
+		t.Errorf("linked %s, want %s", links[0].HostPath, linked)
+	}
+	notLinked(t, links, parent)
+	notLinked(t, links, bare)
+}
+
+// A bare repository has no working tree, so a pool of checkouts beside it has no convention to
+// belong to — and `<project>-worktrees` would be named after the `.git` suffix.
+func TestDeriveNoPoolForABareRepository(t *testing.T) {
+	bare, _ := bareRepo(t)
+	derivation := Derive(bare, LinkReadOnly, true)
+	if derivation.Pool != "" {
+		t.Errorf("pool = %q, want none for a bare repository", derivation.Pool)
+	}
+	if len(derivation.Links) != 0 {
+		t.Errorf("links = %v, want none", derivation.Links)
+	}
+}
+
+func TestDeriveNoPoolFromALinkedWorktreeOfABareRepository(t *testing.T) {
+	bare, parent := bareRepo(t)
+	linked := filepath.Join(parent, "wt-feature")
+	run(t, bare, "worktree", "add", "-q", "-b", "feature", linked)
+
+	derivation := Derive(linked, LinkReadOnly, true)
+	if derivation.Pool != "" {
+		t.Errorf("pool = %q, want none in a linked worktree", derivation.Pool)
+	}
+	if len(derivation.Links) != 1 || !sameDir(derivation.Links[0].HostPath, bare) {
+		t.Errorf("links = %v, want the bare repository only", derivation.Links)
+	}
+}
+
+func TestIsBare(t *testing.T) {
+	bare, parent := bareRepo(t)
+	if !isBare(bare) {
+		t.Error("the bare clone was not detected as bare")
+	}
+	linked := filepath.Join(parent, "wt-feature")
+	run(t, bare, "worktree", "add", "-q", "-b", "feature", linked)
+	// rev-parse --is-bare-repository answers false here; core.bare reads the common config.
+	if !isBare(linked) {
+		t.Error("a linked worktree of a bare repository was not detected as bare")
+	}
+	if isBare(filepath.Join(parent, "seed")) {
+		t.Error("a normal checkout was detected as bare")
+	}
+	if isBare(t.TempDir()) {
+		t.Error("a plain directory was detected as bare")
+	}
+}
