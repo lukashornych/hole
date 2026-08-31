@@ -34,7 +34,7 @@ archives:
     formats: [binary]
     name_template: "hole_{{ .Os }}_{{ .Arch }}"
 
-checksums:
+checksum:
   name_template: checksums.txt
   algorithm: sha256
 

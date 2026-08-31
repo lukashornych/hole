@@ -30,9 +30,17 @@ jobs:
           go vet ./...
           go vet -tags integration ./...
           go vet -tags e2e ./...
-      - uses: golangci/golangci-lint-action@v6
+      # Both shipped platforms: the terminal check in internal/engine is GOOS-specific, so a
+      # host-only build would not notice a break on the other one until release.
+      - name: Cross-compile both platforms
+        run: |
+          CGO_ENABLED=0 GOOS=linux go build ./...
+          CGO_ENABLED=0 GOOS=darwin go build ./...
+      # Pinned: `latest` would silently jump major versions of the linter and break this gate
+      # without a change on our side.
+      - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.5.0
 
   release-config:
     name: Release config

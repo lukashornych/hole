@@ -6,10 +6,12 @@ on:
 
 concurrency:
   group: ${{ github.ref_name }}   # for the same branch
-  cancel-in-progress: true        # run only one workflow at a time (cancel the previous)
+  cancel-in-progress: false       # queue releases, never cancel one mid-publish
 
 permissions:
   contents: write
+  # release-drafter reads merged pull requests to build the notes.
+  pull-requests: write
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -21,7 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          # Full history and tags: the version is resolved from the commits since the last tag.
           fetch-depth: 0
 
       # Conventional commits drive the version: a `!` marker or a `BREAKING CHANGE:` footer bumps
