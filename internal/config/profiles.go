@@ -199,12 +199,12 @@ type UnknownProfileError struct {
 func (e *UnknownProfileError) Error() string {
 	var sb strings.Builder
 	if e.Parent != "" {
-		fmt.Fprintf(&sb, "profile '%s' extends unknown profile '%s'", e.Parent, e.Name)
+		_, _ = fmt.Fprintf(&sb, "profile '%s' extends unknown profile '%s'", e.Parent, e.Name)
 	} else {
-		fmt.Fprintf(&sb, "unknown profile '%s'", e.Name)
+		_, _ = fmt.Fprintf(&sb, "unknown profile '%s'", e.Name)
 	}
-	fmt.Fprintf(&sb, "\n  profiles in ~/.hole/settings.json: %s", formatNames(e.Global))
-	fmt.Fprintf(&sb, "\n  profiles in .hole/settings.json:   %s", formatNames(e.Project))
+	_, _ = fmt.Fprintf(&sb, "\n  profiles in ~/.hole/settings.json: %s", formatNames(e.Global))
+	_, _ = fmt.Fprintf(&sb, "\n  profiles in .hole/settings.json:   %s", formatNames(e.Project))
 	return sb.String()
 }
 

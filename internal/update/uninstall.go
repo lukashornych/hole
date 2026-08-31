@@ -87,7 +87,7 @@ func ConfirmRemoveSettings(in io.Reader, out io.Writer, holeDir string, interact
 	if !interactive {
 		return false
 	}
-	fmt.Fprintf(out, "Remove your settings, custom agents and logs in %s? [y/N] ", holeDir)
+	_, _ = fmt.Fprintf(out, "Remove your settings, custom agents and logs in %s? [y/N] ", holeDir)
 	answer, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil {
 		return false

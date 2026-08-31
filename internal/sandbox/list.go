@@ -44,9 +44,9 @@ func List(out io.Writer) error {
 	}
 
 	writer := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(writer, "INSTANCE\tAGENT\tPROJECT\tUPTIME\tDOCKER\tNETWORK\tSETTINGS")
+	_, _ = fmt.Fprintln(writer, "INSTANCE\tAGENT\tPROJECT\tUPTIME\tDOCKER\tNETWORK\tSETTINGS")
 	for _, instance := range running {
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			instance.InstanceID,
 			agentLabel(instance),
 			instance.ProjectPath,

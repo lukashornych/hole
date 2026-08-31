@@ -181,9 +181,9 @@ func grantKeys(grants []grant) []string {
 func digestOf(grants []grant) string {
 	hash := sha256.New()
 	for _, granted := range grants {
-		fmt.Fprintf(hash, "%s\n", granted.Key)
+		_, _ = fmt.Fprintf(hash, "%s\n", granted.Key)
 		for _, value := range granted.Values {
-			fmt.Fprintf(hash, "\t%s\n", value)
+			_, _ = fmt.Fprintf(hash, "\t%s\n", value)
 		}
 	}
 	return hex.EncodeToString(hash.Sum(nil))
@@ -298,20 +298,20 @@ func Gate(opts Options) error {
 
 // describe prints what a project's settings ask for, one line per requested value.
 func describe(out io.Writer, settingsFile string, grants []grant) {
-	fmt.Fprintf(out, "\n  The project's own settings ask for access beyond the sandbox:\n")
-	fmt.Fprintf(out, "  %s\n\n", settingsFile)
+	_, _ = fmt.Fprintf(out, "\n  The project's own settings ask for access beyond the sandbox:\n")
+	_, _ = fmt.Fprintf(out, "  %s\n\n", settingsFile)
 	for _, granted := range grants {
-		fmt.Fprintf(out, "    %s — %s\n", granted.Key, granted.Effect)
+		_, _ = fmt.Fprintf(out, "    %s — %s\n", granted.Key, granted.Effect)
 		for _, value := range granted.Values {
-			fmt.Fprintf(out, "        %s\n", value)
+			_, _ = fmt.Fprintf(out, "        %s\n", value)
 		}
 	}
-	fmt.Fprintf(out, "\n  Trust them only if you trust this repository's contents.\n")
+	_, _ = fmt.Fprintf(out, "\n  Trust them only if you trust this repository's contents.\n")
 }
 
 // confirm asks the yes/no question. Anything but an explicit yes is a no.
 func confirm(in io.Reader, out io.Writer) bool {
-	fmt.Fprint(out, "\n  Trust this project? [y/N] ")
+	_, _ = fmt.Fprint(out, "\n  Trust this project? [y/N] ")
 	answer, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil && answer == "" {
 		return false

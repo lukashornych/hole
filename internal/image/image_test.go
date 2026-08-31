@@ -225,7 +225,8 @@ func TestContentSHADistinguishesContent(t *testing.T) {
 	if ContentSHA([]byte("a")) == ContentSHA([]byte("b")) {
 		t.Error("different content hashed equally")
 	}
-	if ContentSHA([]byte("a")) != ContentSHA([]byte("a")) {
+	repeated := ContentSHA([]byte("a"))
+	if ContentSHA([]byte("a")) != repeated {
 		t.Error("identical content hashed differently")
 	}
 }
