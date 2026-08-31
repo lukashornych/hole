@@ -410,18 +410,20 @@ func exitCodeForSignal(sig os.Signal) int {
 // should use.
 func attach(containerEngine *engine.Engine, container string) int {
 	err := containerEngine.Attach(container)
-	if err == nil {
-		return 0
-	}
-	// The container's own status wins over the attach client's, and is checked first. An agent
-	// whose command finishes before the attach lands makes the runtime refuse with "cannot
-	// attach to a stopped container" and exit 1 — indistinguishable, from the client's exit
-	// code alone, from an agent that genuinely exited 1. Where both are available they agree,
-	// so consulting the container costs nothing and is right in the case they differ.
+	// The container's own status wins over the attach client's, and is checked first — on the
+	// clean path too, because podman's attach exits 0 whatever the container did, so a client
+	// that succeeded is no evidence the agent did. An agent whose command finishes before the
+	// attach lands makes the runtime refuse with "cannot attach to a stopped container" and
+	// exit 1 — indistinguishable, from the client's exit code alone, from an agent that
+	// genuinely exited 1. Where both are available they agree, so consulting the container
+	// costs nothing and is right in the case they differ.
 	if !containerEngine.ContainerRunning(container) {
 		if code, ok := containerEngine.ContainerExitCode(container); ok {
 			return code
 		}
+	}
+	if err == nil {
+		return 0
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {

@@ -199,6 +199,17 @@ refresh.
 
   CI has a podman job that does exactly this, marked `continue-on-error: true` — podman parity is
   tracked, not gated.
+
+  Differences `internal/engine` already absorbs, so that callers can stay runtime-agnostic:
+
+  | Difference | Where it is handled |
+  |---|---|
+  | `--filter reference=` is answered at image granularity — every name of an image any of whose names matches — and names are qualified with their registry (`localhost/`, `docker.io/library/`) | `ImagesByReference` re-applies the filter to the runtime's answer; without it `hole uninstall` and the image GC would remove images that merely share an ID with a Hole one |
+  | `podman attach` exits 0 whatever the container did | `sandbox.attach` reads the container's own exit code before trusting a clean attach, so a failed agent still sets the CLI's status |
+
+  Known and unhandled: `ContainerHealthProbeOutput` returns nothing under podman, so an unhealthy
+  gateway reports *that* it is unhealthy but not what the probe said. `TestContainerHealthProbeOutput`
+  fails in the parity job for this reason.
 - `HOLE_TEST_LIVENESS_DIR` / `HOLE_TEST_LIVENESS_NAME` are internal: `internal/state` re-execs its
   own test binary as a lock-holding helper through them. Never set them by hand.
 

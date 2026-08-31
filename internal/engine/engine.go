@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -307,12 +308,56 @@ func (e *Engine) ImageTag(source, target string) error {
 }
 
 // ImagesByReference lists image references matching a reference filter.
+//
+// The runtime's own filter is not trusted on its own: podman answers it at image granularity —
+// every name of an image any of whose names matches — so a Hole image that shares an ID with an
+// unrelated one drags that one into the result, and callers here feed the result straight to
+// ImageRemove. The filter is therefore re-applied to what came back.
 func (e *Engine) ImagesByReference(reference string) []string {
 	raw, err := e.output("images", "--filter", "reference="+reference, "--format", "{{.Repository}}:{{.Tag}}")
 	if err != nil {
 		return nil
 	}
-	return nonEmptyLines(raw)
+	var matched []string
+	for _, listed := range nonEmptyLines(raw) {
+		if matchesReference(reference, listed) {
+			matched = append(matched, listed)
+		}
+	}
+	return matched
+}
+
+// matchesReference reports whether a listed image reference satisfies a `reference=` filter.
+// A pattern without a tag matches every tag, as the runtimes' own filters do.
+func matchesReference(pattern, listed string) bool {
+	patternName, patternTag := splitReference(pattern)
+	name, tag := splitReference(listed)
+	if patternTag != "" && patternTag != tag {
+		return false
+	}
+	for {
+		if ok, err := path.Match(patternName, name); err == nil && ok {
+			return true
+		}
+		// Podman qualifies names with the registry the image came from (localhost/,
+		// docker.io/library/) while the patterns are written unqualified. Leading components
+		// are dropped one at a time rather than guessing which prefixes a runtime uses.
+		_, rest, found := strings.Cut(name, "/")
+		if !found {
+			return false
+		}
+		name = rest
+	}
+}
+
+// splitReference separates a reference into name and tag. The tag is the part after the last
+// colon, and only when that colon follows the last slash — otherwise the colon belongs to a
+// registry's port.
+func splitReference(reference string) (name, tag string) {
+	if colon := strings.LastIndex(reference, ":"); colon > strings.LastIndex(reference, "/") {
+		return reference[:colon], reference[colon+1:]
+	}
+	return reference, ""
 }
 
 // ImagePruneDangling removes dangling images carrying a label. Dangling-only is the runtime
