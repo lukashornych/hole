@@ -275,6 +275,15 @@ mirror), then the binary. `~/.hole` holds user data — settings, custom agents,
 goes on an explicit yes; without a terminal the answer is no, because nobody was there to say
 otherwise.
 
+`engine.Detect` failing is a warning, not an abort: `Uninstall` takes a nil engine, names the Docker
+resources it is leaving behind and carries on to the binary and the user directory. Aborting there
+used to strand the whole installation whenever the daemon was down.
+
+The installer is the other half of this: after writing `~/.local/bin/hole` it resolves `command -v
+hole` and warns when a different binary wins `PATH` (`warn_if_shadowed` in `install.sh`). A
+`go install` build in `~/go/bin` otherwise keeps answering, and the stale version it reports reads
+as a broken release rather than a shadowed install.
+
 ## Manual platform checklist
 
 CI covers Linux with Docker only. These need checking by hand per release, because the gateway

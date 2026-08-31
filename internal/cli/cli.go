@@ -320,10 +320,11 @@ func runUninstall(inv *Invocation) int {
 		return 1
 	}
 	host := hostenv.DetectHost()
+	// An unusable container runtime must not abort the uninstall: it would leave the binary and
+	// the user directory installed, with the runtime error as the only thing the user sees.
 	containerEngine, err := engine.Detect()
 	if err != nil {
-		logging.Error("%v", err)
-		return 1
+		logging.Warn("could not detect the container runtime: %v", err)
 	}
 	removeSettings := update.ConfirmRemoveSettings(os.Stdin, os.Stderr, host.HoleDir(), isTerminal(os.Stdin))
 	update.Uninstall(host, containerEngine, update.UninstallOptions{RemoveSettings: removeSettings})

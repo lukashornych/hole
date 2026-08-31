@@ -97,6 +97,24 @@ remove_legacy_install() {
   fi
 }
 
+# Warns when a different hole earlier in PATH keeps answering after this install — a `go install`
+# build in $(go env GOPATH)/bin is the usual one. Silence here would look like a failed upgrade:
+# the install reports the new version while `hole version` keeps printing the old one.
+warn_if_shadowed() {
+  local resolved
+  resolved="$(command -v hole 2>/dev/null || true)"
+  [ -n "${resolved}" ] || return 0
+  # -ef compares device and inode, so a symlinked or oddly spelled PATH entry that points at the
+  # binary just installed does not raise a false alarm.
+  if [ "${resolved}" -ef "${BIN_PATH}" ]; then
+    return 0
+  fi
+  log_warn "another hole comes earlier in your PATH and will keep being used:"
+  log_warn "  ${resolved}"
+  log_warn "Remove it (a 'go install' build lives in \$(go env GOPATH)/bin) or put ${BIN_DIR} first in PATH,"
+  log_warn "then check with: hole version"
+}
+
 main() {
   log_info "Starting hole installation..."
   check_installer_deps
@@ -141,7 +159,7 @@ main() {
   log_success "Installed ${BIN_PATH}"
 
   case ":${PATH}:" in
-    *":${BIN_DIR}:"*) ;;
+    *":${BIN_DIR}:"*) warn_if_shadowed ;;
     *)
       log_warn "${BIN_DIR} is not in your PATH."
       log_warn "Add to ~/.bashrc / ~/.zshrc:"

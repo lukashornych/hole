@@ -120,7 +120,9 @@ curl -fsSL https://raw.githubusercontent.com/lukashornych/hole/main/install.sh |
 ```
 
 The installer detects your OS and architecture, downloads the release binary, verifies its
-checksum, and installs it to `~/.local/bin/hole`. Make sure that directory is on your `PATH`.
+checksum, and installs it to `~/.local/bin/hole`. Make sure that directory is on your `PATH`. If
+another `hole` comes earlier in your `PATH` — a `go install` build in `~/go/bin`, typically — the
+installer names it, because that one keeps answering and the install would look like it failed.
 
 Upgrading from 1.x is not just this command: exit your running sandboxes and uninstall 1.x first —
 see [upgrading](MIGRATION.md#upgrading).
@@ -190,7 +192,9 @@ hole uninstall
 ```
 
 Removes Hole's containers, networks, volumes and images, then the binary. Your settings, custom
-agents and logs in `~/.hole` are only removed if you confirm.
+agents and logs in `~/.hole` are only removed if you confirm. If no container runtime is available,
+the uninstall says so, names what it could not remove, and still takes the binary — a stopped daemon
+must not leave you with Hole installed.
 
 ## Agents
 

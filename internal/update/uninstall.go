@@ -25,30 +25,15 @@ type UninstallOptions struct {
 // Uninstall removes Hole's Docker resources, optionally its user directory, and the binary.
 //
 // Every step is best-effort and reported: a user uninstalling wants to know what is left
-// behind, not to be stopped halfway by one failure.
+// behind, not to be stopped halfway by one failure. A nil engine says the container runtime could
+// not be resolved at all — its resources are then named and left behind, but the binary and the
+// user directory still go, because an unusable daemon must not keep Hole installed.
 func Uninstall(host hostenv.Host, containerEngine *engine.Engine, opts UninstallOptions) {
-	logging.Info("Removing Hole's Docker resources...")
-	dindregistry.Remove(containerEngine)
-
-	if ids := containerEngine.ContainerIDs("hole-sandbox-", true); len(ids) > 0 {
-		if err := containerEngine.ContainerRemove(ids...); err != nil {
-			logging.Warn("could not remove some containers: %v", err)
-		}
-	}
-	for _, name := range containerEngine.NetworkNames("hole-sandbox-") {
-		if err := containerEngine.NetworkRemove(name); err != nil {
-			logging.Warn("could not remove network %s: %v", name, err)
-		}
-	}
-	for _, volume := range containerEngine.VolumesByName("hole-sandbox-") {
-		if err := containerEngine.VolumeRemove(volume); err != nil {
-			logging.Warn("could not remove volume %s: %v", volume, err)
-		}
-	}
-	for _, image := range containerEngine.ImagesByReference("hole-sandbox/*") {
-		if err := containerEngine.ImageRemove(image); err != nil {
-			logging.Warn("could not remove image %s: %v", image, err)
-		}
+	if containerEngine != nil {
+		removeDockerResources(containerEngine)
+	} else {
+		logging.Warn("no container runtime, so Hole's Docker resources stay behind: remove the " +
+			"'hole-sandbox-' containers, networks and volumes and the 'hole-sandbox/*' images by hand")
 	}
 	RemoveLegacyInstall(host)
 
@@ -77,6 +62,33 @@ func Uninstall(host hostenv.Host, containerEngine *engine.Engine, opts Uninstall
 		return
 	}
 	logging.Info("Removed %s", executable)
+}
+
+// removeDockerResources deletes everything Hole created in the container runtime.
+func removeDockerResources(containerEngine *engine.Engine) {
+	logging.Info("Removing Hole's Docker resources...")
+	dindregistry.Remove(containerEngine)
+
+	if ids := containerEngine.ContainerIDs("hole-sandbox-", true); len(ids) > 0 {
+		if err := containerEngine.ContainerRemove(ids...); err != nil {
+			logging.Warn("could not remove some containers: %v", err)
+		}
+	}
+	for _, name := range containerEngine.NetworkNames("hole-sandbox-") {
+		if err := containerEngine.NetworkRemove(name); err != nil {
+			logging.Warn("could not remove network %s: %v", name, err)
+		}
+	}
+	for _, volume := range containerEngine.VolumesByName("hole-sandbox-") {
+		if err := containerEngine.VolumeRemove(volume); err != nil {
+			logging.Warn("could not remove volume %s: %v", volume, err)
+		}
+	}
+	for _, image := range containerEngine.ImagesByReference("hole-sandbox/*") {
+		if err := containerEngine.ImageRemove(image); err != nil {
+			logging.Warn("could not remove image %s: %v", image, err)
+		}
+	}
 }
 
 // ConfirmRemoveSettings asks whether the user directory should go too.
