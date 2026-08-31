@@ -152,7 +152,6 @@ func TestGatewayPrefersIPv4HostGateway(t *testing.T) {
 
 	container := "hole-sandbox-itest-gateway-dualstack"
 	_ = containerEngine.ContainerRemove(container)
-	t.Cleanup(func() { _ = containerEngine.ContainerRemove(container) })
 
 	// Two networks, because interface discovery demands one address inside the sandbox subnet
 	// and one outside it; the entrypoint logs the host gateway address only after that succeeds.
@@ -168,6 +167,10 @@ func TestGatewayPrefersIPv4HostGateway(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = containerEngine.NetworkRemove(name) })
 	}
+	// Registered after the networks so that LIFO cleanup removes the container first: Docker
+	// refuses to remove a network while a container is still attached, and a network that
+	// survives here leaks its subnet into every later test in this package.
+	t.Cleanup(func() { _ = containerEngine.ContainerRemove(container) })
 
 	startGatewayContainer(t, containerEngine, container, gatewayImage, confDir, subnets[0], networks,
 		"host.internal:fd07:b51a:cc66:f0::fe", "host.internal:"+hostGatewayTestAddress)

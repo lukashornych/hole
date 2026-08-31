@@ -358,7 +358,7 @@ func TestGCIgnoresUnrelatedResources(t *testing.T) {
 func TestTeardownDeregistersOnlyAfterItsLastMessage(t *testing.T) {
 	containerEngine := testEngine(t)
 	host, store := testHostAndStore(t)
-	instance := fabricate(t, containerEngine, store, "order0", 90, false)
+	instance := fabricate(t, containerEngine, store, "order0", 100, false)
 
 	logFile := filepath.Join(t.TempDir(), "run.log")
 	instance.LogFile = logFile
