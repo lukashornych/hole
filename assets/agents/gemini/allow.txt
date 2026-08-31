@@ -1,0 +1,9 @@
+# Domains the Gemini CLI needs at runtime.
+# Format: <host>[:<port>[,<port>...]] — ports default to 443,80.
+#
+# Deliberately not `*.googleapis.com`: that namespace is multi-tenant (storage.googleapis.com
+# buckets, BigQuery, Drive, ...), and the gateway filters names, not URL paths, so the wildcard
+# would allow attacker-controlled endpoints it cannot tell apart from Google's own APIs.
+cloudcode-pa.googleapis.com
+generativelanguage.googleapis.com
+oauth2.googleapis.com

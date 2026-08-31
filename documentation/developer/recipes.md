@@ -1,102 +1,112 @@
 # Recipes
 
-Step-by-step instructions for common development tasks.
+## Build and run from a checkout
 
-## Run Hole from a dev checkout
-
-No build step — run the script directly:
-
-```bash
-./hole.sh start claude /path/to/some/project
+```sh
+make build          # static binary at ./hole
+./hole start claude /path/to/project
+./hole start claude . -d          # bash shell instead of the agent CLI
+./hole start claude . -r          # force an image rebuild
+./hole start claude . -n          # dump resolved/refused domains on exit
 ```
 
-- Without a `version` file in the script directory, the update check and `hole update` are
-  disabled (`hole version` prints `development`), so a checkout never tries to replace itself.
-- Requirements: docker (or podman) with the compose plugin, `jq`, `jv`, `sha1sum`,
-  `curl`/`wget`. Set `HOLE_RUNTIME=podman` to force a runtime.
+A checkout build reports `hole development`, which skips update checks and refuses to
+self-update.
 
-### Useful flags while developing
+To try a stamped version: `VERSION=2.0.0 make build`.
 
-```bash
-./hole.sh start claude . -d          # bash shell instead of the agent CLI — inspect the sandbox
-./hole.sh start claude . -r          # force image rebuild (busts the CACHEBUST layer)
-./hole.sh start claude . -n          # write ALLOWED/DENIED domains to .hole/logs/ on exit
-./hole.sh start claude . -u          # disable domain filtering entirely
-./hole.sh start claude . -- -p "hi"  # pass args to the agent CLI
+## Run the tests
+
+```sh
+make test     # unit tests, no container runtime needed
+make itest    # integration tests, needs a real docker/podman daemon
+make e2e      # end-to-end sandbox runs, slow (builds images)
+make lint     # gofmt + go vet under all build tags + golangci-lint if installed
+make golden   # regenerate golden compose/gateway artifacts after an intended change
 ```
+
+What each suite covers, the prerequisites they need, the traps (`make itest` skips silently without
+a daemon, `make test` is not `-race`) and how to match CI locally:
+[development environment](development.md#the-four-suites).
+
+## Add a supported agent
+
+1. Create `assets/agents/<name>/` with `command.json`, `allow.txt`, and the install scripts it
+   needs. The embed directive already covers the directory, so nothing else needs registering.
+2. Add it to the README's agent list, with its authentication mount.
+3. `make test` — the registry test asserts every builtin has a parseable command, a non-empty
+   allow list and at least one install script.
+
+There is no `VALID_AGENTS` list to update any more, and no schema enum: agent names are validated
+against the registry at runtime.
+
+## Add a settings option
+
+1. Add it to `assets/schema/settings.schema.json`, inside `$defs/settings` so profiles get it too.
+2. Add the field to the typed model in `internal/config/settings.go`.
+3. Use it. If it is path-valued, resolve it through `hostenv.Host.ResolveHostPath`.
+4. Decide whether it affects the image. If it does, add it to the canonical config in
+   `internal/image` **and** the table in [configuration](configuration.md#image-identity-and-scope),
+   or cached images will go stale.
+5. Decide whether its effect leaves the sandbox — host code, a host path, a privileged container,
+   or anything running during the image build. If it does, add it to `capabilities` in
+   `internal/trust`, or a project file will be able to set it without the user's consent
+   ([configuration](configuration.md#project-trust)).
+6. Add a valid and an invalid example to the schema tests, and a merge test if its merge behavior
+   is interesting.
+7. Document it in the README.
+
+## Add a runtime asset
+
+Put it under `assets/` beneath an existing embed directive, and materialize it where it is needed
+(`internal/sandbox` writes the build contexts and gateway configuration). If it changes image
+content, remember that the embedded-assets digest is part of the image tag, so a change invalidates
+cached images automatically.
 
 ## Debug a failing sandbox
 
-- Generated artifacts (compose override, tinyproxy conf, whitelist, Corefile) live in
-  `~/.hole/tmp/run.XXXXXX/` **while the sandbox runs** — the directory is wiped on exit, so
-  inspect it from a second terminal.
-- `docker compose -p <instance_name> logs proxy|dns|agent` shows service logs;
-  the instance name (`hole-sandbox-<project>-<id>`) is printed at startup.
-- Proxy denials: run with `-n` and check the `DENIED` lines in the dump, or
-  `docker exec <instance>-proxy-1 cat /var/log/tinyproxy/tinyproxy.log`.
-- Start with `-d` to get a shell in the agent container and test connectivity manually
-  (`curl -v https://example.com` goes through the proxy via the env vars).
-- If a run died uncleanly, `hole destroy <path>` removes leftover containers/networks/images
-  for that project; a stale sandbox network is also removed automatically on the next start.
+```sh
+./hole start claude . -d                      # shell inside the sandbox
+cat ~/.hole/logs/run-*.log | tail -50         # every runtime command, with timings
+hole list                                     # what is still running
+```
 
-## Add a new supported agent
+From a debug shell inside the sandbox:
 
-1. Create `agents/<name>/` with:
-   - `command.json` — JSON array of argv parts (may reference `$HOME`)
-   - `allowed-domains.txt` — tinyproxy regex patterns the CLI needs (escape dots)
-   - `install-user.sh` — install the CLI as the agent user; pre-seed config to skip
-     first-run prompts if possible
-   - `install-root.sh` — only if system-level packages are needed
-2. Add the name to `VALID_AGENTS` in `hole.sh`.
-3. Add the name to the `container.enabledAgents` enum in `schema/settings.schema.json`.
-4. Add the new files to the packaging step in `.github/workflows/release.yml`.
-5. Document the agent in the README (`## Agents` section) and update
-   [agents.md](agents.md) if the mechanism itself changed.
-6. Verify: `./hole.sh start <name> /tmp/some-project -r` and check the CLI starts and can reach
-   its API domains (use `-n` to confirm nothing needed is DENIED).
+```sh
+getent hosts example.com          # is the name allowed? NXDOMAIN means "not in the policy"
+ip route                          # default route should be the gateway address
+env | grep -i proxy               # should be empty: there is no proxy any more
+```
 
-## Add a new settings option
+From the host, against the gateway container:
 
-1. Add the property to `schema/settings.schema.json`. The schema is strict
-   (`additionalProperties: false`) — without this step every user of the new option fails
-   validation at startup.
-2. Read the value from the merged settings in `generate_instance_compose()` (or wherever
-   appropriate) with `jq -r '... // empty'`. Merging is generic — objects deep-merge with
-   project-wins, arrays concatenate + dedupe — so pick the JSON shape accordingly (see
-   [configuration — merge semantics](configuration.md#merge-semantics)).
-3. Path-valued options must go through `expand_env_vars` / `resolve_host_path`.
-4. Follow the [error-handling convention](guidelines.md#error-handling): warn+skip for bad user
-   input that is safe to ignore, error+exit otherwise.
-5. Document it in the README (`## Configuration`) and in
-   [configuration.md](configuration.md).
+```sh
+docker logs <instance>-gateway-1                       # CoreDNS query log, interface detection
+docker exec <instance>-gateway-1 nft list ruleset      # the live firewall, incl. denial counters
+docker exec <instance>-gateway-1 nft list set inet hole g0   # addresses dnsmasq recorded
+cat ~/.hole/tmp/run.*/gateway-conf/Corefile            # the generated policy (while running)
+```
 
-## Add allowed domains
+Triage strings worth recognising:
 
-- Agent CLI needs a new domain → `agents/<agent>/allowed-domains.txt` (regex, escape dots):
-
-  ```
-  example\.com
-  .*\.example\.com
-  ```
-
-- Project-specific domains are user config → `network.domainWhitelist` in `settings.json`
-  (plain names, escaping is automatic).
-- The default base `proxy/allowed-domains.txt` stays empty by design.
-
-## Add a new source file
-
-Add a `cp` line for it to the "Package release archive" step in
-`.github/workflows/release.yml`. Files missing there are absent from installed releases —
-the installer downloads the release tarball, not the git repo. Developer documentation and CI
-files do not need to be packaged.
+| Message | Cause |
+|---|---|
+| `uses settings that were removed in Hole 2.0` | a 1.x settings file; the error shows the replacement |
+| `unknown profile '<name>'` | typo or wrong file; the error lists what each file defines |
+| `subnet pool ... exhausted: N of M` | too many sandboxes, or `network.subnetPool` is too small |
+| `this dnsmasq build has no nftset support` | the gateway base image lost the feature — see [networking](networking.md#base-image-constraint-dnsmasq-needs-nftset) |
+| `could not identify sandbox and internet interfaces` | the gateway saw unexpected addresses; check `HOLE_SANDBOX_SUBNET` |
+| `left resources behind` | teardown could not remove something; it names each one |
+| `No such container` during startup | a teardown ran while the sandbox was still starting — check the watchdog's records (`component=watchdog`) in the run log |
+| `the <service> container no longer exists` | same cause, reported from the CLI side |
 
 ## Pre-PR checklist
 
-- [ ] Branch created from `dev`, PR targets `dev`
-- [ ] Conventional commit messages (`feat:` bumps the minor version on release)
-- [ ] Shell code follows the [bash conventions](guidelines.md#bash-coding-conventions)
-- [ ] New source files added to `.github/workflows/release.yml`
-- [ ] New/changed settings reflected in `schema/settings.schema.json`
-- [ ] README updated for user-facing changes; `documentation/developer/` updated for
-      internals
-- [ ] Manually verified with `./hole.sh start ... ` (use `-d`/`-n` as needed)
+- `make lint && make test && make itest` pass; `make e2e` if the change touches startup, the
+  gateway or teardown.
+- Golden files regenerated and their diff reviewed.
+- Schema updated for any new setting, with tests.
+- README updated for user-facing changes; these docs updated for internals; MIGRATION.md updated if
+  1.x behavior changed.
+- Conventional commit subject (`feat:` bumps the minor version).

@@ -1,0 +1,64 @@
+#!/usr/sbin/nft -f
+# Re-creating the table makes this ruleset idempotent on container restart.
+table inet hole
+delete table inet hole
+
+table inet hole {
+    set g0 {
+        type ipv4_addr
+    }
+    set g1_static {
+        type ipv4_addr
+        flags interval
+        # auto-merge collapses an address already covered by a CIDR in the same set; without it
+        # nft rejects the whole ruleset with "conflicting intervals" and the gateway never starts.
+        auto-merge
+        elements = { 10.0.0.5 }
+    }
+    set g2 {
+        type ipv4_addr
+    }
+    set g3 {
+        type ipv4_addr
+    }
+    set g4_static {
+        type ipv4_addr
+        flags interval
+        # auto-merge collapses an address already covered by a CIDR in the same set; without it
+        # nft rejects the whole ruleset with "conflicting intervals" and the gateway never starts.
+        auto-merge
+        elements = { 192.168.1.0/24 }
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+        meta nfproto ipv6 drop
+        ct state established,related accept
+        ip daddr {HOST_GATEWAY_IP} tcp dport { 5432 } accept
+        ip daddr {HOST_GATEWAY_IP} udp dport { 5432 } accept
+        ip daddr @g0 tcp dport { 22, 443 } accept
+        ip daddr @g0 udp dport { 22, 443 } accept
+        ip daddr @g1_static tcp dport { 22, 2222 } accept
+        ip daddr @g1_static udp dport { 22, 2222 } accept
+        ip daddr @g2 tcp dport { 80, 443 } accept
+        ip daddr @g2 udp dport { 80, 443 } accept
+        ip daddr @g3 tcp dport { 5432 } accept
+        ip daddr @g3 udp dport { 5432 } accept
+        ip daddr @g4_static tcp dport { 8080 } accept
+        ip daddr @g4_static udp dport { 8080 } accept
+        counter limit rate 10/minute log prefix "hole-denied " level info
+    }
+
+    chain input {
+        type filter hook input priority filter; policy accept;
+        iifname "{SANDBOX_IF}" udp dport 53 accept
+        iifname "{SANDBOX_IF}" tcp dport 53 accept
+        iifname "{SANDBOX_IF}" ct state established,related accept
+        iifname "{SANDBOX_IF}" drop
+    }
+
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        oifname "{INTERNET_IF}" masquerade
+    }
+}

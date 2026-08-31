@@ -6,10 +6,12 @@ on:
 
 concurrency:
   group: ${{ github.ref_name }}   # for the same branch
-  cancel-in-progress: true        # run only one workflow at a time (cancel the previous)
+  cancel-in-progress: false       # queue releases, never cancel one mid-publish
 
 permissions:
   contents: write
+  # release-drafter reads merged pull requests to build the notes.
+  pull-requests: write
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -21,71 +23,54 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          # Full history and tags: the version is resolved from the commits since the last tag.
           fetch-depth: 0
 
+      # Conventional commits drive the version: a `!` marker or a `BREAKING CHANGE:` footer bumps
+      # the major, `feat:` the minor, everything else the patch.
       - name: Resolve version
         id: version
         uses: codacy/git-version@2.7.1
         with:
           release-branch: 'main'
           prefix: 'v'
-          minor-identifier: '/feat(?:\\([^)]+\\))?:/'
+          # Single backslashes: YAML single quotes do not process escapes, so a doubled one
+          # reaches the regex as a literal backslash and stops `feat(scope):` from matching.
+          minor-identifier: '/feat(\([^)]+\))?:/'
+          # Lowercase only — the action downcases each line before matching, so an uppercase
+          # `BREAKING CHANGE` here could never fire. It also prepends `^` to this pattern and
+          # matches per line, which is why a footer on its own line counts. Types are listed rather
+          # than matched with \w+ so the marker cannot come from prose.
+          major-identifier: '/((feat|fix|refactor|perf|build|chore|docs|style|test|ci)(\([^)]+\))?!:|breaking[ -]change:)/'
 
-      - name: Generate version file
-        run: echo "${{ steps.version.outputs.version }}" | sed 's/^v//' > version
-
-      - name: Package release archive
+      # GoReleaser builds from a tag, so the resolved version becomes one — pushed before the
+      # release notes so the repository keeps the annotated tag rather than the lightweight one
+      # release-drafter would create as a side effect.
+      - name: Tag the resolved version
         run: |
-          mkdir hole
-          cp version                          hole/
-          cp logger.sh                        hole/
-          cp utils.sh                         hole/
-          cp hole.sh                          hole/
-          cp docker-compose.yml               hole/
-          cp uninstall.sh                     hole/
-          mkdir -p hole/agents
-          cp agents/Dockerfile                    hole/agents/
-          cp agents/docker-compose.yml            hole/agents/
-          cp agents/entrypoint.sh                hole/agents/
-          mkdir -p hole/agents/claude
-          cp agents/claude/install-user.sh        hole/agents/claude/
-          cp agents/claude/allowed-domains.txt    hole/agents/claude/
-          cp agents/claude/command.json           hole/agents/claude/
-          mkdir -p hole/agents/gemini
-          cp agents/gemini/install-user.sh        hole/agents/gemini/
-          cp agents/gemini/allowed-domains.txt    hole/agents/gemini/
-          cp agents/gemini/command.json           hole/agents/gemini/
-          mkdir -p hole/agents/codex
-          cp agents/codex/install-user.sh         hole/agents/codex/
-          cp agents/codex/allowed-domains.txt     hole/agents/codex/
-          cp agents/codex/command.json            hole/agents/codex/
-          mkdir -p hole/dns
-          cp dns/Dockerfile                  hole/dns/
-          cp dns/docker-compose.yml          hole/dns/
-          cp dns/Corefile                    hole/dns/
-          cp dns/entrypoint.sh              hole/dns/
-          mkdir -p hole/proxy
-          cp proxy/Dockerfile                 hole/proxy/
-          cp proxy/docker-compose.yml         hole/proxy/
-          cp proxy/tinyproxy.conf             hole/proxy/
-          cp proxy/tinyproxy-unrestricted.conf hole/proxy/
-          cp proxy/allowed-domains.txt        hole/proxy/
-          mkdir -p hole/schema
-          cp schema/settings.schema.json      hole/schema/
-          tar -czf hole.tar.gz hole
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.version }}" -m "${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.version }}"
 
-      - name: Create release
+      - name: Draft the release notes
         id: release
         uses: release-drafter/release-drafter@v5
         with:
           version: ${{ steps.version.outputs.version }}
           publish: true
 
-      - name: Upload hole.tar.gz to release
-        uses: actions/upload-release-asset@v1
+      - uses: actions/setup-go@v5
         with:
-          upload_url: ${{ steps.release.outputs.upload_url }}
-          asset_path: ./hole.tar.gz
-          asset_name: Hole (tar.gz)
-          asset_content_type: application/gzip
+          go-version: '1.25'
+          cache: true
+
+      # GORELEASER_CURRENT_TAG makes the resolved version explicit instead of relying on
+      # GoReleaser inferring it back out of the tag it finds at HEAD.
+      - name: Build and upload the binaries
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          GORELEASER_CURRENT_TAG: ${{ steps.version.outputs.version }}

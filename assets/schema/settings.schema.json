@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hole Settings",
+  "description": "Configuration for the Hole AI agent sandbox",
+  "type": "object",
+  "$ref": "#/$defs/settings",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference for IDE autocompletion"
+    },
+    "profiles": {
+      "type": "object",
+      "description": "Named settings overlays selected with `hole start <agent>:<profile>`; a profile may only add to the base settings",
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/settings",
+        "properties": {
+          "extends": {
+            "description": "Profiles this one inherits from; parents are applied before it",
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]*$"
+                }
+              }
+            ]
+          }
+        },
+        "unevaluatedProperties": false
+      }
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "settings": {
+      "type": "object",
+      "description": "Settings usable at the root and inside every profile",
+      "properties": {
+        "files": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "exclude": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "include": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              },
+              "propertyNames": {
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "network": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allow": {
+              "type": "array",
+              "description": "Egress rules as <host>[:<port>[,<port>...]] \u2014 an exact domain, a *.wildcard domain, an IPv4 address or an IPv4 CIDR; ports default to 443 and 80 and apply to TCP and UDP",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(\\*\\.)?[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*(/[0-9]{1,2})?(:[0-9]{1,5}(,[0-9]{1,5})*)?$"
+              }
+            },
+            "hostGatewayDomains": {
+              "type": "array",
+              "description": "Domains resolved to the Docker host gateway, restricted to the listed ports (required)",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*:[0-9]{1,5}(,[0-9]{1,5})*$"
+              }
+            },
+            "subnetPool": {
+              "type": "string",
+              "description": "IPv4 CIDR Hole allocates per-sandbox /24 networks from (default 10.222.0.0/16, at least a /23)",
+              "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$"
+            }
+          }
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "container": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "memoryLimit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "memorySwapLimit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "docker": {
+              "type": "boolean"
+            },
+            "baseImage": {
+              "type": "string",
+              "minLength": 1
+            },
+            "enabledAgents": {
+              "type": "array",
+              "description": "Agents whose CLIs are installed into the sandbox image; names are validated against the agent registry (builtins plus ~/.hole/agents) at startup",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              },
+              "uniqueItems": true
+            }
+          }
+        },
+        "hooks": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "setup": {
+              "type": "array",
+              "description": "Scripts baked into the sandbox image; each entry is a literal path or a glob, and matches run in lexicographic order",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "script": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "script"
+                ]
+              }
+            },
+            "prestart": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "script": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "script"
+                ]
+              }
+            },
+            "setupHost": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "script": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "script"
+                ]
+              }
+            },
+            "cleanupHost": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "script": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "script"
+                ]
+              }
+            }
+          }
+        },
+        "libraries": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(/|~|\\$)"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^(/|~|\\$)"
+                  },
+                  "readwrite": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            ]
+          },
+          "propertyNames": {
+            "minLength": 1
+          }
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "minLength": 1
+          }
+        },
+        "agents": {
+          "type": "object",
+          "description": "Per-agent defaults; the started agent's args are appended to its command before any arguments given after --",
+          "propertyNames": {
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "git": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "worktreeLinks": {
+              "description": "Mount related git worktrees as libraries: read-only (default), read-write, or not at all",
+              "enum": [
+                "ro",
+                "rw",
+                "off"
+              ]
+            },
+            "worktreePool": {
+              "description": "In the main repository, create and mount a read-write '<project>-worktrees' sibling directory for worktrees the agent creates. Ignored in a linked worktree and when worktreeLinks is off",
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  }
+}

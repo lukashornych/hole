@@ -1,0 +1,27 @@
+#!/usr/sbin/nft -f
+# Re-creating the table makes this ruleset idempotent on container restart.
+table inet hole
+delete table inet hole
+
+table inet hole {
+
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+        meta nfproto ipv6 drop
+        ct state established,related accept
+        counter limit rate 10/minute log prefix "hole-denied " level info
+    }
+
+    chain input {
+        type filter hook input priority filter; policy accept;
+        iifname "{SANDBOX_IF}" udp dport 53 accept
+        iifname "{SANDBOX_IF}" tcp dport 53 accept
+        iifname "{SANDBOX_IF}" ct state established,related accept
+        iifname "{SANDBOX_IF}" drop
+    }
+
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        oifname "{INTERNET_IF}" masquerade
+    }
+}

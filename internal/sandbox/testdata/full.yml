@@ -1,0 +1,142 @@
+services:
+    agent:
+        image: hole-sandbox/agent-demo-abcd1234:0123456789ab
+        build:
+            context: <RUN>/agent
+            dockerfile: Dockerfile
+            args:
+                AGENT_HOME: /home/dev
+                AGENT_USERNAME: dev
+                BASE_IMAGE: ubuntu:24.04
+                CACHEBUST: "1"
+                EXTRA_PACKAGES: make gcc
+                GID: "1000"
+                UID: "1000"
+        pull_policy: never
+        command:
+            - claude
+            - --dangerously-skip-permissions
+        environment:
+            - ANOTHER=value
+            - MODE=test
+            - HOLE_GATEWAY_IP=10.222.0.53
+            - HOLE_SANDBOX_NETWORK=hole-sandbox-demo-abcd1234-xyz123_sandbox
+            - DOCKER_HOST=tcp://docker:2375
+        volumes:
+            - <PROJECT>:<PROJECT>
+            - /dev/null:<PROJECT>/.env:ro
+            - <RUN>/excluded-dirs<PROJECT>/secrets:<PROJECT>/secrets
+            - /dev/null:<PROJECT>/config/app.yaml:ro
+            - <LIBRARY>:/libs/shared:ro
+        networks:
+            sandbox: {}
+        dns:
+            - 10.222.0.53
+            - 127.0.0.11
+        depends_on:
+            docker:
+                condition: service_healthy
+            gateway:
+                condition: service_healthy
+        labels:
+            hole.instance: hole-sandbox-demo-abcd1234-xyz123
+            hole.managed: "true"
+            hole.project: demo-abcd1234
+        cap_add:
+            - NET_ADMIN
+        stdin_open: true
+        tty: true
+        working_dir: <PROJECT>
+        mem_limit: 8g
+        memswap_limit: 8g
+    docker:
+        image: docker@sha256:7451e3dc398b11ba2d8183bb7915402683e3d32e5ec8cef835c215f314a65fef
+        entrypoint:
+            - sh
+            - -c
+            - |
+              ip route replace default via $${HOLE_GATEWAY_IP} || echo "WARNING: could not set gateway route" >&2
+              rm -rf /home/rootless/.local/share/docker/containerd/daemon/io.containerd.metadata.v1.bolt/meta.db-lock
+              rm -f /run/user/1000/docker.pid
+              exec su rootless -c "HOME=/home/rootless XDG_RUNTIME_DIR=/run/user/1000 exec dockerd-entrypoint.sh $$@"
+            - --
+        environment:
+            - DOCKER_TLS_CERTDIR=
+            - HOLE_GATEWAY_IP=10.222.0.53
+            - ANOTHER=value
+            - MODE=test
+        volumes:
+            - <PROJECT>:<PROJECT>
+            - hole-sandbox-docker-data-hole-sandbox-demo-abcd1234-xyz123:/home/rootless/.local/share/docker
+            - <LIBRARY>:/libs/shared:ro
+            - /dev/null:<PROJECT>/.env:ro
+            - <RUN>/excluded-dirs<PROJECT>/secrets:<PROJECT>/secrets
+            - /dev/null:<PROJECT>/config/app.yaml:ro
+        networks:
+            sandbox: {}
+        dns:
+            - 10.222.0.53
+            - 127.0.0.11
+        depends_on:
+            gateway:
+                condition: service_healthy
+        healthcheck:
+            test:
+                - CMD
+                - docker
+                - -H
+                - tcp://127.0.0.1:2375
+                - info
+            interval: 3s
+            timeout: 5s
+            retries: 10
+        labels:
+            hole.instance: hole-sandbox-demo-abcd1234-xyz123
+            hole.managed: "true"
+            hole.project: demo-abcd1234
+        privileged: true
+        user: root
+    gateway:
+        image: hole-sandbox/gateway:0123456789ab
+        build:
+            context: <RUN>/gateway
+            dockerfile: Dockerfile
+        pull_policy: never
+        environment:
+            - HOLE_SANDBOX_SUBNET=10.222.0.0/24
+        volumes:
+            - <RUN>/gateway-conf/Corefile:/etc/hole/Corefile:ro
+            - <RUN>/gateway-conf/dnsmasq.conf:/etc/hole/dnsmasq.conf:ro
+            - <RUN>/gateway-conf/nftables.rules:/etc/hole/nftables.rules:ro
+        networks:
+            internet: {}
+            sandbox:
+                ipv4_address: 10.222.0.53
+        extra_hosts:
+            - host.internal:host-gateway
+        healthcheck:
+            test:
+                - CMD-SHELL
+                - dig +short +time=1 +tries=1 @127.0.0.1 health.hole.internal A | grep -qx 127.0.0.1
+            interval: 2s
+            timeout: 2s
+            retries: 10
+        labels:
+            hole.instance: hole-sandbox-demo-abcd1234-xyz123
+            hole.managed: "true"
+            hole.project: demo-abcd1234
+        cap_add:
+            - NET_ADMIN
+        sysctls:
+            net.ipv4.ip_forward: "1"
+        restart: on-failure
+volumes:
+    hole-sandbox-docker-data-hole-sandbox-demo-abcd1234-xyz123:
+        external: true
+networks:
+    internet:
+        external: true
+        name: hole-sandbox-demo-abcd1234-xyz123_internet
+    sandbox:
+        external: true
+        name: hole-sandbox-demo-abcd1234-xyz123_sandbox

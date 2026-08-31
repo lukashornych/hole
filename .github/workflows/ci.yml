@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l cmd internal assets test)
+          if [ -n "${unformatted}" ]; then
+            echo "These files need gofmt:"; echo "${unformatted}"; exit 1
+          fi
+      - name: go vet (all build tags)
+        run: |
+          go vet ./...
+          go vet -tags integration ./...
+          go vet -tags e2e ./...
+      # Both shipped platforms: the terminal check in internal/engine is GOOS-specific, so a
+      # host-only build would not notice a break on the other one until release.
+      - name: Cross-compile both platforms
+        run: |
+          CGO_ENABLED=0 GOOS=linux go build ./...
+          CGO_ENABLED=0 GOOS=darwin go build ./...
+      # Pinned: `latest` would silently jump major versions of the linter and break this gate
+      # without a change on our side.
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.5.0
+
+  release-config:
+    name: Release config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      # Catches a broken .goreleaser.yaml here rather than on a push to main, where it would
+      # fail after the release notes have already been published.
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: check
+      - name: Installer syntax
+        run: bash -n install.sh
+
+  unit:
+    name: Unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - run: go test -race ./...
+
+  integration:
+    name: Integration (docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: Runtime versions
+        run: |
+          docker version
+          docker compose version
+      - run: make itest
+
+  e2e:
+    name: E2E (docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - run: make e2e
