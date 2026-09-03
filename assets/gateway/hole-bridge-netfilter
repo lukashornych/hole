@@ -1,0 +1,181 @@
+#!/bin/bash
+set -euo pipefail
+
+# Restores same-bridge traffic on hosts where br_netfilter pushes bridged frames through the
+# host's iptables FORWARD chain (net.bridge.bridge-nf-call-iptables=1). There, Docker's rules
+# for --internal networks drop any frame whose IP destination lies outside the sandbox subnet —
+# which is exactly what agent→gateway egress looks like, because the gateway is a same-bridge
+# router. One ACCEPT in DOCKER-USER (evaluated before every rule Docker writes), scoped to
+# frames whose in- AND out-device is the sandbox bridge, re-admits only traffic that never
+# leaves that bridge; routed traffic still hits Docker's isolation rules unchanged.
+#
+# This script must run in the *daemon's* network namespace (`docker run --network host` with
+# NET_ADMIN): that namespace is where the sysctl, the FORWARD chain and the sandbox bridges
+# live — on VM-based engines (Docker Desktop, OrbStack) that is the VM, not the machine the
+# CLI runs on.
+#
+# Usage:
+#   hole-bridge-netfilter apply <bridge> <comment>
+#   hole-bridge-netfilter remove <comment>
+#
+# `apply` prints one machine-readable line on stdout for the caller:
+#   HOLE_BRIDGE_NETFILTER=not-needed   sysctl absent or 0 — no rule was installed
+#   HOLE_BRIDGE_NETFILTER=installed backend=<iptables-*> physdev=<yes|no>
+#                                      the rule is in place (inserted now, or already there),
+#                                      through that backend and in that variant — teardown
+#                                      echoes both back in its manual-removal guidance
+# While there it also sweeps rules whose hole-sandbox-* comment names a bridge that no longer
+# exists, so sandboxes that died without teardown never accumulate rules. The sweep runs even
+# when the sysctl has gone back to 0, so rules from an affected era do not linger once the
+# host is healthy again. Exit codes beyond failure:
+#   3  the sysctl is 1 but no iptables backend has a DOCKER-USER chain (native nftables
+#      backend, or a daemon with iptables disabled) — the caller must fail the start, because
+#      the sandbox would come up with dead egress and no way to repair it from here
+#   4  the sysctl is 1 and the rule could not be inserted
+
+# Overridable for tests only; the real path is fixed by the kernel.
+SYSCTL_FILE="${HOLE_BRNF_SYSCTL_FILE:-/proc/sys/net/bridge/bridge-nf-call-iptables}"
+
+# Every rule Hole owns carries a comment with this prefix (the instance name), which is what
+# makes the sweep safe: nothing else in DOCKER-USER is ever considered.
+readonly COMMENT_PREFIX="hole-sandbox-"
+
+# Bounded so a held xtables lock (firewalld reload, a stuck iptables-restore) degrades into a
+# warn-and-continue start instead of hanging it indefinitely.
+readonly LOCK_WAIT_SECONDS=5
+
+# The daemon writes its rules through exactly one backend, and rules written through the other
+# are invisible to it — so the backend is chosen by where the DOCKER-USER chain actually
+# exists, nft-based first (the default on current distributions). The plain `iptables` name is
+# deliberately not a candidate: on this image it aliases one of the two, and listing it twice
+# would make the sweep double-delete and warn about its own second pass.
+backends_with_docker_user() {
+  local candidate
+  for candidate in iptables-nft iptables-legacy; do
+    command -v "${candidate}" >/dev/null 2>&1 || continue
+    "${candidate}" -w "${LOCK_WAIT_SECONDS}" -n --list DOCKER-USER >/dev/null 2>&1 || continue
+    echo "${candidate}"
+  done
+}
+
+# bridge_exists <ifname>: whether the interface is live in this (the daemon's) netns. This is
+# the sweep's liveness test: a per-user registry cannot see other users' sandboxes on a shared
+# daemon, but the bridge itself is global truth — it exists exactly as long as its network does.
+bridge_exists() {
+  ip link show dev "$1" >/dev/null 2>&1
+}
+
+# rule_args <bridge> <comment> <with-physdev>: the rule spec, without the chain.
+rule_args() {
+  local bridge="$1" comment="$2" with_physdev="$3"
+  local args=(-i "${bridge}" -o "${bridge}")
+  if [[ "${with_physdev}" == yes ]]; then
+    args+=(-m physdev --physdev-is-bridged)
+  fi
+  args+=(-m comment --comment "${comment}" -j ACCEPT)
+  printf '%s\n' "${args[@]}"
+}
+
+# sweep <ipt> <own-comment>: delete every Hole-owned rule whose bridge no longer exists. The
+# own comment is always kept, so a broken `ip` can never sweep the rule being installed.
+# Only lines matching the exact shape this script installs are considered; `-S` quotes
+# comments on some iptables versions and not others, so the quotes are optional.
+sweep() {
+  local ipt="$1" own_comment="$2"
+  if ! command -v ip >/dev/null 2>&1; then
+    echo "WARNING: iproute2 is unavailable; skipping the stale-rule sweep" >&2
+    return 0
+  fi
+  local line_pattern='^-A DOCKER-USER -i ([^ ]+) -o ([^ ]+)( -m physdev --physdev-is-bridged)? -m comment --comment "?('"${COMMENT_PREFIX}"'[^" ]+)"? -j ACCEPT$'
+  local line
+  while IFS= read -r line; do
+    [[ "${line}" =~ ${line_pattern} ]] || continue
+    local in_if="${BASH_REMATCH[1]}" out_if="${BASH_REMATCH[2]}" physdev="${BASH_REMATCH[3]}" comment="${BASH_REMATCH[4]}"
+    [[ "${comment}" == "${own_comment}" ]] && continue
+    bridge_exists "${in_if}" && continue
+    local del=(-i "${in_if}" -o "${out_if}")
+    [[ -n "${physdev}" ]] && del+=(-m physdev --physdev-is-bridged)
+    del+=(-m comment --comment "${comment}" -j ACCEPT)
+    if ! "${ipt}" -w "${LOCK_WAIT_SECONDS}" -D DOCKER-USER "${del[@]}"; then
+      echo "WARNING: could not remove stale rule for ${comment}" >&2
+    fi
+  done < <("${ipt}" -w "${LOCK_WAIT_SECONDS}" -S DOCKER-USER)
+}
+
+apply() {
+  local bridge="$1" comment="$2"
+
+  # Sweep every backend the chain exists in — before the sysctl gate, so rules from an
+  # affected era are still collected once the host is healthy again, and across backends,
+  # because a daemon switching backends across restarts must not strand rules in the
+  # abandoned one.
+  local backends ipt
+  mapfile -t backends < <(backends_with_docker_user)
+  if [[ ${#backends[@]} -gt 0 ]]; then
+    for ipt in "${backends[@]}"; do
+      sweep "${ipt}" "${comment}"
+    done
+  fi
+
+  if [[ ! -f "${SYSCTL_FILE}" ]] || [[ "$(cat "${SYSCTL_FILE}")" != "1" ]]; then
+    echo "HOLE_BRIDGE_NETFILTER=not-needed"
+    return 0
+  fi
+
+  if [[ ${#backends[@]} -eq 0 ]]; then
+    echo "ERROR: bridge-nf-call-iptables is 1 but no iptables backend has a DOCKER-USER chain" >&2
+    echo "       (native nftables backend, or a daemon with iptables disabled)" >&2
+    return 3
+  fi
+
+  # Install through the daemon's (first) backend. physdev pins the rule to switched frames;
+  # when xt_physdev is unavailable the plain in/out-device match is still same-bridge-only,
+  # because host-routed traffic between two networks always has two different bridges.
+  ipt="${backends[0]}"
+  local with_physdev
+  for with_physdev in yes no; do
+    local spec
+    mapfile -t spec < <(rule_args "${bridge}" "${comment}" "${with_physdev}")
+    if "${ipt}" -w "${LOCK_WAIT_SECONDS}" -C DOCKER-USER "${spec[@]}" 2>/dev/null \
+        || "${ipt}" -w "${LOCK_WAIT_SECONDS}" -I DOCKER-USER 1 "${spec[@]}" 2>/dev/null; then
+      echo "HOLE_BRIDGE_NETFILTER=installed backend=${ipt} physdev=${with_physdev}"
+      return 0
+    fi
+  done
+  echo "ERROR: could not insert the ACCEPT rule for ${bridge} into DOCKER-USER (${ipt})" >&2
+  return 4
+}
+
+remove() {
+  local comment="$1"
+  local ipt
+  # Delete wherever the chain exists: keep everything except the target comment. An empty
+  # backend list is fine — then there is nothing the rule could live in.
+  while IFS= read -r ipt; do
+    local line_pattern='^-A DOCKER-USER -i ([^ ]+) -o ([^ ]+)( -m physdev --physdev-is-bridged)? -m comment --comment "?('"${comment}"')"? -j ACCEPT$'
+    local line
+    while IFS= read -r line; do
+      [[ "${line}" =~ ${line_pattern} ]] || continue
+      local del=(-i "${BASH_REMATCH[1]}" -o "${BASH_REMATCH[2]}")
+      [[ -n "${BASH_REMATCH[3]}" ]] && del+=(-m physdev --physdev-is-bridged)
+      del+=(-m comment --comment "${BASH_REMATCH[4]}" -j ACCEPT)
+      "${ipt}" -w "${LOCK_WAIT_SECONDS}" -D DOCKER-USER "${del[@]}"
+    done < <("${ipt}" -w "${LOCK_WAIT_SECONDS}" -S DOCKER-USER)
+  done < <(backends_with_docker_user)
+}
+
+mode="${1:-}"
+case "${mode}" in
+  apply)
+    [[ $# -eq 3 ]] || { echo "usage: $0 apply <bridge> <comment>" >&2; exit 2; }
+    apply "$2" "$3"
+    ;;
+  remove)
+    [[ $# -eq 2 ]] || { echo "usage: $0 remove <comment>" >&2; exit 2; }
+    remove "$2"
+    ;;
+  *)
+    echo "usage: $0 apply|remove ..." >&2
+    exit 2
+    ;;
+esac

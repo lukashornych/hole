@@ -67,6 +67,8 @@ func Teardown(containerEngine *engine.Engine, host hostenv.Host, store *state.St
 
 	removeNetworksOf(containerEngine, instance)
 
+	removeBridgeNetfilterRule(containerEngine, instance)
+
 	if instance.DinDVolume != "" {
 		if err := containerEngine.VolumeRemove(instance.DinDVolume); err != nil && containerEngine.VolumeExists(instance.DinDVolume) {
 			logging.Warn("could not remove Docker-in-Docker volume %s", instance.DinDVolume)

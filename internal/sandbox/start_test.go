@@ -3,11 +3,45 @@ package sandbox
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lukashornych/hole/v2/internal/config"
+	"github.com/lukashornych/hole/v2/internal/network"
 	"github.com/lukashornych/hole/v2/internal/worktree"
 )
+
+// Every file the gateway Dockerfile COPYs from its build context has to be materialized by
+// writeGatewayArtifacts, or the compose build fails with "failed to compute cache key" only at
+// runtime (regression: hole-bridge-netfilter was embedded but never written).
+func TestWriteGatewayArtifactsMaterializesEveryDockerfileCopySource(t *testing.T) {
+	runTmpDir := t.TempDir()
+	if _, err := writeGatewayArtifacts(runTmpDir, network.BuildPolicy(nil, nil, false)); err != nil {
+		t.Fatalf("writeGatewayArtifacts: %v", err)
+	}
+
+	buildDir := filepath.Join(runTmpDir, "gateway")
+	dockerfile, err := os.ReadFile(filepath.Join(buildDir, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("read materialized Dockerfile: %v", err)
+	}
+	copySources := 0
+	for _, line := range strings.Split(string(dockerfile), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] != "COPY" || strings.HasPrefix(fields[1], "--from=") {
+			continue
+		}
+		copySources++
+		source := fields[1]
+		if _, err := os.Stat(filepath.Join(buildDir, source)); err != nil {
+			t.Errorf("Dockerfile COPYs %q but writeGatewayArtifacts did not materialize it: %v",
+				source, err)
+		}
+	}
+	if copySources == 0 {
+		t.Fatal("no COPY sources found in the gateway Dockerfile; the test parses it wrong")
+	}
+}
 
 func TestWorktreeMode(t *testing.T) {
 	tests := map[string]worktree.LinkMode{

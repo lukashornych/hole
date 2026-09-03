@@ -5,7 +5,9 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lukashornych/hole/v2/internal/logging"
@@ -28,8 +31,30 @@ const (
 
 // Engine is a resolved container runtime.
 type Engine struct {
-	// Binary is `docker` or `podman`.
+	// Binary is `docker` or `podman` — or whatever $HOLE_RUNTIME named, which may be a path
+	// or a wrapper, so flavor decisions go through IsDocker, never the raw name.
 	Binary string
+
+	flavorOnce sync.Once
+	flavor     string
+}
+
+// IsDocker reports whether the runtime is real docker rather than podman. $HOLE_RUNTIME may
+// point at a path or a wrapper script, so the binary name alone is not conclusive: the
+// `--version` banner is asked once (podman prints "podman version" even through its docker
+// alias), with the base name as the fallback when even that fails.
+func (e *Engine) IsDocker() bool {
+	e.flavorOnce.Do(func() {
+		e.flavor = path.Base(e.Binary)
+		if out, err := e.output("--version"); err == nil {
+			if strings.Contains(strings.ToLower(out), "podman") {
+				e.flavor = "podman"
+			} else {
+				e.flavor = "docker"
+			}
+		}
+	})
+	return e.flavor == "docker"
 }
 
 // Detect resolves the container runtime: $HOLE_RUNTIME, then docker, then podman. It also
@@ -133,6 +158,57 @@ func (e *Engine) NetworkCreate(opts NetworkOptions) error {
 	args = append(args, opts.Name)
 	_, err := e.output(args...)
 	return err
+}
+
+// NetworkID returns the runtime's full identifier of a network. Docker names the bridge
+// interface a network creates after the ID's first 12 characters ("br-<id12>").
+func (e *Engine) NetworkID(name string) (string, error) {
+	out, err := e.output("network", "inspect", "--format", "{{.Id}}", name)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// hostHelperTimeout bounds a RunHostHelper container: firewall maintenance is a few iptables
+// calls, so anything this long is a wedged daemon or a held lock — better a warn-and-continue
+// start than one that hangs with no message.
+const hostHelperTimeout = 60 * time.Second
+
+// RunHostHelper runs a one-shot container in the daemon's own network namespace with
+// NET_ADMIN — for host-side firewall maintenance the unprivileged CLI cannot do itself, in
+// the namespace where the daemon's rules actually live (on VM-based engines, the VM's).
+// The exit code is the container command's own; -1 when the container could not run at all
+// or did not finish within hostHelperTimeout.
+func (e *Engine) RunHostHelper(image, entrypoint string, args ...string) (string, int, error) {
+	runArgs := []string{"run", "--rm", "--network", "host",
+		"--cap-add", "NET_ADMIN", "--cap-add", "NET_RAW",
+		"--entrypoint", entrypoint, image}
+	runArgs = append(runArgs, args...)
+
+	ctx, cancel := context.WithTimeout(context.Background(), hostHelperTimeout)
+	defer cancel()
+	start := time.Now()
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, e.Binary, runArgs...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	logging.Debug("engine: %s %s (%s)", e.Binary, strings.Join(runArgs, " "), time.Since(start).Round(time.Millisecond))
+	if ctx.Err() != nil {
+		return stdout.String(), -1, fmt.Errorf("%s %s: timed out after %s",
+			e.Binary, strings.Join(runArgs, " "), hostHelperTimeout)
+	}
+	if err != nil {
+		err = fmt.Errorf("%s %s: %w: %s",
+			e.Binary, strings.Join(runArgs, " "), err, strings.TrimSpace(stderr.String()))
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return stdout.String(), exitErr.ExitCode(), err
+		}
+		return stdout.String(), -1, err
+	}
+	return stdout.String(), 0, nil
 }
 
 // NetworkRemove removes a network.

@@ -47,6 +47,9 @@ the developer's machine), `hooks.setup`, `dependencies` (code during the image b
 the host's unfiltered network), `network.allow` (egress widening). Nothing else is gated:
 `files.exclude` only removes access, and `environment`, `agents.*.args`, `container.baseImage`,
 `hooks.prestart` and `network.subnetPool` act inside the container, which is the boundary.
+`network.bridgeNetfilterFix` does touch the host firewall, but the rule it controls is scoped to
+the sandbox's own bridge and opens nothing a sandbox does not already have — see
+[networking](networking.md#hosts-that-filter-bridged-packets-br_netfilter).
 
 The asymmetry inside `git` is deliberate. `worktreePool` is gated because it *creates* a directory
 outside the project; `worktreeLinks: "rw"` mounts checkouts of the repository Hole was already
@@ -471,7 +474,7 @@ upgrade able to replace it. Superseded gateway tags are collected by the same im
 | `container.enabledAgents` | yes — which install scripts enter the build context |
 | `hooks.setup` | yes — script *content* |
 | `files.*`, `libraries`, `git` | no — runtime mounts |
-| `network.*` | no — runtime config mounts |
+| `network.*` | no — runtime config mounts (`bridgeNetfilterFix` acts on the host firewall at start, not on any image) |
 | `environment`, `agents.*.args` | no — compose environment / command |
 | `container.memoryLimit`, `memorySwapLimit` | no — compose limits |
 | `container.docker`, `--with-docker` | no — sidecar only; the Docker CLI and its compose/buildx plugins are always baked in |

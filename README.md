@@ -401,7 +401,7 @@ Answering no starts nothing at all — no container, and none of the scripts abo
 | `hooks.setup`, `dependencies` | run during the image build, which uses your host's network rather than the gateway |
 | `network.allow` | widen the network allow-list — every destination the sandbox may reach is also somewhere it can send the project's contents |
 
-Everything else in a project file is confined to the sandbox and never prompts — `files.exclude` only takes access away, and `environment`, `agents.*.args`, `container.baseImage`, `hooks.prestart` and `network.subnetPool` act inside the container, which is the boundary. `git.worktreeLinks` is not gated either: it mounts checkouts of the repository you already pointed Hole at, and creates nothing.
+Everything else in a project file is confined to the sandbox and never prompts — `files.exclude` only takes access away, and `environment`, `agents.*.args`, `container.baseImage`, `hooks.prestart` and `network.subnetPool` act inside the container, which is the boundary. `git.worktreeLinks` is not gated either: it mounts checkouts of the repository you already pointed Hole at, and creates nothing. `network.bridgeNetfilterFix` is not gated because its only effect is a firewall rule scoped to the sandbox's own bridge — it opens nothing beyond what a sandbox already has (see [Hosts that filter bridged packets](#hosts-that-filter-bridged-packets-wsl-kubernetes-hosts)).
 
 A yes is remembered in `~/.hole/trust.json`, keyed by project path and by *what* you accepted: editing an ungated setting later changes nothing, but a project that starts asking for more asks again. Delete the file (or the project's entry) to be asked afresh.
 
@@ -624,6 +624,31 @@ Each sandbox takes two `/24` networks from Hole's own pool. Change it if the def
 ```
 
 Must be a `/23` or larger (each sandbox needs two `/24`s). A `/16` supports ~127 concurrent sandboxes.
+
+### Hosts that filter bridged packets (WSL, Kubernetes hosts)
+
+On some hosts — WSL distributions, and any machine where Kubernetes tooling (k3s, kubeadm) or an old daemon config has set `net.bridge.bridge-nf-call-iptables=1` — the kernel pushes even *switched* packets between containers on the same Docker bridge through the host's iptables. Docker's rules for internal networks then drop the sandbox's traffic to its own gateway, and every connection from the agent hangs while DNS still works.
+
+Hole detects and repairs this automatically: when the sysctl is enabled, it inserts a single `ACCEPT` rule into Docker's `DOCKER-USER` chain, scoped to the sandbox's own bridge and to bridged frames only (`-i br-… -o br-… -m physdev --physdev-is-bridged`). The rule re-admits only traffic that never leaves the sandbox's bridge — everything routed off it still hits Docker's isolation rules, so nothing beyond the sandbox's normal reach opens up. The rule is removed when the sandbox exits, and rules of sandboxes that died uncleanly are swept on the next start.
+
+On hosts that don't filter bridged packets (the sysctl is absent or `0` — the common case), no rule is installed; only leftovers of Hole's own rules from sandboxes that died uncleanly are still cleaned up.
+
+To manage the host firewall yourself instead:
+
+```json
+{
+  "network": {
+    "bridgeNetfilterFix": "off"
+  }
+}
+```
+
+With `"off"` on an affected host you need one of these yourself (narrowest first):
+
+- `iptables -I DOCKER-USER -m physdev --physdev-is-bridged -j ACCEPT` — accepts only switched frames that never leave their bridge, for all bridges; Docker's filtering of routed traffic is untouched
+- `sysctl -w net.bridge.bridge-nf-call-iptables=0`, persisted in `/etc/sysctl.d/` — host-wide; do **not** use it on a machine that is itself a Kubernetes node (kubeadm and host-mode k3s require the value to be `1`; containerized clusters like k3d are unaffected either way)
+
+If the sysctl is `1` but the daemon has no `DOCKER-USER` chain to repair through (a daemon running the native nftables backend, or started with `iptables: false`), the sandbox refuses to start and says so, rather than starting with every connection dead.
 
 ### Dependencies
 

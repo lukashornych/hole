@@ -205,6 +205,7 @@ func Start(opts Options) (exitCode int, err error) {
 	dockerEnabled := settings.Container.Docker || opts.WithDocker
 	instance.ImageRef = imageIdentity.Reference()
 	gatewayImage := image.GatewayImage(assets.BuildInputsHash())
+	instance.GatewayImage = gatewayImage
 
 	if opts.Debug {
 		logging.Warn("Debug mode: opening bash shell instead of agent CLI")
@@ -328,6 +329,12 @@ func Start(opts Options) (exitCode int, err error) {
 	logging.Info("Starting network gateway...")
 	if err := containerEngine.ComposeUp(instanceName, composeFile, runTmpDir, opts.Rebuild, "gateway"); err != nil {
 		reportServiceStartFailure(containerEngine, instanceName, "gateway")
+		return 1, err
+	}
+
+	// After the gateway (its image provably exists now, and the helper ships inside it),
+	// before the agent — so the agent never runs a moment without working egress.
+	if err := applyBridgeNetfilterFix(containerEngine, store, instance, settings, sandboxNet.name, gatewayImage); err != nil {
 		return 1, err
 	}
 
@@ -805,7 +812,7 @@ func writeGatewayArtifacts(runTmpDir string, policy network.Policy) (string, err
 		return "", fmt.Errorf("create gateway build context: %w", err)
 	}
 	gatewayAssets := assets.Gateway()
-	for _, name := range []string{"Dockerfile", "entrypoint.sh"} {
+	for _, name := range []string{"Dockerfile", "entrypoint.sh", "hole-bridge-netfilter"} {
 		data, err := fs.ReadFile(gatewayAssets, name)
 		if err != nil {
 			return "", fmt.Errorf("read embedded gateway %s: %w", name, err)
