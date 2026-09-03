@@ -223,6 +223,74 @@ the agent can only break its own connectivity, never widen it.
 Proxy environment variables (`HTTP_PROXY` and friends) are **not** set on any service. Removing
 them is what makes non-proxy-aware tools work.
 
+## Hosts that filter bridged packets (br_netfilter)
+
+The gateway-as-router design assumes a same-bridge hop is pure L2 switching that host iptables
+never sees. That assumption breaks when `br_netfilter` is active with
+`net.bridge.bridge-nf-call-iptables=1`: bridged frames are then pushed through the host's
+`FORWARD` chain, where Docker's rules for `--internal` networks drop anything whose IP
+destination lies outside the sandbox subnet — which is exactly what agent→gateway egress looks
+like. The SYN dies on the bridge, the gateway never sees it, and because DNS and the
+healthcheck have in-subnet destinations, the sandbox starts "healthy" and then every connection
+hangs. Most hosts are unaffected (Docker ≥27.3 only enables the sysctl when it needs it); k3s,
+kubeadm, some WSL setups and leftover `/etc/sysctl.d` entries set it. Full analysis:
+`documentation/analysis/br-netfilter-internal-network-egress.md`.
+
+The repair is one iptables rule at the top of `DOCKER-USER` — the chain Docker evaluates before
+every rule it writes itself and reserves for users:
+
+```
+-i br-<sandbox> -o br-<sandbox> -m physdev --physdev-is-bridged -j ACCEPT
+```
+
+It can only match frames that are *switched* with the sandbox bridge as both in- and out-device,
+i.e. traffic that never leaves that bridge and can only terminate at another sandbox container.
+Routed traffic always has a different out-device, so Docker's isolation and the `--internal`
+boundary are untouched. This is a strictly narrower intervention than turning the sysctl off,
+which is per-netns-global and breaks host-mode Kubernetes.
+
+Mechanics (`internal/sandbox/bridgefilter.go`, `assets/gateway/hole-bridge-netfilter`):
+
+- The CLI is unprivileged and, on VM-based engines, on the wrong machine — so the work runs in
+  a one-shot helper container in the **daemon's** network namespace
+  (`docker run --rm --network host --cap-add NET_ADMIN`, `engine.RunHostHelper`), using the
+  gateway image, which provably exists right after the staged `compose up gateway`. The helper
+  runs there and then, before the agent starts — no window in which the agent runs unrepaired.
+  That helper round-trip is a deliberate per-start cost even on healthy hosts: the sysctl must
+  be read in the daemon's namespace, and no cheaper proxy for it is trustworthy (a local
+  `/proc` read is wrong under a VM-based or remote daemon, and `docker info`'s
+  bridge-nf warning is cached from daemon start).
+- The helper first sweeps every stale Hole rule, then reads the sysctl in that namespace;
+  absent or `0` means exit without installing anything, keeping healthy hosts' firewalls
+  untouched — the sweep still runs, so rules from an affected era are collected once the host
+  is healthy again. Otherwise it picks the iptables backend by where the `DOCKER-USER` chain
+  actually exists (`iptables-nft` preferred over `iptables-legacy` — the daemon's rules are
+  invisible through the other backend) and installs this sandbox's rule idempotently. No chain
+  in either backend (native nftables daemon, `iptables: false`) exits 3 and **fails the
+  start** with guidance — the sandbox would come up with dead egress. Every iptables call
+  waits for the xtables lock at most 5 seconds and the helper container itself is bounded by
+  `engine.RunHostHelper`'s 60-second timeout, so a held lock degrades into the
+  warn-and-continue path instead of hanging the start.
+- A rule is stale when its `br-*` interface no longer exists in the daemon's namespace — the
+  bridge is global truth on a shared daemon, unlike the per-user instance registry, so the
+  sweep can never delete the rule of another user's running sandbox. The instance's own
+  comment is always kept, and a helper without a working `ip` skips the sweep rather than
+  guessing.
+- The rule is comment-tagged with the instance name. Teardown removes it by comment
+  (best-effort, warns with the manual removal command if the gateway image is already gone —
+  the image tag, the backend and the physdev/no-physdev variant are recorded in
+  `state.Instance`, so the printed command names the rule that actually exists even after an
+  upgrade). A leftover rule is inert — its bridge died with the network — and the next
+  start's sweep collects it.
+- `network.bridgeNetfilterFix: "off"` disables all of it; docker engine only, decided by the
+  runtime's `--version` banner rather than the binary name, so a `$HOLE_RUNTIME` path or
+  wrapper around real docker still gets the fix (netavark writes different rules — revisit
+  with podman support).
+
+Accepted residual risk: a firewalld reload or an admin flush of `DOCKER-USER` mid-run silently
+re-breaks egress until the next start reinstalls the rule — the same class of event that flushes
+Docker's own rules.
+
 ## Unrestricted mode (`-u`)
 
 CoreDNS forwards everything unconditionally, dnsmasq drops its nftset lines, and the forward chain

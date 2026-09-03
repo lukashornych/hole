@@ -63,6 +63,18 @@ type Instance struct {
 	// mirror could not be started.
 	RegistryMirror string `json:"registryMirror,omitempty"`
 	ImageRef       string `json:"imageRef,omitempty"`
+	// GatewayImage is this run's gateway image tag. Teardown reuses it for the br_netfilter
+	// helper: recomputing it from the tearing binary's own asset hash would name the wrong
+	// image after an upgrade.
+	GatewayImage string `json:"gatewayImage,omitempty"`
+	// BridgeFilterRule records that a DOCKER-USER accept rule was installed for this
+	// sandbox's bridge (BridgeFilterBridge), so teardown knows to remove it. Backend and
+	// physdev record the exact variant the helper installed, so the manual-removal command
+	// teardown may have to print names the rule that actually exists.
+	BridgeFilterRule    bool   `json:"bridgeFilterRule,omitempty"`
+	BridgeFilterBridge  string `json:"bridgeFilterBridge,omitempty"`
+	BridgeFilterBackend string `json:"bridgeFilterBackend,omitempty"`
+	BridgeFilterPhysdev bool   `json:"bridgeFilterPhysdev,omitempty"`
 
 	RunTmpDir string    `json:"runTmpDir,omitempty"`
 	LogFile   string    `json:"logFile,omitempty"`

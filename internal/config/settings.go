@@ -55,6 +55,10 @@ type NetworkSettings struct {
 	// HostGatewayDomains resolve to the Docker host gateway, optionally restricted to ports.
 	HostGatewayDomains []string `json:"hostGatewayDomains"`
 	SubnetPool         string   `json:"subnetPool"`
+	// BridgeNetfilterFix controls the DOCKER-USER accept rule that restores same-bridge
+	// traffic on hosts where br_netfilter filters bridged packets: "auto" (default, empty
+	// means auto) installs it when the host needs it, "off" leaves the host firewall alone.
+	BridgeNetfilterFix string `json:"bridgeNetfilterFix"`
 }
 
 // ContainerSettings controls the sandbox container itself.

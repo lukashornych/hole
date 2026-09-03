@@ -40,6 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       curl \
       dnsmasq-base \
       iproute2 \
+      iptables \
       nftables \
       bind9-dnsutils \
     && ARCH="$(dpkg --print-architecture)" \
@@ -57,9 +58,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get purge -y curl \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* \
-    && command -v dig >/dev/null
+    && command -v dig >/dev/null \
+    && command -v iptables-nft >/dev/null \
+    && command -v iptables-legacy >/dev/null
 
+# hole-bridge-netfilter runs in the *daemon's* netns (docker run --network host), not in this
+# container's — it lives in the gateway image only because that image always exists by the
+# time it is needed. Both iptables backends are asserted above: the helper must speak
+# whichever one the host daemon uses.
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY hole-bridge-netfilter /usr/local/bin/hole-bridge-netfilter
+RUN chmod +x /entrypoint.sh /usr/local/bin/hole-bridge-netfilter
 
 ENTRYPOINT ["/entrypoint.sh"]

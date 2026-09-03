@@ -94,6 +94,11 @@
               "type": "string",
               "description": "IPv4 CIDR Hole allocates per-sandbox /24 networks from (default 10.222.0.0/16, at least a /23)",
               "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$"
+            },
+            "bridgeNetfilterFix": {
+              "type": "string",
+              "enum": ["auto", "off"],
+              "description": "Repair of sandbox egress on hosts where br_netfilter filters bridged packets (bridge-nf-call-iptables=1): auto (default) installs a DOCKER-USER accept rule scoped to the sandbox's own bridge, off leaves the host firewall alone"
             }
           }
         },

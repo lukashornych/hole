@@ -19,6 +19,7 @@ func TestEmbeddedTreeIsComplete(t *testing.T) {
 		"agents/codex/allow.txt",
 		"gateway/Dockerfile",
 		"gateway/entrypoint.sh",
+		"gateway/hole-bridge-netfilter",
 		"schema/settings.schema.json",
 	}
 	for _, path := range required {
