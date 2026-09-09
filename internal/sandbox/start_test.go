@@ -45,11 +45,11 @@ func TestWriteGatewayArtifactsMaterializesEveryDockerfileCopySource(t *testing.T
 
 func TestWorktreeMode(t *testing.T) {
 	tests := map[string]worktree.LinkMode{
-		"":         worktree.LinkReadOnly,
+		"":         worktree.LinkOff,
 		"ro":       worktree.LinkReadOnly,
 		"rw":       worktree.LinkReadWrite,
 		"off":      worktree.LinkOff,
-		"nonsense": worktree.LinkReadOnly,
+		"nonsense": worktree.LinkOff,
 	}
 	for value, want := range tests {
 		settings := &config.Settings{}

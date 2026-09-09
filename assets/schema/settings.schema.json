@@ -275,7 +275,7 @@
           "additionalProperties": false,
           "properties": {
             "worktreeLinks": {
-              "description": "Mount related git worktrees as libraries: read-only (default), read-write, or not at all",
+              "description": "Mount related git worktrees as libraries: read-only, read-write, or not at all (default). Only applies when the project directory is the root of a checkout",
               "enum": [
                 "ro",
                 "rw",
@@ -283,7 +283,7 @@
               ]
             },
             "worktreePool": {
-              "description": "In the main repository, create and mount a read-write '<project>-worktrees' sibling directory for worktrees the agent creates. Ignored in a linked worktree and when worktreeLinks is off",
+              "description": "In the main repository, create and mount a read-write '<project>-worktrees' sibling directory for worktrees the agent creates. Ignored in a linked worktree and when worktreeLinks is off (the default)",
               "type": "boolean"
             }
           }

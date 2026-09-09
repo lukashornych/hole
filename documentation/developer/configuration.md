@@ -241,20 +241,30 @@ above, which only exposes the ones that already existed. `Derive` returns a `Der
 the pool directory, and the checkouts that already exist inside it. The decision tree, in order:
 
 ```
-project is a linked worktree
-    └─ worktreeLinks == off  → nothing
-       otherwise             → link the main repository (ro/rw); no pool
+worktreeLinks unset or off      → nothing (one master switch for the whole mechanism, off unless set)
+
+project is not a worktree root  → nothing (a subdirectory of a checkout, main or linked)
+
+project is a linked worktree    → link the main repository (ro/rw); no pool
 
 project is the main repository
-    ├─ worktreeLinks == off  → nothing (one master switch for the whole mechanism)
     ├─ core.bare == true     → link every linked worktree outside the project; no pool
     ├─ worktreePool == false → link every linked worktree outside the project
     └─ worktreePool == true  → mount `<project>-worktrees` read-write
                              + link every linked worktree outside the project *and* the pool
 ```
 
-Four things carry that design:
+Five things carry that design:
 
+- **The project directory has to be a worktree root.** `git rev-parse --show-toplevel` is the probe:
+  it names the root of the working tree the directory belongs to — for main and linked worktrees
+  alike, as a physical path, which is what the rest of the function compares against — and it fails
+  only where there is no working tree, so a failure is accepted exactly when `core.bare` says the
+  project is a bare repository. Below a root the derivation is both useless and harmful: `.git` sits
+  above the project mount, so git cannot work inside the sandbox whatever gets linked, and linking
+  the enclosing checkout would hand the agent the whole repository the narrower project directory
+  was chosen to keep out. The older `isInside(mainRepo, project)` guard tested the containment the
+  other way around and let that case through.
 - **Pool mode never activates in a linked worktree.** That is what keeps the pool a *sibling* of the
   project, so the pool mount and the project mount can never nest, and makes the path trivially
   `project + "-worktrees"`. It costs nothing git allows anyway: from a linked worktree whose main

@@ -855,16 +855,17 @@ func removeForRebuild(containerEngine *engine.Engine, agentImage, gatewayImage s
 	}
 }
 
-// worktreeMode resolves the git.worktreeLinks setting; read-only is the default so a sibling
-// checkout is readable without being writable.
+// worktreeMode resolves the git.worktreeLinks setting. Unset means off: mounting host
+// directories the user never named has to be asked for, the way git.worktreePool already is.
+// Anything outside the enum is rejected by schema validation long before this.
 func worktreeMode(settings *config.Settings) worktree.LinkMode {
 	switch settings.Git.WorktreeLinks {
-	case string(worktree.LinkOff):
-		return worktree.LinkOff
+	case string(worktree.LinkReadOnly):
+		return worktree.LinkReadOnly
 	case string(worktree.LinkReadWrite):
 		return worktree.LinkReadWrite
 	default:
-		return worktree.LinkReadOnly
+		return worktree.LinkOff
 	}
 }
 

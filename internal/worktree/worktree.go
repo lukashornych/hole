@@ -15,12 +15,13 @@ import (
 type LinkMode string
 
 const (
-	// LinkReadOnly mounts related worktrees read-only. This is the default: an agent should
-	// be able to read a sibling checkout without being able to change it.
+	// LinkReadOnly mounts related worktrees read-only: an agent should be able to read a
+	// sibling checkout without being able to change it.
 	LinkReadOnly LinkMode = "ro"
 	// LinkReadWrite mounts them read-write.
 	LinkReadWrite LinkMode = "rw"
-	// LinkOff derives nothing.
+	// LinkOff derives nothing. This is the default — the mechanism mounts host directories
+	// the user never named, so it has to be asked for.
 	LinkOff LinkMode = "off"
 )
 
@@ -49,6 +50,11 @@ type Derivation struct {
 }
 
 // Derive returns what a project directory's git layout implies.
+//
+// Nothing is derived unless the project directory is itself the root of a working tree (or a
+// bare repository): from a subdirectory the repository lies above the project mount, where
+// linking it would hand the agent the whole checkout the user deliberately narrowed away from
+// and still not give git a repository it can use.
 //
 // If the project is a linked worktree, the main repository is added — a linked worktree's
 // `.git` file only points at it, so without the main repo the agent cannot run git at all.
@@ -95,6 +101,26 @@ func Derive(projectDir string, mode LinkMode, pool bool) Derivation {
 	// inside a working tree, so its parent is an unrelated directory that merely happens to
 	// contain it.
 	bare := isBare(project)
+
+	// Everything below assumes the project *is* a working tree root (or a bare repository).
+	// Below a root the derivation is both useless and harmful: `.git` lives above the project
+	// mount, so git cannot work inside the sandbox whatever is linked, and mounting the
+	// checkout the project sits in would widen the access the narrower directory was chosen
+	// to limit. `rev-parse --show-toplevel` is the probe — it names the root of the working
+	// tree the directory belongs to, for main and linked worktrees alike, as a physical path
+	// — and it fails only where there is no working tree, which is the bare case.
+	topLevel, err := git(project, "rev-parse", "--show-toplevel")
+	switch {
+	case err != nil:
+		if !bare {
+			logging.Debug("%s has no working tree, skipping worktree links", projectDir)
+			return Derivation{}
+		}
+	case !sameDir(resolveDir(topLevel), project):
+		logging.Debug("%s is a subdirectory of the working tree at %s, skipping worktree links", projectDir, topLevel)
+		return Derivation{}
+	}
+
 	mainRepo := commonDir
 	if !bare {
 		mainRepo = filepath.Dir(commonDir)
