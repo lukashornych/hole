@@ -117,6 +117,61 @@ func TestDeriveSkipsWorktreesInsideTheProject(t *testing.T) {
 	}
 }
 
+// A subdirectory of a checkout is a deliberately narrower project than the repository, and the
+// repository above it is not the sandbox's to mount: git cannot work from the mount anyway,
+// because `.git` stays outside it.
+func TestDeriveNothingInASubdirectoryOfTheMainRepository(t *testing.T) {
+	main := repo(t)
+	// A sibling worktree exists, so the root of the same repository would derive something.
+	run(t, main, "worktree", "add", "-q", "-b", "feature", filepath.Join(tempDir(t), "feature"))
+	sub := filepath.Join(main, "sub", "deep")
+	if err := os.MkdirAll(sub, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	derivation := Derive(sub, LinkReadOnly, true)
+	if len(derivation.Links) != 0 {
+		t.Errorf("a subdirectory of the main repository yielded %v", derivation.Links)
+	}
+	// The pool would otherwise be named `<main>/sub/deep-worktrees`.
+	if derivation.Pool != "" {
+		t.Errorf("pool = %q, want none in a subdirectory", derivation.Pool)
+	}
+}
+
+func TestDeriveNothingInASubdirectoryOfALinkedWorktree(t *testing.T) {
+	main := repo(t)
+	linked := filepath.Join(tempDir(t), "feature")
+	run(t, main, "worktree", "add", "-q", "-b", "feature", linked)
+	sub := filepath.Join(linked, "sub")
+	if err := os.MkdirAll(sub, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if links := Derive(sub, LinkReadOnly, false).Links; len(links) != 0 {
+		t.Errorf("a subdirectory of a linked worktree yielded %v", links)
+	}
+}
+
+// The subdirectory rule compares git's physical output against the project directory, so it has
+// to hold for a project reached through a symlink too.
+func TestDeriveNothingInASymlinkedSubdirectoryOfTheMainRepository(t *testing.T) {
+	main := repo(t)
+	run(t, main, "worktree", "add", "-q", "-b", "feature", filepath.Join(tempDir(t), "feature"))
+	sub := filepath.Join(main, "sub")
+	if err := os.MkdirAll(sub, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(tempDir(t), "alias")
+	if err := os.Symlink(sub, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if links := Derive(link, LinkReadOnly, false).Links; len(links) != 0 {
+		t.Errorf("a symlinked subdirectory of the main repository yielded %v", links)
+	}
+}
+
 // A project reached through a symlink must behave exactly like the physical path. git resolves
 // symlinks in everything it prints, so comparing its output against the project directory as
 // given used to make a plain repository look like a linked worktree of itself — mounting the

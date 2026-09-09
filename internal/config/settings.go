@@ -81,10 +81,10 @@ type HookSettings struct {
 
 // GitSettings controls the git-derived libraries.
 type GitSettings struct {
-	// WorktreeLinks is "ro" (default), "rw" or "off".
+	// WorktreeLinks is "off" (default), "ro" or "rw".
 	WorktreeLinks string `json:"worktreeLinks"`
 	// WorktreePool mounts a read-write `<project>-worktrees` sibling directory the agent can
-	// create worktrees in. Only in the main repository, and only when WorktreeLinks is not off.
+	// create worktrees in. Only in the main repository, and only when WorktreeLinks is on.
 	WorktreePool bool `json:"worktreePool"`
 }
 

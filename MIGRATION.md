@@ -192,7 +192,7 @@ Nothing here is required; all of it is opt-in.
 |---|---|
 | `profiles` | named overlays selected with `hole start <agent>:<profile>` |
 | `agents.<name>.args` | default CLI arguments for an agent |
-| `git.worktreeLinks`, `git.worktreePool` | mount related git worktrees (`ro` by default, `rw`, or `off`), and optionally a read-write `<project>-worktrees` pool the agent can create worktrees in |
+| `git.worktreeLinks`, `git.worktreePool` | mount related git worktrees (`off` by default, or `ro`/`rw` to opt in), and optionally a read-write `<project>-worktrees` pool the agent can create worktrees in. Both apply only when the project directory is the root of a checkout |
 | `network.subnetPool` | the address range sandbox networks come from (default `10.222.0.0/16`) |
 | `container.enabledAgents` | now accepts custom agent names, not just the three builtins |
 

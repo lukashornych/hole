@@ -488,7 +488,7 @@ A read-only library stays read-only there. Builds never needed this — `docker 
 
 ### Git worktrees
 
-If your project is a git worktree, Hole mounts the related checkouts automatically — the main repository when you are in a linked worktree (a linked worktree's `.git` is only a pointer, so git would not work without it), and every linked worktree when you are in the main repository. Each is mounted at its own absolute path.
+With `worktreeLinks` enabled, Hole mounts the checkouts related to your project automatically — the main repository when you are in a linked worktree (a linked worktree's `.git` is only a pointer, so git would not work without it), and every linked worktree when you are in the main repository. Each is mounted at its own absolute path. Add it to your settings:
 
 ```json
 {
@@ -499,7 +499,9 @@ If your project is a git worktree, Hole mounts the related checkouts automatical
 }
 ```
 
-`worktreeLinks` is `"ro"` (default), `"rw"`, or `"off"`. Explicit `libraries`/`--library` entries for the same path win. If `git` is not installed, this is skipped silently.
+`worktreeLinks` is `"off"` (default), `"ro"`, or `"rw"`. Explicit `libraries`/`--library` entries for the same path win. If `git` is not installed, this is skipped silently.
+
+This applies **only when the project directory is the root of a checkout**. Start a sandbox in a subdirectory of a repository — `hole start claude ~/projects/monorepo/services/api` — and you get no related checkouts and no pool: the repository above the project is exactly what picking a subdirectory kept out, and mounting it would not help git either, because `.git` stays outside the mount (so git is unavailable inside such a sandbox regardless).
 
 #### A place to create worktrees
 
@@ -516,7 +518,7 @@ so `git worktree add ~/projects/myapp-worktrees/feature-x` inside the sandbox pr
 
 The two mechanisms divide the work by location: a checkout inside the project comes with the project mount, one inside the pool with the pool mount, and any other one gets its own `worktreeLinks` mount. So `"worktreeLinks": "ro"` plus a pool means existing outside checkouts stay read-only while the pool — whose whole purpose is to be written to — is read-write.
 
-The pool is only mounted when you start the sandbox **in the main repository**: from a linked worktree `git worktree add` cannot write the main repository's admin files anyway. `"worktreeLinks": "off"` switches the pool off too, and in a project settings file the pool needs your confirmation once, because it creates a host directory outside the project.
+The pool is only mounted when you start the sandbox **in the main repository**: from a linked worktree `git worktree add` cannot write the main repository's admin files anyway. `"worktreeLinks": "off"` — the default — switches the pool off too, and in a project settings file the pool needs your confirmation once, because it creates a host directory outside the project.
 
 Tell your agent about it in the project's own instructions (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md` — Hole does not write these for you):
 
@@ -539,16 +541,16 @@ Keep the `if` — that file is read by agents running on your host too, and insi
 
 ### Network access
 
-The sandbox has **no route to the internet** except through Hole's gateway, which denies everything by default — on every protocol and port. Allow what the project needs:
+The sandbox has **no route to the internet** except through Hole's gateway, which denies everything by default — on every protocol and port. `network.allow` is the allow-list (1.x called it `domainWhitelist`; see [MIGRATION.md](MIGRATION.md#networkdomainwhitelist-and-networkallowedports--networkallow)). Put it in `~/.hole/settings.json` for every project, or in `<project>/.hole/settings.json` for one project — the lists are merged, and a project-file entry only takes effect once you have accepted that project's settings (see [Project trust](#project-trust)). Allow what the project needs:
 
 ```json
 {
   "network": {
     "allow": [
       "api.github.com",
+      "github.com:22,443",
       "*.npmjs.org",
       "db.example.com:5432",
-      "github.com:22,443",
       "10.0.0.5:22,2222",
       "192.168.1.0/24:8080"
     ]
@@ -560,12 +562,19 @@ Entry grammar: `<host>[:<port>[,<port>...]]`
 
 | Host form | Matches |
 |---|---|
-| `example.com` | that exact name, nothing else |
-| `*.example.com` | subdomains only — **not** the apex |
+| `example.com` | that exact name — **not** `api.example.com` |
+| `*.example.com` | every name under it, at any depth (`api.example.com`, `a.b.example.com`) — **not** `example.com` itself |
 | `10.0.0.5` | one IPv4 address |
 | `10.0.0.0/24` | an IPv4 range |
 
-Ports default to `443,80` and apply to **TCP and UDP** alike. Wildcards are explicit: `example.com` never implies its subdomains.
+Rules that trip people up:
+
+- **Each entry stands alone.** `github.com` does not cover `api.github.com`, and `*.github.com` does not cover `github.com`. To reach a site and its subdomains, list both: `"example.com", "*.example.com"`.
+- **Listing ports replaces the default, it does not add to it.** `example.com` means `example.com:443,80`; `github.com:22,443` allows 22 and 443 and *not* 80. Ports apply to **TCP and UDP** alike.
+- **The same host may appear more than once** — for example in the global and the project file — and its ports are merged.
+- **Only these forms are accepted.** No scheme (`https://example.com`), no path, no port ranges, no IPv6, and `*` only as the leading label (`*.example.com`, never `api.*.com` or `*example.com`). A malformed entry is a startup error, not a warning, because a wrong allow-list makes the sandbox unsafe.
+- **The image build is not filtered.** `dependencies` and `hooks.setup` run on your host's network, so package repositories they use need no entry — only what the agent reaches *at runtime* does.
+- `-u` disables filtering for one run when you need to work unrestricted.
 
 How it works: the gateway is the sandbox's DNS server, router and firewall. A name you have not allowed does not resolve at all (a fast `NXDOMAIN` rather than a timeout), and an address is only reachable if the sandbox's own resolver handed it out for an allowed entry. So hardcoded IPs, third-party resolvers (`dig @8.8.8.8`) and DNS-over-TLS are all denied too.
 
