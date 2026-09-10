@@ -81,7 +81,7 @@ Run without a terminal — from a script, a CI job, or with the output piped —
 | `-u`, `--unrestricted-network` | Disable egress filtering; allow all network access |
 | `--with-docker` | Enable the Docker-in-Docker sidecar |
 | `--trust-project` | Accept whatever the project's own `.hole/settings.json` asks for beyond the sandbox — host access and network widening alike — without being asked, and remember it; see [project trust](#project-trust) |
-| `--library PATH[:MOUNT][:rw]` | Mount an extra directory (repeatable); defaults to `/libs/{basename}`, read-only unless `:rw` |
+| `--library PATH[:MOUNT][:rw]` | Mount an extra directory (repeatable); mounted at its own host path unless `MOUNT` is given, read-only unless `:rw` |
 | `--` | Everything after this is passed verbatim to the agent CLI |
 
 `-r` is only needed to refresh *versions* (latest apt packages, latest agent CLIs). Changing a
@@ -475,6 +475,8 @@ Or ad-hoc:
 hole start claude . --library ~/projects/shared-lib
 hole start claude . --library ~/projects/other-lib:/libs/other:rw
 ```
+
+Without `MOUNT`, `--library` mounts the directory at its own host path — the same place the project and the [git-derived checkouts](#git-worktrees) land — so symlinks, `go.mod` replaces and other references that record an absolute path keep resolving. `settings.json` has no such default: `libraries` values are always explicit container paths.
 
 If a library has its own `.hole/settings.json`, only its `files.exclude` entries are honored, scoped to that library's mount.
 

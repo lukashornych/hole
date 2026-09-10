@@ -145,8 +145,10 @@ func (b *mountBuilder) addIncludes(include map[string]string, projectDir string)
 
 // ParseLibraryFlag parses one `--library PATH[:MOUNT][:rw]` value.
 //
-// The container path defaults to /libs/<basename> and the mount is read-only unless `:rw` is
-// given, which mirrors the read-only default of configured libraries.
+// The container path defaults to the host path — the same place the project and the git-derived
+// checkouts are mounted, so absolute paths, symlinks and inter-checkout relative references keep
+// resolving inside the sandbox. The mount is read-only unless `:rw` is given, which mirrors the
+// read-only default of configured libraries.
 func ParseLibraryFlag(raw string) (hostPath string, library config.Library, err error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
@@ -180,7 +182,7 @@ func ParseLibraryFlag(raw string) (hostPath string, library config.Library, err 
 		return "", config.Library{}, fmt.Errorf("invalid --library '%s': empty path", raw)
 	}
 	if library.Path == "" {
-		library.Path = "/libs/" + filepath.Base(hostenv.StripTrailingSlashes(hostPath))
+		library.Path = hostenv.StripTrailingSlashes(hostPath)
 	}
 	return hostPath, library, nil
 }

@@ -43,8 +43,9 @@ Options:
                                   .hole/logs/network-access-{agent}-{id}.log
   -r, --rebuild               Force rebuild of Docker images before starting
   -u, --unrestricted-network  Disable egress filtering; allow all network access
-      --library PATH[:MOUNT][:rw]  Mount an extra directory (repeatable). Defaults to
-                                  /libs/{basename}, read-only unless :rw is given
+      --library PATH[:MOUNT][:rw]  Mount an extra directory (repeatable). Mounted at
+                                  its own host path unless MOUNT is given, and
+                                  read-only unless :rw is given
       --with-docker           Enable Docker-in-Docker sidecar for the sandbox
       --trust-project         Accept the host access this project's .hole/settings.json
                                   asks for without being asked, and remember it

@@ -18,12 +18,12 @@ func TestParseLibraryFlag(t *testing.T) {
 		wantContainer string
 		wantReadWrite bool
 	}{
-		{"/host/lib", "/host/lib", "/libs/lib", false},
-		{"/host/lib/", "/host/lib/", "/libs/lib", false},
-		{"/host/lib:rw", "/host/lib", "/libs/lib", true},
+		{"/host/lib", "/host/lib", "/host/lib", false},
+		{"/host/lib/", "/host/lib/", "/host/lib", false},
+		{"/host/lib:rw", "/host/lib", "/host/lib", true},
 		{"/host/lib:/container/lib", "/host/lib", "/container/lib", false},
 		{"/host/lib:/container/lib:rw", "/host/lib", "/container/lib", true},
-		{"~/lib", "~/lib", "/libs/lib", false},
+		{"~/lib", "~/lib", "~/lib", false},
 	}
 	for _, test := range tests {
 		t.Run(test.raw, func(t *testing.T) {
@@ -36,6 +36,30 @@ func TestParseLibraryFlag(t *testing.T) {
 					hostPath, library, test.wantHost, test.wantContainer, test.wantReadWrite)
 			}
 		})
+	}
+}
+
+// A bare `--library PATH` used to land on /libs/<basename>, which broke every reference that
+// records an absolute path (symlinks, go.mod replaces, IDE metadata) and forced users to spell
+// out `--library PATH:PATH`. The two forms must be indistinguishable.
+func TestParseLibraryFlagDefaultsToHostPath(t *testing.T) {
+	host := testHost()
+	for _, hostPath := range []string{"/host/lib", "~/lib", "../lib"} {
+		bare, bareLibrary, err := ParseLibraryFlag(hostPath)
+		if err != nil {
+			t.Fatalf("ParseLibraryFlag(%q): %v", hostPath, err)
+		}
+		explicit, explicitLibrary, err := ParseLibraryFlag(hostPath + ":" + hostPath)
+		if err != nil {
+			t.Fatalf("ParseLibraryFlag(%q): %v", hostPath+":"+hostPath, err)
+		}
+		if bare != explicit || bareLibrary != explicitLibrary {
+			t.Errorf("%q parsed as %s -> %+v, but %q as %s -> %+v",
+				hostPath, bare, bareLibrary, hostPath+":"+hostPath, explicit, explicitLibrary)
+		}
+		if got := host.ResolveContainerPath(bareLibrary.Path, "/host/project"); got != host.ResolveHostPath(bare, "/host/project") {
+			t.Errorf("%q mounts at %s, want its own host path", hostPath, got)
+		}
 	}
 }
 
@@ -69,7 +93,7 @@ func TestMergeLibrariesPrecedence(t *testing.T) {
 	if got := libraries["/host/worktree"]; got.Path != "/host/worktree" {
 		t.Errorf("derived worktree library = %+v, want it mounted at its own path", got)
 	}
-	if got := libraries["/host/flagonly"]; got.Path != "/libs/flagonly" {
+	if got := libraries["/host/flagonly"]; got.Path != "/host/flagonly" {
 		t.Errorf("flag-only library = %+v", got)
 	}
 	if len(libraries) != 3 {

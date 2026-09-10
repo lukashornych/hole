@@ -217,7 +217,11 @@ Keying by the raw value would break that: `~/other-worktree` and the git-derived
 `/home/me/other-worktree` are the same directory but two keys, and both then reach the mount
 builder, where first-wins-by-target quietly keeps whichever sorts first.
 
-`--library PATH[:MOUNT][:rw]` defaults to `/libs/<basename>`, read-only unless `:rw`.
+`--library PATH[:MOUNT][:rw]` defaults the mount point to the host path itself — like the project
+and the worktree-derived links, and unlike the configured `libraries`, whose container path is
+always explicit. A basename-derived `/libs/<name>` would break every reference that records an
+absolute path (symlinks, `go.mod` replaces, tool caches), which is exactly what a library is for.
+Read-only unless `:rw`.
 
 The two categories differ in one runtime respect: libraries (including the worktree-derived ones)
 are mirrored onto the DinD sidecar, `files.include` targets are not — see
