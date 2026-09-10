@@ -590,31 +590,33 @@ The `-n` dump is a record of what the gateway's resolver was asked, not of every
 
 ### Host gateway domains
 
-Let the sandbox reach services running on your host under a stable name:
+Let the sandbox reach services running on your host. Inside the sandbox the host is reachable under the name `host.internal`; `hostGatewayDomains` says which of its ports the sandbox may use:
 
 ```json
 {
   "network": {
     "hostGatewayDomains": [
-      "mydb.local:5432",
-      "myapi.local:8080,8443"
+      "host.internal:5432,8080"
     ]
   }
 }
 ```
 
-Each name resolves to the Docker host gateway — the address your container runtime gives containers for the machine Hole runs on.
+To reach a service on your machine from the sandbox:
 
-Four things trip people up, in the order they bite:
+1. **Bind the service to `0.0.0.0`, not `127.0.0.1`.** On native Linux a service listening on loopback only is unreachable from any container, whatever the DNS says — start it with `--host 0.0.0.0`, `kubectl port-forward --address 0.0.0.0 …`, `docker run -p 0.0.0.0:5432:5432 …` and so on. Docker Desktop and OrbStack proxy loopback, so it works there without the change.
+2. **List the port under `host.internal` in `network.hostGatewayDomains`**, as above. The port list is required (see below).
+3. **Connect to `host.internal:<port>` from inside the sandbox** — `psql -h host.internal -p 5432`, `http://host.internal:8080`, and so on. Where the host service says `localhost`, the sandbox says `host.internal`.
 
-- **The host service must not be bound to loopback only.** On native Linux a service on `127.0.0.1` is unreachable from any container, whatever the DNS says — bind it to `0.0.0.0` (`kubectl port-forward --address 0.0.0.0 …`, `--host 0.0.0.0`, and so on). Docker Desktop and OrbStack proxy loopback, so it works there without the change.
+Each name in the list resolves to the Docker host gateway — the address your container runtime gives containers for the machine Hole runs on. `host.internal` is the name Hole documents, but any other name works the same way as an alias (`"mydb.local:5432"` makes `mydb.local` resolve to your host too). Explicitly *not* `localhost` or `127.0.0.1`: inside the container those are the container itself.
+
+Other things to know:
+
 - **The port list is required.** The firewall matches the host gateway *address*, not the name, so a port-less entry would expose every service on your machine — SSH, a TCP-exposed Docker socket, databases, anything bound to `0.0.0.0`. Several entries for the same name merge into one, opening the union of their ports.
 - **A project-file entry needs the trust prompt.** `hostGatewayDomains` in `<project>/.hole/settings.json` only takes effect once you have accepted that project's settings; see [Project trust](#project-trust).
 - **A settings change needs a restart.** The gateway reads its configuration once at startup, so exit the sandbox and run `hole start` again — a running sandbox will not pick the new entry up.
 
-Pick a name **nothing else already resolves**, ideally under a suffix that cannot resolve publicly (`myhost.local`, `db.internal.test`). Explicitly *not* `localhost` or `127.0.0.1` — inside the container those are the container itself — and not `host.internal` or `host.docker.internal`, which your container runtime may answer itself instead of letting Hole's resolver see the query.
-
-The ports are unioned across *all* entries: with the example above the sandbox can reach the host gateway IP on 5432, 8080 and 8443, directly and without DNS. The names choose what resolves, not what the firewall permits.
+The ports are unioned across *all* entries: with `"host.internal:5432"` and `"mydb.local:8080"` the sandbox can reach the host gateway IP on both 5432 and 8080, directly and without DNS. The names choose what resolves, not what the firewall permits.
 
 If the runtime offers no usable host gateway address at all, the sandbox refuses to start and says so, rather than starting with the feature quietly broken.
 
@@ -914,15 +916,17 @@ If you need toolchains, note the JDK path inside the sandbox depends on the arch
 
 #### Reaching a database on your host
 
+Make sure the database listens on `0.0.0.0` rather than `127.0.0.1` (see [Host gateway domains](#host-gateway-domains)), then:
+
 ```json
 {
   "network": {
-    "hostGatewayDomains": ["mydb.local:5432"]
+    "hostGatewayDomains": ["host.internal:5432"]
   }
 }
 ```
 
-Then connect to `mydb.local:5432` from inside the sandbox.
+Then connect to `host.internal:5432` from inside the sandbox.
 
 ## Logs
 
