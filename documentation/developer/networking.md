@@ -97,6 +97,11 @@ cannot drift out of sync with the policy. `TestGatewayEntrypointResolvesHostGate
 (`internal/sandbox/gateway_integration_test.go`) run the real entrypoint against a fabricated
 `/etc/hosts` — one dual-stack, one loopback-only.
 
+The `extra_hosts` entry lands in the **gateway** container only. The agent container gets no
+runtime-injected name for the host, so a `host.internal:<port>` entry is resolved by the gateway's
+CoreDNS zone block like any other name — which is why the README documents `host.internal` as *the*
+name for host services instead of asking users to invent one.
+
 A malformed entry is fatal. A wrong allow list makes the sandbox unsafe or broken, which is not a
 skippable warning.
 
