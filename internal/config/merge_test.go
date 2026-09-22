@@ -59,6 +59,20 @@ func TestMergeSemantics(t *testing.T) {
 			want:    `{"files":{"include":{"~/.npmrc":"~/.npmrc","~/.gitconfig":"~/.gitconfig"}}}`,
 		},
 		{
+			// A higher-precedence file restating an include in object form opts it into the
+			// Docker sidecar: the types differ, so the value is overwritten, not deep-merged.
+			name:    "an include in object form overwrites the string shorthand",
+			global:  `{"files":{"include":{"~/.m2/settings.xml":"~/.m2/settings.xml"}}}`,
+			project: `{"files":{"include":{"~/.m2/settings.xml":{"path":"~/.m2/settings.xml","docker":true}}}}`,
+			want:    `{"files":{"include":{"~/.m2/settings.xml":{"path":"~/.m2/settings.xml","docker":true}}}}`,
+		},
+		{
+			name:    "the string shorthand overwrites an include in object form",
+			global:  `{"files":{"include":{"~/.m2/settings.xml":{"path":"~/.m2/settings.xml","docker":true}}}}`,
+			project: `{"files":{"include":{"~/.m2/settings.xml":"~/.m2/settings.xml"}}}`,
+			want:    `{"files":{"include":{"~/.m2/settings.xml":"~/.m2/settings.xml"}}}`,
+		},
+		{
 			name:    "type mismatch: project wins",
 			global:  `{"libraries":{"/a":"/a"}}`,
 			project: `{"libraries":{"/a":{"path":"/a","readwrite":true}}}`,
@@ -129,6 +143,38 @@ func TestDecodeLibraryForms(t *testing.T) {
 	}
 	if lib := settings.Libraries["/host/b"]; lib.Path != "/container/b" || !lib.ReadWrite {
 		t.Errorf("object library form decoded as %+v", lib)
+	}
+}
+
+func TestDecodeIncludeForms(t *testing.T) {
+	settings, err := Decode(doc(t, `{
+	  "files": {
+	    "include": {
+	      "~/.npmrc": "~/.npmrc",
+	      "~/.m2/settings.xml": {"path": "~/.m2/settings.xml", "docker": true},
+	      "~/.gitconfig": {"path": "~/.gitconfig"}
+	    }
+	  }
+	}`))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if entry := settings.Files.Include["~/.npmrc"]; entry.Path != "~/.npmrc" || entry.Docker {
+		t.Errorf("string include form decoded as %+v, want agent-only ~/.npmrc", entry)
+	}
+	if entry := settings.Files.Include["~/.m2/settings.xml"]; entry.Path != "~/.m2/settings.xml" || !entry.Docker {
+		t.Errorf("flagged include form decoded as %+v", entry)
+	}
+	if entry := settings.Files.Include["~/.gitconfig"]; entry.Path != "~/.gitconfig" || entry.Docker {
+		t.Errorf("object include without the flag decoded as %+v", entry)
+	}
+}
+
+func TestDecodeRejectsMalformedInclude(t *testing.T) {
+	for _, value := range []string{"42", "[\"~/.npmrc\"]"} {
+		if _, err := Decode(doc(t, `{"files":{"include":{"~/.npmrc":`+value+`}}}`)); err == nil {
+			t.Errorf("include value %s was accepted", value)
+		}
 	}
 }
 

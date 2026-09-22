@@ -59,8 +59,27 @@
             "include": {
               "type": "object",
               "additionalProperties": {
-                "type": "string",
-                "minLength": 1
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "object",
+                    "required": ["path"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "docker": {
+                        "type": "boolean",
+                        "description": "Also mount this path into the Docker-in-Docker sidecar, at the same container path, so a container started inside the sandbox can bind-mount it directly"
+                      }
+                    }
+                  }
+                ]
               },
               "propertyNames": {
                 "minLength": 1

@@ -264,7 +264,8 @@ build could have destroyed the last working image. See
   container working directory.
 - Secrets are hidden by over-mounting: files get `/dev/null`, directories get an empty host
   directory. Never anonymous volumes — `compose down` leaks those without `-v`.
-- `files.include` and `libraries` are opt-in; libraries are read-only by default.
+- `files.include` and `libraries` are opt-in; libraries are read-only by default, and an include
+  reaches the Docker-in-Docker sidecar only when marked `docker`.
 
 **The agent runs as a non-root user** mirroring the host user, so files it creates in the project
 have the right ownership. It does have passwordless `sudo` inside the container: the container is
@@ -287,9 +288,12 @@ must be privileged (rootlesskit will not start otherwise), so it is the one plac
 container holds the capabilities a container escape needs. The daemon inside it runs **rootless** so
 the agent cannot use it to read the host — a nested `--privileged` container maps to a subuid that
 owns none of the host's devices, verified against both the raw-disk read and the exclusion-strip
-escapes. The sidecar sees the project directory read-write, the exclusion over-mounts and the
-libraries — the libraries because a nested container has to be able to bind-mount them, and a `:ro`
-one stays read-only on the same user-namespace property the exclusions rely on. What remains is a
+escapes. The sidecar sees the project directory read-write, the exclusion over-mounts, the
+libraries and the `files.include` entries explicitly marked `docker` — the libraries because a
+nested container has to be able to bind-mount them, and a `:ro` one stays read-only on the same
+user-namespace property the exclusions rely on. That set is always a subset of the agent's mounts,
+so the sidecar gains nothing the agent — which drives it through `DOCKER_HOST` — does not already
+have. What remains is a
 kernel- or runtime-level escape from the privileged sidecar, which is why DinD is off by default
 and documented as a larger surface than the rest of the sandbox. See
 [configuration](configuration.md#docker-in-docker).

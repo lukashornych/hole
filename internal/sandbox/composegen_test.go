@@ -104,6 +104,12 @@ func testInput(t *testing.T, projectDir, runTmpDir string, settings *config.Sett
 
 func TestGenerateComposeGolden(t *testing.T) {
 	projectDir, libraryDir := fixture(t)
+	// A real file, so the `full` case shows a mounted include rather than a warned-away one —
+	// and, being marked `docker`, its mirror onto the sidecar.
+	includedFile := filepath.Join(t.TempDir(), "settings.xml")
+	if err := os.WriteFile(includedFile, []byte("<settings/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	tests := []struct {
 		name     string
@@ -121,7 +127,7 @@ func TestGenerateComposeGolden(t *testing.T) {
 			settings: func() *config.Settings {
 				settings := &config.Settings{}
 				settings.Files.Exclude = []string{".env", "secrets", "config/*.yaml"}
-				settings.Files.Include = map[string]string{"~/.npmrc": "~/.npmrc"}
+				settings.Files.Include = map[string]config.Include{includedFile: {Path: "~/.m2/settings.xml", Docker: true}}
 				settings.Libraries = map[string]config.Library{libraryDir: {Path: "/libs/shared", ReadWrite: false}}
 				settings.Dependencies = []string{"make", "gcc"}
 				settings.Environment = map[string]string{"MODE": "test", "ANOTHER": "value"}
@@ -166,6 +172,7 @@ func TestGenerateComposeGolden(t *testing.T) {
 			normalized := strings.ReplaceAll(string(data), runTmpDir, "<RUN>")
 			normalized = strings.ReplaceAll(normalized, projectDir, "<PROJECT>")
 			normalized = strings.ReplaceAll(normalized, libraryDir, "<LIBRARY>")
+			normalized = strings.ReplaceAll(normalized, includedFile, "<INCLUDE>")
 
 			golden := filepath.Join("testdata", strings.ReplaceAll(test.name, " ", "-")+".yml")
 			if *updateGolden {
@@ -319,7 +326,7 @@ func TestGenerateComposeSkipsMissingPaths(t *testing.T) {
 	projectDir, _ := fixture(t)
 	settings := &config.Settings{}
 	settings.Files.Exclude = []string{"does-not-exist", "*.absent"}
-	settings.Files.Include = map[string]string{"/absolutely/missing": "/container/missing"}
+	settings.Files.Include = map[string]config.Include{"/absolutely/missing": {Path: "/container/missing"}}
 	settings.Libraries = map[string]config.Library{"/missing/library": {Path: "/libs/missing"}}
 
 	runTmpDir := t.TempDir()
@@ -449,9 +456,10 @@ func writeSettingsFile(t *testing.T, path, content string) {
 // The sidecar resolves `-v` paths in its own filesystem, so a library has to be mirrored onto it
 // or a nested container gets a silently empty directory; the read-only default survives the mirror
 // because the daemon is rootless. Exclusions are mirrored so that path cannot be turned into a way
-// to read what the agent was meant not to see. `files.include` targets stay off it — single files
-// like ~/.npmrc have no use as a nested bind mount. Build contexts need none of it, because the
-// docker client streams the context to the daemon.
+// to read what the agent was meant not to see. A `files.include` entry in the *string* form stays
+// off the privileged sidecar — only the object form with `docker: true` is mirrored
+// (TestDinDSidecarReceivesFlaggedIncludes). Build contexts need none of it, because the docker
+// client streams the context to the daemon.
 func TestDinDSidecarReceivesExclusionsAndLibraries(t *testing.T) {
 	projectDir, libraryDir := fixture(t)
 	// A real file, so the include is actually mounted rather than warned away — otherwise the
@@ -462,7 +470,7 @@ func TestDinDSidecarReceivesExclusionsAndLibraries(t *testing.T) {
 	}
 	settings := &config.Settings{}
 	settings.Files.Exclude = []string{".env", "secrets"}
-	settings.Files.Include = map[string]string{includedFile: "/opt/included-secret.txt"}
+	settings.Files.Include = map[string]config.Include{includedFile: {Path: "/opt/included-secret.txt"}}
 	settings.Libraries = map[string]config.Library{libraryDir: {Path: "/libs/shared"}}
 	settings.Container.Docker = true
 
@@ -533,6 +541,144 @@ func TestDinDSidecarKeepsALibraryReadOnly(t *testing.T) {
 	if !strings.Contains(sidecar, writableDir+":/libs/writable\n") {
 		t.Errorf("the read-write library is not mirrored as read-write:\n%s", sidecar)
 	}
+}
+
+// An include marked `docker` is mirrored onto the sidecar verbatim, so a container the agent
+// starts can bind-mount the very path the agent knows; a plain include is not, which is what
+// keeps the sidecar's mount set a subset of the agent's.
+func TestDinDSidecarReceivesFlaggedIncludes(t *testing.T) {
+	projectDir, _ := fixture(t)
+	includeDir := t.TempDir()
+	flaggedFile := filepath.Join(includeDir, "settings.xml")
+	plainFile := filepath.Join(includeDir, "npmrc")
+	for _, file := range []string{flaggedFile, plainFile} {
+		if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settings := &config.Settings{}
+	settings.Files.Include = map[string]config.Include{
+		flaggedFile: {Path: "/opt/settings.xml", Docker: true},
+		plainFile:   {Path: "/opt/npmrc"},
+	}
+	settings.Container.Docker = true
+
+	in := testInput(t, projectDir, t.TempDir(), settings, Options{})
+	sidecar := dindService(t, in)
+
+	if !strings.Contains(sidecar, flaggedFile+":/opt/settings.xml\n") {
+		t.Errorf("the flagged include is not mirrored onto the sidecar:\n%s", sidecar)
+	}
+	for _, unflagged := range []string{plainFile, "/opt/npmrc"} {
+		if strings.Contains(sidecar, unflagged) {
+			t.Errorf("the privileged sidecar is given the unflagged include target %q", unflagged)
+		}
+	}
+	// Both are the agent's, flag or not: the flag widens the sidecar, never the agent.
+	agent := agentServiceBlock(t, in)
+	for _, mount := range []string{flaggedFile + ":/opt/settings.xml", plainFile + ":/opt/npmrc"} {
+		if !strings.Contains(agent, mount) {
+			t.Errorf("the agent is missing the include %q:\n%s", mount, agent)
+		}
+	}
+}
+
+// Same reason libraries precede their exclusions: an over-mount emitted first would be buried
+// under a bind that lands on top of it.
+func TestDinDSidecarMountsIncludesBeforeExclusions(t *testing.T) {
+	projectDir, _ := fixture(t)
+	flaggedFile := filepath.Join(t.TempDir(), "settings.xml")
+	if err := os.WriteFile(flaggedFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := &config.Settings{}
+	settings.Files.Exclude = []string{".env"}
+	settings.Files.Include = map[string]config.Include{flaggedFile: {Path: "/opt/settings.xml", Docker: true}}
+	settings.Container.Docker = true
+
+	sidecar := dindService(t, testInput(t, projectDir, t.TempDir(), settings, Options{}))
+
+	include := strings.Index(sidecar, flaggedFile+":/opt/settings.xml")
+	exclusion := strings.Index(sidecar, "/dev/null:"+projectDir+"/.env")
+	if include == -1 || exclusion == -1 {
+		t.Fatalf("sidecar is missing the include (%d) or the exclusion (%d):\n%s", include, exclusion, sidecar)
+	}
+	if include > exclusion {
+		t.Error("the flagged include is emitted after the exclusion over-mounts")
+	}
+}
+
+// The flag legitimately lives in a global settings file while --with-docker is toggled per run,
+// so it must be a silent no-op when there is no sidecar — exactly like a library.
+func TestFlaggedIncludeIsInertWithoutTheSidecar(t *testing.T) {
+	projectDir, _ := fixture(t)
+	flaggedFile := filepath.Join(t.TempDir(), "settings.xml")
+	if err := os.WriteFile(flaggedFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := &config.Settings{}
+	settings.Files.Include = map[string]config.Include{flaggedFile: {Path: "/opt/settings.xml", Docker: true}}
+
+	path, err := generateCompose(testInput(t, projectDir, t.TempDir(), settings, Options{}))
+	if err != nil {
+		t.Fatalf("a flagged include without the sidecar must not be an error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "\n    docker:") {
+		t.Error("a flagged include started the sidecar on its own")
+	}
+	if !strings.Contains(string(data), flaggedFile+":/opt/settings.xml") {
+		t.Errorf("the agent lost the include:\n%s", data)
+	}
+}
+
+// A skipped include must be mirrored nowhere: recording the mount before it is accepted would
+// hand the sidecar a bind the agent never got.
+func TestDinDSidecarSkipsIncludesThatWereNotMounted(t *testing.T) {
+	projectDir, _ := fixture(t)
+	settings := &config.Settings{}
+	settings.Files.Exclude = []string{".env"}
+	settings.Files.Include = map[string]config.Include{
+		// Missing on the host: warned away, so neither service gets it.
+		"/absolutely/missing": {Path: "/opt/missing", Docker: true},
+		// Target already claimed by the project's own exclusion over-mount: `add` rejects it.
+		filepath.Join(projectDir, "config"): {Path: projectDir + "/.env", Docker: true},
+	}
+	settings.Container.Docker = true
+
+	in := testInput(t, projectDir, t.TempDir(), settings, Options{})
+	sidecar := dindService(t, in)
+
+	if strings.Contains(sidecar, "/opt/missing") {
+		t.Errorf("a missing flagged include reached the sidecar:\n%s", sidecar)
+	}
+	if strings.Contains(sidecar, filepath.Join(projectDir, "config")+":") {
+		t.Errorf("a rejected duplicate flagged include reached the sidecar:\n%s", sidecar)
+	}
+}
+
+// agentServiceBlock generates the compose file and returns the agent service block from it.
+func agentServiceBlock(t *testing.T, in composeInput) string {
+	t.Helper()
+	path, err := generateCompose(in)
+	if err != nil {
+		t.Fatalf("generateCompose: %v", err)
+	}
+	generated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, agent, found := strings.Cut(string(generated), "\n    agent:")
+	if !found {
+		t.Fatal("no agent service in the generated file")
+	}
+	if end := strings.Index(agent, "\n    docker:"); end != -1 {
+		agent = agent[:end]
+	}
+	return agent
 }
 
 // dindService generates the compose file and returns the docker service block from it.
@@ -646,9 +792,11 @@ func TestGenerateComposeRejectsCollidingIncludeTargets(t *testing.T) {
 	// files.include is keyed by host path, so a base mount and a profile mount of different
 	// sources can target the same container path. Picking one silently would give the sandbox
 	// a different file than the settings describe.
-	settings.Files.Include = map[string]string{
-		filepath.Join(projectDir, "config"):  "/work/config",
-		filepath.Join(projectDir, "secrets"): "/work/config",
+	// One entry in object form: the check is about container paths, not about how an entry
+	// happens to be written.
+	settings.Files.Include = map[string]config.Include{
+		filepath.Join(projectDir, "config"):  {Path: "/work/config"},
+		filepath.Join(projectDir, "secrets"): {Path: "/work/config", Docker: true},
 	}
 	_, err := generateCompose(testInput(t, projectDir, t.TempDir(), settings, Options{}))
 	if err == nil {

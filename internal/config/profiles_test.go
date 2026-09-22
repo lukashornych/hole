@@ -297,7 +297,7 @@ func TestProfileOverlayCarriesEveryRootSetting(t *testing.T) {
 	  "agents": {"claude": {"args": ["--model", "opus"]}}
 	}}}`, "p")
 
-	if len(settings.Files.Exclude) != 1 || settings.Files.Include["~/.npmrc"] == "" {
+	if len(settings.Files.Exclude) != 1 || settings.Files.Include["~/.npmrc"].Path == "" {
 		t.Error("files settings did not come through the overlay")
 	}
 	if len(settings.Network.Allow) != 1 || settings.Network.SubnetPool != "10.99.0.0/16" {

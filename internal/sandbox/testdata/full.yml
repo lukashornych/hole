@@ -27,6 +27,7 @@ services:
             - /dev/null:<PROJECT>/.env:ro
             - <RUN>/excluded-dirs<PROJECT>/secrets:<PROJECT>/secrets
             - /dev/null:<PROJECT>/config/app.yaml:ro
+            - <INCLUDE>:/home/dev/.m2/settings.xml
             - <LIBRARY>:/libs/shared:ro
         networks:
             sandbox: {}
@@ -69,6 +70,7 @@ services:
             - <PROJECT>:<PROJECT>
             - hole-sandbox-docker-data-hole-sandbox-demo-abcd1234-xyz123:/home/rootless/.local/share/docker
             - <LIBRARY>:/libs/shared:ro
+            - <INCLUDE>:/home/dev/.m2/settings.xml
             - /dev/null:<PROJECT>/.env:ro
             - <RUN>/excluded-dirs<PROJECT>/secrets:<PROJECT>/secrets
             - /dev/null:<PROJECT>/config/app.yaml:ro

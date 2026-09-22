@@ -132,6 +132,31 @@ func TestGrants(t *testing.T) {
 				{Key: "files.include", Values: []string{"$SECRETS/id_rsa -> ~/.ssh/id_rsa"}},
 			},
 		},
+		{
+			// An include marked `docker` also reaches the privileged sidecar, so the prompt
+			// has to say which entries do; a plain entry must keep rendering byte-identically,
+			// or every already-trusted project would be asked again.
+			name: "an include marked docker is flagged in its value",
+			document: `{"files": {"include": {
+				"~/.m2/settings.xml": {"path": "~/.m2/settings.xml", "docker": true},
+				"~/.npmrc": "~/.npmrc"
+			}}}`,
+			want: []grant{
+				{Key: "files.include", Values: []string{
+					"~/.m2/settings.xml -> ~/.m2/settings.xml (docker)",
+					"~/.npmrc -> ~/.npmrc",
+				}},
+			},
+		},
+		{
+			name: "a flagged include inside a profile is collected",
+			document: `{"profiles": {"build": {"files": {"include": {
+				"~/.m2/settings.xml": {"path": "~/.m2/settings.xml", "docker": true}
+			}}}}}`,
+			want: []grant{
+				{Key: "files.include", Values: []string{"~/.m2/settings.xml -> ~/.m2/settings.xml (docker)"}},
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -192,6 +217,12 @@ func TestDigest(t *testing.T) {
 		"git": {"worktreeLinks": "rw"}
 	}`) {
 		t.Error("git.worktreeLinks changed the digest")
+	}
+	// Marking an include `docker` widens what the privileged sidecar can bind-mount, so the
+	// same include in the two forms must not hash alike.
+	if digestOf(`{"files": {"include": {"~/.m2/settings.xml": "~/.m2/settings.xml"}}}`) ==
+		digestOf(`{"files": {"include": {"~/.m2/settings.xml": {"path": "~/.m2/settings.xml", "docker": true}}}}`) {
+		t.Error("marking an include docker kept the same digest")
 	}
 	if digestOf(base) == digestOf(`{
 		"hooks": {"setupHost": [{"script": "a.sh"}]},
