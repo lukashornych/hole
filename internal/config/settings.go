@@ -41,10 +41,37 @@ func (l *Library) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Include is one files.include entry: a host path exposed to the agent at Path and, when
+// Docker is set, mirrored onto the Docker-in-Docker sidecar at the same container path.
+type Include struct {
+	Path   string `json:"path"`
+	Docker bool   `json:"docker"`
+}
+
+// UnmarshalJSON accepts both the string shorthand (agent container only) and the object form.
+func (i *Include) UnmarshalJSON(data []byte) error {
+	var asString string
+	if err := json.Unmarshal(data, &asString); err == nil {
+		i.Path = asString
+		i.Docker = false
+		return nil
+	}
+	var asObject struct {
+		Path   string `json:"path"`
+		Docker bool   `json:"docker"`
+	}
+	if err := json.Unmarshal(data, &asObject); err != nil {
+		return fmt.Errorf("include must be a string or an object with a path: %w", err)
+	}
+	i.Path = asObject.Path
+	i.Docker = asObject.Docker
+	return nil
+}
+
 // FilesSettings controls what the sandbox can see of the host filesystem.
 type FilesSettings struct {
-	Exclude []string          `json:"exclude"`
-	Include map[string]string `json:"include"`
+	Exclude []string           `json:"exclude"`
+	Include map[string]Include `json:"include"`
 }
 
 // NetworkSettings controls sandbox egress.

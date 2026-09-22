@@ -379,8 +379,9 @@ All path-valued settings support `$VAR`/`${VAR}` expansion, `~/` (your home on t
 
     hooks.setupHost — runs a script on your host before the sandbox is created
         .hole/setup-host.sh
-    files.include — mounts host paths into the sandbox
+    files.include — mounts host paths into the sandbox (entries marked "docker" also into the privileged Docker-in-Docker sidecar)
         ~/.ssh -> ~/.ssh
+        ~/.m2/settings.xml -> ~/.m2/settings.xml (docker)
     network.allow — widens the sandbox's network allow-list
         uploads.example.com
 
@@ -394,7 +395,7 @@ Answering no starts nothing at all — no container, and none of the scripts abo
 | Setting | What the project is asking for |
 |---|---|
 | `hooks.setupHost`, `hooks.cleanupHost` | run a script **on your host**, as you |
-| `files.include`, `libraries` | mount host paths into the sandbox |
+| `files.include`, `libraries` | mount host paths into the sandbox — an include marked `(docker)` also into the privileged sidecar |
 | `container.docker` | add the privileged Docker-in-Docker sidecar |
 | `git.worktreePool` | create a worktree directory next to your project and mount it read-write |
 | `network.hostGatewayDomains` | reach services running on your host |
@@ -455,6 +456,30 @@ Mount extra host paths into the sandbox:
 ```
 
 Keys are host paths, values are container paths. A missing host path is a warning and the entry is skipped. Two inclusions resolving to the *same* container path is an error — see [profiles](#profiles) for why that matters.
+
+An entry can also be written as an object to expose it to the [Docker-in-Docker sidecar](#docker-in-docker) as well:
+
+```json
+{
+  "files": {
+    "include": {
+      "~/.npmrc": "~/.npmrc",
+      "~/.m2/settings.xml": { "path": "~/.m2/settings.xml", "docker": true },
+      "~/.m2/repository": { "path": "~/.m2/repository", "docker": true }
+    }
+  }
+}
+```
+
+`docker: true` mirrors the entry onto the sidecar at the *same* container path, so a container started inside the sandbox can bind-mount it directly:
+
+```sh
+docker run --rm -v /home/you/.m2/settings.xml:/root/.m2/settings.xml maven mvn ...
+```
+
+Note the source path: `~/` in a container path resolves to the sandbox home, and that absolute path is what both the agent and the daemon see. Remapping to wherever the image expects the file belongs in the `-v` argument, not in Hole's settings. Files and directories both work, the mount is read-write exactly like the agent's, a missing host path warns and is mirrored nowhere, and the flag is a silent no-op when the sidecar is off — so it can live in your global settings while `--with-docker` is decided per run.
+
+This can never give the sidecar more than the agent has. The agent holds `DOCKER_HOST` and therefore drives the daemon, so any path the daemon can bind-mount it can already read; the flag only decides whether a container started inside the sandbox can bind-mount the path *directly* instead of the agent having to copy it in.
 
 ### Libraries
 
@@ -720,7 +745,7 @@ A `docker:dind-rootless` sidecar starts on the internal sandbox network; the age
 - **Workspace bind mounts**: the project is mounted at the same absolute path in both containers, so bind mounts in your compose files resolve correctly.
 - **File exclusions** are mirrored onto the sidecar, so a container started inside the sandbox cannot bind-mount a path the agent was meant not to see.
 - **Libraries** are mirrored too, at the same paths, so `docker run -v /libs/shared:/x` and compose `volumes:` entries pointing at a library resolve. A `:ro` library stays read-only inside the nested container: the daemon is rootless, and the kernel refuses to lift the read-only flag off a mount inherited into its user namespace. That guarantee is defense-in-depth, not a hard boundary — an escape from the privileged sidecar container lands outside that namespace, where the remount works again.
-- **`files.include` targets are not** mounted into the sidecar. They stay available to the agent as always; a single file like `~/.npmrc` has no plausible use as a nested bind mount, so there is no reason to widen what the sidecar can see. If you need one there, move the entry to `libraries`. Builds are unaffected either way — `docker build` and `buildx` stream the context from the client, so they work with paths the daemon cannot see.
+- **Only `files.include` entries marked `docker: true` are** mounted into the sidecar; a plain entry stays off the privileged container and remains available to the agent as always. See [file inclusions](#file-inclusions) for the object form. Builds are unaffected either way — `docker build` and `buildx` stream the context from the client, so they work with paths the daemon cannot see.
 - **Docker Hub must be allowed explicitly**: `network.allow` has to contain `"docker.io"` or `"*.docker.io"`, or the sandbox cannot pull from Hub at all. No other spelling counts — not `index.docker.io`, not `registry-1.docker.io`. Allowing it is a real decision, not a formality: Hub is a platform anyone can publish to, so the whole of it becomes reachable, and the cache reaches it over a channel the gateway does not filter.
   ```json
   { "container": { "docker": true }, "network": { "allow": ["docker.io"] } }
@@ -850,6 +875,7 @@ A profile you ask for that no settings file defines is an **error**, not a silen
 
 1. **Keep the base minimal.** A broad base cannot be narrowed by a profile, so put in the base only what every mode needs and let each profile add the rest.
 2. **A mount whose source varies between profiles belongs in each profile**, not in the base. `files.include` is keyed by *host* path, so a base `~/.claude → ~/.claude` and a profile `~/claude-review → ~/.claude` would both survive the merge and target the same container path — which Hole rejects, naming both sources.
+3. **A profile restating an include in object form opts it in.** The two forms are different types, so the profile's value overwrites the base's rather than deep-merging — a base `"~/.m2/settings.xml": "~/.m2/settings.xml"` plus a build profile's `{ "path": "~/.m2/settings.xml", "docker": true }` gives that profile, and only that profile, the sidecar mirror. The reverse drops the flag again.
 
 ### Configuration examples
 
@@ -900,6 +926,8 @@ If you need toolchains, note the JDK path inside the sandbox depends on the arch
   }
 }
 ```
+
+If the build also runs Maven inside a container started by the agent, mark those entries `{ "path": "...", "docker": true }` so the [Docker-in-Docker sidecar](#docker-in-docker) can bind-mount them too — see [file inclusions](#file-inclusions).
 
 #### Node project with a private registry
 

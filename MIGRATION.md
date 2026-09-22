@@ -275,18 +275,33 @@ reaches Hub over a channel the gateway does not filter, so that access is now so
 rather than a side effect of turning Docker on. Without the entry the sandbox still starts and warns,
 and `docker pull nginx` fails while pulls from registries you *have* allowed keep working.
 
-**The Docker-in-Docker sidecar no longer receives `files.include` targets.** 1.x handed it the
-agent's whole mount set — exclusions, `files.include` targets *and* `libraries` — although both its
-own code comment and its README described exclusions only. Exclusions and `libraries` are still
-mirrored, as in 1.x; only the included paths are not. A single file like `~/.npmrc` has no plausible
-use as a nested bind mount, so there is no reason to hand it to the privileged sidecar.
+**The Docker-in-Docker sidecar no longer receives `files.include` targets by default.** 1.x handed
+it the agent's whole mount set — exclusions, `files.include` targets *and* `libraries` — although
+both its own code comment and its README described exclusions only. Exclusions and `libraries` are
+still mirrored, as in 1.x; included paths are mirrored only where you ask for it.
 
 Nothing changes for the agent, and builds are unaffected — `docker build` and `buildx` stream the
 context from the client, so they work against paths the daemon cannot see. The one thing that breaks
 is a **bind mount at run time** that points at an included path: `docker run -v
-/opt/npmrc:/x` or an equivalent compose `volumes:` entry no longer resolves inside the sandbox. Move
-the entry to `libraries` if you need it there. The project directory is still mounted at the same
-absolute path in both containers.
+/opt/npmrc:/x` or an equivalent compose `volumes:` entry no longer resolves inside the sandbox.
+
+2.x gives it back per entry, by writing that include in object form with `docker: true`:
+
+```json
+{
+  "files": {
+    "include": {
+      "~/.npmrc": "~/.npmrc",
+      "~/.m2/settings.xml": { "path": "~/.m2/settings.xml", "docker": true }
+    }
+  }
+}
+```
+
+The flagged entry is mirrored onto the sidecar at the same container path, so the nested bind mount
+resolves again; the rest stay off the privileged container. Flagging an include in a *project* settings file re-prompts for
+[project trust](README.md#project-trust), because it widens what that container can reach. The project directory is still mounted at the same absolute path in both
+containers.
 
 **Project names changed, so cached images from an earlier 2.0 build are orphaned.** The hash
 suffix in `hole-sandbox-<project>-<hash>` is now taken over the project path as written, not over

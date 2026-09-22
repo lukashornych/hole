@@ -65,7 +65,7 @@ var capabilities = []capability{
 	},
 	{
 		key:    "files.include",
-		effect: "mounts host paths into the sandbox",
+		effect: `mounts host paths into the sandbox (entries marked "docker" also into the privileged Docker-in-Docker sidecar)`,
 		values: includeValues,
 	},
 	{
@@ -202,7 +202,14 @@ func scriptPaths(entries []config.ScriptEntry) []string {
 func includeValues(settings *config.Settings) []string {
 	var values []string
 	for _, hostPath := range config.SortedKeys(settings.Files.Include) {
-		values = append(values, hostPath+" -> "+settings.Files.Include[hostPath])
+		// A plain entry must keep rendering exactly as it always did: the rendering is what the
+		// recorded digest covers, so a cosmetic change here would re-prompt every trusted project.
+		include := settings.Files.Include[hostPath]
+		value := hostPath + " -> " + include.Path
+		if include.Docker {
+			value += " (docker)"
+		}
+		values = append(values, value)
 	}
 	return values
 }

@@ -17,17 +17,24 @@ import (
 type mountBuilder struct {
 	host      hostenv.Host
 	runTmpDir string
-	mounts    []string
-	// exclusions holds the subset of mounts that hide a path rather than expose one, and
-	// libraries the library mounts. Both are mirrored onto the DinD sidecar; nothing else is.
-	// The daemon resolves `-v` paths in its own filesystem, so without the mirror a nested
-	// container gets a silently empty directory. A mirrored `:ro` library stays read-only
+	// mounts is the agent's complete volume list. The three fields below hold no mounts of their
+	// own: each records which of these same strings is *also* mirrored onto the DinD sidecar, so
+	// the sidecar's set is by construction a subset of the agent's — and, since `seen` already
+	// keeps one mount per container target, a set with no duplicate target either.
+	mounts []string
+	// exclusions are the mounts that hide a path rather than expose one and libraries the library
+	// mounts; both categories are mirrored in full. dockerIncludes is only the subset of
+	// `files.include` entries marked `docker` — a plain include stays off the privileged sidecar.
+	//
+	// Mirroring is needed because the daemon resolves `-v` paths in its own filesystem: without it
+	// a nested container gets a silently empty directory. A mirrored `:ro` library stays read-only
 	// because the daemon runs rootless: mounts it inherits into a child user namespace are
 	// MNT_LOCKED, so the kernel refuses to clear MS_RDONLY. The same property is what keeps a
 	// mirrored over-mount from being unmounted — being an over-mount is no boundary on its own.
-	exclusions []string
-	libraries  []string
-	seen       map[string]bool
+	exclusions     []string
+	libraries      []string
+	dockerIncludes []string
+	seen           map[string]bool
 }
 
 func newMountBuilder(host hostenv.Host, runTmpDir string) *mountBuilder {
@@ -115,17 +122,21 @@ func (b *mountBuilder) addExclusions(sourceDir, mountPoint string, entries []str
 	return nil
 }
 
-// addIncludes mounts extra host paths into the sandbox.
+// addIncludes mounts extra host paths into the sandbox. An entry marked `docker` is also
+// recorded for the DinD sidecar, at the same container path and with the same options, so a
+// container started inside the sandbox can bind-mount it directly; an unmarked entry reaches
+// the agent only.
 //
 // Two includes resolving to the same container path are fatal rather than silently
 // last-one-wins: because includes are keyed by *host* path, a base mount and a profile mount
 // of different sources can collide on one target, and quietly picking one would hand the
 // sandbox a different file than the settings describe.
-func (b *mountBuilder) addIncludes(include map[string]string, projectDir string) error {
+func (b *mountBuilder) addIncludes(includes map[string]config.Include, projectDir string) error {
 	targets := map[string]string{}
-	for _, rawHostPath := range config.SortedKeys(include) {
+	for _, rawHostPath := range config.SortedKeys(includes) {
+		include := includes[rawHostPath]
 		hostPath := b.host.ResolveHostPath(rawHostPath, projectDir)
-		containerPath := b.host.ResolveContainerPath(include[rawHostPath], projectDir)
+		containerPath := b.host.ResolveContainerPath(include.Path, projectDir)
 		if previous, clash := targets[containerPath]; clash {
 			return fmt.Errorf(
 				"files.include maps two host paths to the same container path '%s': '%s' and '%s'; "+
@@ -138,7 +149,9 @@ func (b *mountBuilder) addIncludes(include map[string]string, projectDir string)
 			logging.Warn("included path '%s' not found, skipping", hostPath)
 			continue
 		}
-		b.add(hostPath, containerPath, "")
+		if b.add(hostPath, containerPath, "") && include.Docker {
+			b.dockerIncludes = append(b.dockerIncludes, b.mounts[len(b.mounts)-1])
+		}
 	}
 	return nil
 }

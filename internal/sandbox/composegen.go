@@ -235,15 +235,19 @@ func generateCompose(in composeInput) (string, error) {
 		// unmirrored path is silently an empty directory there. A `:ro` library stays read-only
 		// because the daemon is rootless (see mountBuilder). The exclusion over-mounts are
 		// mirrored so that path cannot be used to read what the agent was meant not to see.
-		// `files.include` targets are not mirrored: they are single files like ~/.npmrc, with no
-		// plausible use as a nested bind mount. Build contexts need none of this — the docker
-		// client streams the context, so `docker build` and `buildx` work against paths the
-		// daemon cannot see; only a run-time bind mount needs a daemon-side path.
+		// `files.include` targets are mirrored only when the entry is marked `docker: true`; a
+		// plain entry stays off the privileged sidecar. What is mirrored is therefore always a
+		// subset of what the agent gets, which is the only honest arrangement: the agent holds
+		// DOCKER_HOST, so it can read anything the daemon can bind-mount anyway. Build contexts
+		// need none of this — the docker client streams the context, so `docker build` and
+		// `buildx` work against paths the daemon cannot see; only a run-time bind mount needs a
+		// daemon-side path.
 		//
-		// Libraries must come before exclusions: a library with its own .hole/settings.json
-		// contributes over-mounts *inside* its mount point, and the parent bind has to be
-		// emitted first or it would land on top of them and unhide the excluded paths.
+		// Exclusions must come last: a library with its own .hole/settings.json contributes
+		// over-mounts *inside* its mount point, and the parent bind has to be emitted first or
+		// it would land on top of them and unhide the excluded paths.
 		dindVolumes = append(dindVolumes, mounts.libraries...)
+		dindVolumes = append(dindVolumes, mounts.dockerIncludes...)
 		dindVolumes = append(dindVolumes, mounts.exclusions...)
 
 		dindCommand := []string{}

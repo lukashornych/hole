@@ -78,7 +78,12 @@ Three details carry the design:
   settings **and every profile** — the file is the unit of trust, so which profile a run selects
   neither hides a grant nor invalidates a recorded decision. Values are kept **raw**: an expanded
   path embeds the host's home, which would make the digest machine-specific, and a redirected
-  `$VAR` would leave it unchanged.
+  `$VAR` would leave it unchanged. A value may carry a suffix for the part of the grant a bare path
+  does not show — ` (read-write)` on a library, ` (docker)` on an include mirrored onto the
+  privileged sidecar. **The unsuffixed rendering is frozen**: it is what every recorded digest was
+  taken over, so changing how a plain entry renders would re-prompt every trusted project. Adding
+  the flag to an include does change the digest, which is the intent — it widens what the
+  privileged container can bind-mount.
 - **What re-prompts.** `~/.hole/trust.json` records a sha256 over the grant set per project path,
   so an ungated settings edit keeps the decision valid while a project that starts asking for more
   asks again. Keying on the grant set rather than on the path is what closes the obvious loop: the
@@ -106,6 +111,12 @@ Merging happens on the untyped document, which is then decoded into `config.Sett
 - **objects** merge recursively, the higher-precedence document winning;
 - **arrays** concatenate lower-precedence first, then deduplicate preserving first occurrence;
 - **scalars** and type mismatches are overwritten.
+
+The type-mismatch rule is load-bearing for the string-or-object settings. A higher-precedence file
+restating `files.include["~/.m2/settings.xml"]` as `{"path": ..., "docker": true}` overwrites the
+global string form and thereby opts the entry into the Docker sidecar; the reverse direction drops
+the flag. Both are the expected "higher precedence wins" outcome, and neither needs special-casing.
+`libraries` behaves the same way.
 
 One exception: `agents.<name>.args` is recomputed as a plain concatenation of every contributing
 source. Generic dedup would corrupt an argument vector — `["--tool", "a", "--tool", "b"]` would
@@ -223,9 +234,30 @@ always explicit. A basename-derived `/libs/<name>` would break every reference t
 absolute path (symlinks, `go.mod` replaces, tool caches), which is exactly what a library is for.
 Read-only unless `:rw`.
 
+`files.include` values are string-or-object (`config.Include`, decoded like `config.Library`): the
+string is the container path, and the object form adds `docker: true`, which mirrors the entry onto
+the DinD sidecar at the same container path with the same options. `mountBuilder.dockerIncludes`
+collects the flagged mounts, the third mirrored category next to `libraries` and `exclusions`.
+Unlike `libraries`, `path` carries no `pattern` constraint — include values may be relative and
+resolve against the project directory, so tightening it would break existing files.
+
 The two categories differ in one runtime respect: libraries (including the worktree-derived ones)
-are mirrored onto the DinD sidecar, `files.include` targets are not — see
-[Docker-in-Docker](#docker-in-docker).
+are mirrored onto the DinD sidecar unconditionally, `files.include` targets only where flagged —
+see [Docker-in-Docker](#docker-in-docker).
+
+**The sidecar's mount set is a subset of the agent's, by construction.** A "sidecar-only" mount
+would be a fiction: the agent holds `DOCKER_HOST`, so anything the daemon can bind-mount it can
+read with `docker run -v <path>:/x alpine cat /x`, and listing such a path under a sidecar-only
+grant would make the trust prompt claim a separation that does not exist. The only real lever is
+whether a nested container can bind-mount the path *directly*, which is exactly what the flag
+controls. One entry with one container path also removes a whole class of silent failure: two
+independent maps would let the two sides disagree on the path, and the nested bind would then
+resolve to an empty directory instead of erroring.
+
+The subset property is also why no new collision domain is needed. Everything mirrored is an agent
+mount, so the builder's single `seen` set — one mount per container target — already guarantees
+uniqueness on the sidecar. A flagged entry the builder *rejected* (missing host path, target
+already claimed) is recorded nowhere, the same rule `addLibraries` follows.
 
 Worktree derivation (`internal/worktree`): in a linked worktree the main repository is mounted — a
 linked worktree's `.git` is only a pointer, so git would not work without it — and in a main
@@ -396,19 +428,26 @@ them wrong fails silently (a healthy-looking daemon that cannot run containers, 
 no route to the gateway), which is why they are called out here.
 
 The sidecar receives the project mount, then `mountBuilder.libraries`, then
-`mountBuilder.exclusions` — never `files.include` targets. Libraries have to be there: the daemon
-resolves `-v` paths in its own filesystem, and an unmirrored one is not an error but a silently
-empty directory in the nested container. Exclusions have to be there so that path cannot become a
-way to read what the agent was meant not to see. `files.include` is left out for a practical reason
-rather than a principled one — its entries are single files like `~/.npmrc` or `~/.gitconfig`, where
-a nested bind mount has no plausible use; a case that needs one belongs in `libraries`. Builds need
-none of it, since they stream their context from the client (`docker build` and `buildx` work
-against paths the daemon cannot see) and only a run-time bind mount needs a daemon-side path.
+`mountBuilder.dockerIncludes`, then `mountBuilder.exclusions`. Libraries have to be there: the
+daemon resolves `-v` paths in its own filesystem, and an unmirrored one is not an error but a
+silently empty directory in the nested container. Exclusions have to be there so that path cannot become a
+way to read what the agent was meant not to see. `files.include` reaches it **only per entry**,
+through `docker: true` — the default stays off the privileged container, and the flagged subset
+exists because the practical case the 2.0 hardening overlooked is real: a build tool's
+configuration file (`~/.m2/settings.xml`, `~/.npmrc`) cannot go in `libraries`, which rejects
+anything that is not a directory. Builds themselves need none of it, since they stream their
+context from the client (`docker build` and `buildx` work against paths the daemon cannot see) and
+only a run-time bind mount needs a daemon-side path.
+
+**The mirrored set is always a subset of the agent's**, and that is what keeps the trust prompt
+honest — see [`files.include`](#filesinclude-libraries-gitworktreelinks-gitworktreepool---library).
 
 **The order is load-bearing.** A library with its own `.hole/settings.json` contributes exclusion
 over-mounts *inside* its mount point; emitting the library bind after them would let it land on top
-and unhide the excluded file. Moby does sort mounts by destination depth, but that is the engine's
-implementation detail, not something to lean on.
+and unhide the excluded file. Flagged includes sit between the two for the same reason exclusions
+come last: nothing that hides a path may be buried under a bind added afterwards. Moby does sort
+mounts by destination depth, but that is the engine's implementation detail, not something to lean
+on.
 
 A mirrored `:ro` library keeps its read-only-ness for the same reason a mirrored over-mount cannot
 be unmounted: the daemon is rootless, so mounts it inherits into its user namespace are
@@ -420,9 +459,12 @@ residual is the sidecar *container* itself: an escape from it lands outside that
 real root, where the remount works again. Defense-in-depth, not a hard boundary.
 
 1.x passed the whole mount set here while its comment and README both said exclusions only — the
-`files.include` half of that came from reusing one array, not from a decision.
-`TestDinDSidecarReceivesExclusionsAndLibraries`, `TestDinDSidecarMountsLibraryBeforeItsExclusions`
-and `TestDinDSidecarKeepsALibraryReadOnly` pin the split, the order and the options.
+`files.include` half of that came from reusing one array, not from a decision; `docker: true` makes
+it a decision. `TestDinDSidecarReceivesExclusionsAndLibraries`,
+`TestDinDSidecarReceivesFlaggedIncludes`, `TestDinDSidecarMountsLibraryBeforeItsExclusions`,
+`TestDinDSidecarMountsIncludesBeforeExclusions`, `TestDinDSidecarKeepsALibraryReadOnly`,
+`TestFlaggedIncludeIsInertWithoutTheSidecar` and
+`TestDinDSidecarSkipsIncludesThatWereNotMounted` pin the split, the order and the options.
 
 Each instance gets a fresh named volume for the daemon's data root
 (`/home/rootless/.local/share/docker`, not `/var/lib/docker` — rootless stores under the
