@@ -518,6 +518,34 @@ func TestDinDSidecarMountsLibraryBeforeItsExclusions(t *testing.T) {
 	}
 }
 
+// A library without a settings file of its own is still covered by the global `files.exclude`,
+// end to end: the over-mount must reach the agent and be mirrored onto the sidecar after the
+// library bind, or `docker build` in the sandbox reads the file the agent cannot.
+func TestGenerateComposeAppliesGlobalExclusionsToALibrary(t *testing.T) {
+	projectDir, libraryDir := fixture(t)
+	settings := &config.Settings{}
+	settings.Libraries = map[string]config.Library{libraryDir: {Path: "/libs/shared"}}
+	settings.Container.Docker = true
+
+	in := testInput(t, projectDir, t.TempDir(), settings, Options{})
+	in.globalExclude = []string{".env"}
+
+	agent := agentServiceBlock(t, in)
+	if !strings.Contains(agent, "/dev/null:/libs/shared/.env:ro") {
+		t.Errorf("the library's .env is not hidden from the agent:\n%s", agent)
+	}
+
+	sidecar := dindService(t, in)
+	library := strings.Index(sidecar, libraryDir+":/libs/shared")
+	exclusion := strings.Index(sidecar, "/dev/null:/libs/shared/.env:ro")
+	if library == -1 || exclusion == -1 {
+		t.Fatalf("sidecar is missing the library (%d) or its exclusion (%d):\n%s", library, exclusion, sidecar)
+	}
+	if library > exclusion {
+		t.Error("the library mount is emitted after its exclusion over-mount, which would unhide it")
+	}
+}
+
 // Mirroring must hand the sidecar the same options the agent gets: a default library is `:ro` on
 // both, and the read-only-ness of the mirrored one is what the rootless daemon enforces.
 func TestDinDSidecarKeepsALibraryReadOnly(t *testing.T) {

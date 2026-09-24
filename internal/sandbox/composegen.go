@@ -57,6 +57,10 @@ type composeInput struct {
 	imageRef       string
 	gatewayImage   string
 	settings       *config.Settings
+	// globalExclude is the global `files.exclude` (global file plus the global overlays of the
+	// selected profile chain), applied to every checkout that is not the project. The project
+	// mount is covered by `settings`, which already merges the global patterns in.
+	globalExclude  []string
 	host           hostenv.Host
 	startupAgent   *agents.Agent
 	enabledAgents  []*agents.Agent
@@ -80,6 +84,7 @@ func generateCompose(in composeInput) (string, error) {
 	// first, while everything the builder collects is shared between them verbatim.
 	projectMount := in.projectDir() + ":" + in.projectDir()
 	mounts := newMountBuilder(in.host, in.runTmpDir)
+	mounts.globalExclude = in.globalExclude
 	mounts.seen[in.projectDir()] = true
 	if err := mounts.addExclusions(in.projectDir(), in.projectDir(), in.settings.Files.Exclude); err != nil {
 		return "", err

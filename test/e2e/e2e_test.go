@@ -359,6 +359,39 @@ func TestExcludedFilesAreHidden(t *testing.T) {
 	assertNoLeftovers(t, projectDir)
 }
 
+// The global `files.exclude` covers every checkout Hole mounts, not only the project: a sibling
+// library carrying no settings file of its own must still have its secrets hidden.
+func TestGlobalExclusionsHideLibraryFiles(t *testing.T) {
+	// Resolved for the same reason the project directory is: the library is mounted at its own
+	// host path, which is the path the agent has to read back.
+	libraryDir, err := hostenv.ResolveProjectDir(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := `["bash", "-c", "sleep 3; [[ -s ` + libraryDir + `/.env ]] && echo LEAKED_LIB_ENV || echo LIB_ENV_HIDDEN; ` +
+		`[[ -s ` + libraryDir + `/lib.txt ]] && echo LIB_MOUNTED || echo LIB_MISSING"]`
+	home, projectDir := environment(t, command, "")
+	write(t, filepath.Join(libraryDir, ".env"), "SECRET=value\n")
+	write(t, filepath.Join(libraryDir, "lib.txt"), "content\n")
+	// Global settings, the file the README tells users to put secret patterns in once.
+	write(t, filepath.Join(home, ".hole", "settings.json"), `{"files":{"exclude":[".env"]}}`)
+
+	output, code := runHole(t, home, 20*time.Minute, "start", "test-agent", projectDir, "--library", libraryDir)
+	if code != 0 {
+		t.Fatalf("hole start exited with %d:\n%s", code, output)
+	}
+	if !strings.Contains(output, "LIB_MOUNTED") {
+		t.Fatalf("the library was not mounted, so the exclusion assertion proves nothing:\n%s", output)
+	}
+	if !strings.Contains(output, "LIB_ENV_HIDDEN") {
+		t.Errorf("the library's .env was visible inside the sandbox:\n%s", output)
+	}
+	if content, err := os.ReadFile(filepath.Join(libraryDir, ".env")); err != nil || !strings.Contains(string(content), "SECRET") {
+		t.Error("the excluded host file was modified")
+	}
+	assertNoLeftovers(t, projectDir)
+}
+
 func TestPrestartAndHostHooksRun(t *testing.T) {
 	home, projectDir := environment(t, `["bash", "-c", "sleep 3; cat /tmp/prestart-marker"]`, `{
 	  "container": {"enabledAgents": ["test-agent"]},

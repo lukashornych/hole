@@ -201,9 +201,11 @@ func TestPoolIsASingleReadWriteMount(t *testing.T) {
 	}
 }
 
-// Every checkout Hole exposes hides what its own settings file asks to hide. Inside the pool that
-// is the only thing that can: the pool is mounted at its root, so `addLibraries` never looks at
-// the children, and without this the project's secrets would be visible in every checkout below it.
+// Every checkout Hole exposes hides what the global settings and its own settings file ask to
+// hide. Inside the pool those are the only two sources: the pool is mounted at its root, so
+// `addLibraries` never looks at the children, and without this the project's secrets would be
+// visible in every checkout below it. Here no global set is configured, which isolates the
+// checkout's own half of the rule.
 func TestPoolWorktreeExclusionsComeFromEachWorktreesOwnSettings(t *testing.T) {
 	host, projectDir, poolDir, hiding, plain := poolFixture(t)
 
@@ -231,7 +233,8 @@ func TestPoolWorktreeExclusionsComeFromEachWorktreesOwnSettings(t *testing.T) {
 		"/dev/null:" + filepath.Join(hiding, ".env") + ":ro",
 	}
 	if !reflect.DeepEqual(builder.mounts, want) {
-		t.Errorf("mounts = %v, want %v (a checkout without settings inherits nothing)", builder.mounts, want)
+		t.Errorf("mounts = %v, want %v (without a global set, a checkout without settings inherits nothing)",
+			builder.mounts, want)
 	}
 	// Over-mounts inside the pool must reach the sidecar too, or `docker build` there sees the file.
 	if !reflect.DeepEqual(builder.exclusions, []string{want[0], want[2]}) {
@@ -285,5 +288,161 @@ func TestExplicitLibraryBeatsThePool(t *testing.T) {
 	}
 	if got := libraries[poolDir]; got.Path != "/libs/pool" || got.ReadWrite {
 		t.Errorf("pool library = %+v, want the configured entry to win", got)
+	}
+}
+
+// libraryFixture builds a sibling checkout next to the project, with the files a global
+// `files.exclude` would typically name, and optionally its own settings file.
+func libraryFixture(t *testing.T, settingsContent string) (hostenv.Host, string) {
+	t.Helper()
+	host := hostenv.Host{Username: "dev", Home: t.TempDir()}
+	libraryDir := filepath.Join(host.Home, "sibling")
+
+	files := []string{
+		filepath.Join(libraryDir, ".env"),
+		filepath.Join(libraryDir, "secrets", "key.pem"),
+		filepath.Join(libraryDir, "config", "app.yaml"),
+	}
+	if settingsContent != "" {
+		files = append(files, filepath.Join(libraryDir, ".hole", "settings.json"))
+	}
+	for _, file := range files {
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := "x"
+		if filepath.Base(file) == "settings.json" {
+			content = settingsContent
+		}
+		if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return host, libraryDir
+}
+
+// The README tells users to write secret patterns once, globally, so they cover every project.
+// A sibling checkout without a settings file of its own used to hide nothing at all.
+func TestLibraryGetsGlobalExclusions(t *testing.T) {
+	host, libraryDir := libraryFixture(t, "")
+
+	builder := newMountBuilder(host, t.TempDir())
+	builder.globalExclude = []string{".env"}
+	if err := builder.addLibraries(
+		map[string]config.Library{libraryDir: {Path: libraryDir}}, host.Home); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		libraryDir + ":" + libraryDir + ":ro",
+		"/dev/null:" + filepath.Join(libraryDir, ".env") + ":ro",
+	}
+	if !reflect.DeepEqual(builder.mounts, want) {
+		t.Errorf("mounts = %v, want %v", builder.mounts, want)
+	}
+}
+
+// The checkout's own file adds to the global set instead of replacing it — and is still honored
+// for `files.exclude` only, so the `libraries` it also declares mounts nothing.
+func TestLibraryCombinesGlobalAndOwnExclusions(t *testing.T) {
+	host, libraryDir := libraryFixture(t,
+		`{"files": {"exclude": ["secrets"]}, "libraries": {"/somewhere/else": "/libs/nested"}}`)
+
+	runTmpDir := t.TempDir()
+	builder := newMountBuilder(host, runTmpDir)
+	builder.globalExclude = []string{".env"}
+	if err := builder.addLibraries(
+		map[string]config.Library{libraryDir: {Path: libraryDir}}, host.Home); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		libraryDir + ":" + libraryDir + ":ro",
+		"/dev/null:" + filepath.Join(libraryDir, ".env") + ":ro",
+		filepath.Join(runTmpDir, "excluded-dirs", libraryDir, "secrets") + ":" +
+			filepath.Join(libraryDir, "secrets"),
+	}
+	if !reflect.DeepEqual(builder.mounts, want) {
+		t.Errorf("mounts = %v, want %v", builder.mounts, want)
+	}
+}
+
+// An entry listed both globally and in the checkout's own file must not produce the same
+// over-mount twice; the builder's one-mount-per-target rule is what guarantees it.
+func TestLibraryDeduplicatesGlobalAndOwnExclusion(t *testing.T) {
+	host, libraryDir := libraryFixture(t, `{"files": {"exclude": [".env"]}}`)
+
+	builder := newMountBuilder(host, t.TempDir())
+	builder.globalExclude = []string{".env"}
+	if err := builder.addLibraries(
+		map[string]config.Library{libraryDir: {Path: libraryDir}}, host.Home); err != nil {
+		t.Fatal(err)
+	}
+
+	overMount := "/dev/null:" + filepath.Join(libraryDir, ".env") + ":ro"
+	if want := []string{libraryDir + ":" + libraryDir + ":ro", overMount}; !reflect.DeepEqual(builder.mounts, want) {
+		t.Errorf("mounts = %v, want %v", builder.mounts, want)
+	}
+	if want := []string{overMount}; !reflect.DeepEqual(builder.exclusions, want) {
+		t.Errorf("exclusions = %v, want the over-mount mirrored exactly once", builder.exclusions)
+	}
+}
+
+// The other half of the rule, unchanged: the project's settings file is repository content and
+// must not govern an unrelated checkout, or a sibling and a pool child would hide different sets.
+func TestProjectExclusionsStillDoNotReachLibraries(t *testing.T) {
+	host, libraryDir := libraryFixture(t, "")
+	projectDir := filepath.Join(host.Home, "myapp")
+	if err := os.MkdirAll(filepath.Join(projectDir, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "config", "app.yaml"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	builder := newMountBuilder(host, t.TempDir())
+	if err := builder.addExclusions(projectDir, projectDir, []string{"config/*.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.addLibraries(
+		map[string]config.Library{libraryDir: {Path: libraryDir}}, projectDir); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		"/dev/null:" + filepath.Join(projectDir, "config", "app.yaml") + ":ro",
+		libraryDir + ":" + libraryDir + ":ro",
+	}
+	if !reflect.DeepEqual(builder.mounts, want) {
+		t.Errorf("mounts = %v, want %v (the project's patterns must not reach the library)", builder.mounts, want)
+	}
+}
+
+// A checkout inside the pool is reached the same way a library is, so the global set covers the
+// one that has no settings file of its own too.
+func TestPoolWorktreesGetGlobalExclusions(t *testing.T) {
+	host, projectDir, poolDir, hiding, plain := poolFixture(t)
+
+	builder := newMountBuilder(host, t.TempDir())
+	builder.globalExclude = []string{".env"}
+	libraries, err := mergeLibraries(host, projectDir, nil,
+		[]worktree.Link{{HostPath: poolDir, ReadWrite: true}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.addLibraries(libraries, projectDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.addPoolWorktreeExclusions([]string{hiding, plain}); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		poolDir + ":" + poolDir,
+		"/dev/null:" + filepath.Join(hiding, ".env") + ":ro",
+		"/dev/null:" + filepath.Join(plain, ".env") + ":ro",
+	}
+	if !reflect.DeepEqual(builder.mounts, want) {
+		t.Errorf("mounts = %v, want %v (the checkout without settings is covered globally)", builder.mounts, want)
 	}
 }

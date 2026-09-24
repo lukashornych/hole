@@ -44,8 +44,8 @@ type Derivation struct {
 	// not exist yet — naming it is this package's job, creating it the caller's.
 	Pool string
 	// PoolWorktrees are the checkouts that already exist inside the pool. The pool mount
-	// covers them, so they get no mount of their own — only their own `files.exclude`, which
-	// nothing else would apply for them.
+	// covers them, so they get no mount of their own — only their exclusions (the global
+	// `files.exclude` plus their own), which nothing else would apply for them.
 	PoolWorktrees []string
 }
 
