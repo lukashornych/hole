@@ -35,6 +35,10 @@ type mountBuilder struct {
 	libraries      []string
 	dockerIncludes []string
 	seen           map[string]bool
+	// globalExclude is the global `files.exclude` (with the selected profile chain applied). It
+	// is applied to every checkout that is not the project; the project mount gets its patterns
+	// from the merged settings, which already contain the global ones.
+	globalExclude []string
 }
 
 func newMountBuilder(host hostenv.Host, runTmpDir string) *mountBuilder {
@@ -228,7 +232,7 @@ func mergeLibraries(host hostenv.Host, projectDir string, configured map[string]
 }
 
 // addLibraries mounts sibling projects, read-only unless the entry opts into read-write.
-// A library's own settings file is honored for files.exclude only, scoped to its mount.
+// Each library hides the global `files.exclude` plus its own settings file's, scoped to its mount.
 //
 // Keys are already resolved by mergeLibraries and are not resolved again: expansion is not
 // idempotent, so a directory whose name contains a literal `$` would be substituted twice.
@@ -250,37 +254,48 @@ func (b *mountBuilder) addLibraries(libraries map[string]config.Library, project
 			b.libraries = append(b.libraries, b.mounts[len(b.mounts)-1])
 		}
 
-		if err := b.addOwnExclusions(hostPath, containerPath); err != nil {
+		if err := b.addCheckoutExclusions(hostPath, containerPath); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// addOwnExclusions applies the `files.exclude` of a directory's own `.hole/settings.json`,
-// scoped to the mount it is exposed through. A directory without that file gets nothing: the
-// project's own exclusions deliberately do not reach outside the project mount.
+// addCheckoutExclusions hides, inside one checkout's mount, what the global `files.exclude` and
+// that checkout's own `.hole/settings.json` ask to hide. The project's `files.exclude` deliberately
+// does not reach it: it is repository content, and a sibling checkout and a pool child must hide
+// the same set regardless of which project opened the sandbox.
 //
 // Every checkout Hole exposes that is not the project goes through here — a library, a derived
-// worktree, or a worktree inside the pool — so "the same way" is one implementation.
-func (b *mountBuilder) addOwnExclusions(hostPath, containerPath string) error {
+// worktree, or a worktree inside the pool — so "the same way" is one implementation. The checkout's
+// own file is honored for `files.exclude` only.
+func (b *mountBuilder) addCheckoutExclusions(hostPath, containerPath string) error {
+	entries := append([]string(nil), b.globalExclude...)
+
 	settingsPath := filepath.Join(hostPath, ".hole", "settings.json")
-	if _, err := os.Stat(settingsPath); err != nil {
+	if _, err := os.Stat(settingsPath); err == nil {
+		label := fmt.Sprintf("library settings (%s)", settingsPath)
+		document, err := config.LoadAndValidate(settingsPath, label)
+		if err != nil {
+			return err
+		}
+		settings, err := config.Decode(document)
+		if err != nil {
+			return err
+		}
+		entries = append(entries, settings.Files.Exclude...)
+	}
+
+	if len(entries) == 0 {
 		return nil
 	}
-	label := fmt.Sprintf("library settings (%s)", settingsPath)
-	document, err := config.LoadAndValidate(settingsPath, label)
-	if err != nil {
-		return err
-	}
-	settings, err := config.Decode(document)
-	if err != nil {
-		return err
-	}
-	return b.addExclusions(hostPath, containerPath, settings.Files.Exclude)
+	// An entry named both globally and by the checkout needs no string-level dedupe: two identical
+	// patterns resolve to the same container target, which `add` keeps exactly once.
+	return b.addExclusions(hostPath, containerPath, entries)
 }
 
-// addPoolWorktreeExclusions hides what the checkouts inside the worktree pool ask to hide.
+// addPoolWorktreeExclusions hides, in every checkout inside the worktree pool, what the global
+// settings and that checkout's own settings file ask to hide.
 //
 // The pool is a single mount at its root, so `addLibraries` only ever looks for
 // `<pool>/.hole/settings.json` — every secret in every checkout below it would otherwise be
@@ -289,7 +304,7 @@ func (b *mountBuilder) addOwnExclusions(hostPath, containerPath string) error {
 // these land as over-mounts *inside* the pool mount, exactly like the project's own exclusions.
 func (b *mountBuilder) addPoolWorktreeExclusions(worktrees []string) error {
 	for _, checkout := range worktrees {
-		if err := b.addOwnExclusions(checkout, checkout); err != nil {
+		if err := b.addCheckoutExclusions(checkout, checkout); err != nil {
 			return err
 		}
 	}

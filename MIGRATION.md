@@ -221,6 +221,17 @@ IPv4 and an IPv6 entry (OrbStack, where the feature never worked), and a runtime
 nothing usable fails the start with a message naming the cause. Nothing changes where the feature
 already worked.
 
+**Global `files.exclude` now applies to libraries and git-derived worktrees.** In 1.x — and 2.x
+before this release — only a library's own `.hole/settings.json` hid anything inside it, so a
+global `.env` pattern protected your project but not a sibling checkout mounted with `libraries`,
+`--library`, `git.worktreeLinks` or the worktree pool: a checkout without its own settings file
+exposed its secrets to the agent (read-only, and mirrored onto the Docker-in-Docker sidecar). Now
+every mounted checkout hides what your global settings ask for, plus whatever its own file adds.
+The project's `files.exclude` still does not reach a library. If you relied on a file being visible
+in a library that your global settings exclude, remove the pattern globally or expose that path
+through `files.include`, which exclusions never reach. Expect one "matched no paths" warning per
+checkout that does not contain a globally excluded file.
+
 **No more proxy environment variables.** `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` are gone from the
 sandbox, because filtering no longer happens at the HTTP layer. Anything that needed proxy
 awareness can drop it:

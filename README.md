@@ -435,9 +435,9 @@ Files are replaced with `/dev/null` and directories with an empty directory, so 
 
 Three things to know about how patterns are matched:
 
-- **A pattern matching nothing is a warning, not an error.** That is deliberate: exclusions are meant to be written once in your global settings for files only *some* projects have (`.env`, `**/*.pem`), and erroring would make one shared default refuse to start every project without them. The cost is on you — a typo hides nothing and only warns, so check the warnings when a project holds something that matters.
+- **A pattern matching nothing is a warning, not an error.** That is deliberate: exclusions are meant to be written once in your global settings for files only *some* projects have (`.env`, `**/*.pem`), and erroring would make one shared default refuse to start every project without them. The cost is on you — a typo hides nothing and only warns, so check the warnings when a project holds something that matters. Because global patterns also apply to every library and worktree mount, expect one warning per checkout that does not contain the file.
 - **Patterns do not follow symlinked directories**, matching bash `globstar`: if `secrets` is a symlink, `secrets/**` matches nothing. Name the link itself (`"secrets"`) and the whole directory is hidden.
-- **`files.exclude` does not reach into `files.include` or library mounts.** Patterns apply to the project directory, and separately to each library's own mount (via that library's `.hole/settings.json`). An included path like `~/.claude` is mounted whole or not at all — there is no way to hide part of it.
+- **Where a pattern applies depends on which settings file it comes from.** Patterns in your **global** settings apply to the project *and* to every library and git-derived worktree mount — that is what makes one global `.env` rule protect every checkout Hole exposes. Patterns in a **project's** `.hole/settings.json` apply to that project's directory only, and a **library's** own `.hole/settings.json` adds to the global set for that library's mount alone. `files.exclude` never reaches into `files.include`: an included path like `~/.claude` is mounted whole or not at all — there is no way to hide part of it.
 
 ### File inclusions
 
@@ -503,7 +503,7 @@ hole start claude . --library ~/projects/other-lib:/libs/other:rw
 
 Without `MOUNT`, `--library` mounts the directory at its own host path — the same place the project and the [git-derived checkouts](#git-worktrees) land — so symlinks, `go.mod` replaces and other references that record an absolute path keep resolving. `settings.json` has no such default: `libraries` values are always explicit container paths.
 
-If a library has its own `.hole/settings.json`, only its `files.exclude` entries are honored, scoped to that library's mount.
+Your global `files.exclude` applies to every library mount. If a library has its own `.hole/settings.json`, only its `files.exclude` entries are honored on top of that, scoped to that library's mount; the project's exclusions never reach a library.
 
 With [Docker-in-Docker](#docker-in-docker) on, libraries are also mounted into the sidecar at the same paths, so a container the agent starts can bind-mount one:
 
@@ -564,7 +564,7 @@ variable is not set, use the project's usual location.
 
 Keep the `if` — that file is read by agents running on your host too, and inside a sandbox the variable is unset whenever the pool is not mounted (started in a linked worktree, `worktreeLinks: "off"`, or the pool disabled). Unconditional instructions would degrade into `git worktree add /<branch>` in every one of those cases.
 
-**A worktree created mid-session gets no `files.exclude` over-mounts.** The mount set is fixed when the sandbox starts, so only checkouts that already existed then have their secrets hidden — each according to its own `.hole/settings.json`, exactly as a library does. This is the sharp edge of the mode's benefit: the sandbox cannot hide what did not exist yet.
+**A worktree created mid-session gets no `files.exclude` over-mounts.** The mount set is fixed when the sandbox starts, so only checkouts that already existed then have their secrets hidden — each according to your global `files.exclude` plus its own `.hole/settings.json`, exactly as a library does. This is the sharp edge of the mode's benefit: the sandbox cannot hide what did not exist yet.
 
 ### Network access
 

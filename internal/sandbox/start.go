@@ -311,6 +311,7 @@ func Start(opts Options) (exitCode int, err error) {
 		imageRef:       imageIdentity.Reference(),
 		gatewayImage:   gatewayImage,
 		settings:       settings,
+		globalExclude:  globalSettings.Files.Exclude,
 		host:           host,
 		startupAgent:   startupAgent,
 		enabledAgents:  enabledAgents,
