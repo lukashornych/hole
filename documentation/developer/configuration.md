@@ -19,7 +19,8 @@ The schema is strict — `unevaluatedProperties: false` at the root and inside e
 any new setting **must** be added to it or every user's startup breaks. See
 [recipes](recipes.md#add-a-settings-option).
 
-Library settings files go through the same pipeline, but only their `files.exclude` is honored.
+Library settings files go through the same pipeline, but only their `files.exclude` is honored, and
+it is combined with the global `files.exclude` rather than replacing it.
 
 ### Removed keys and migration errors
 
@@ -216,6 +217,11 @@ exposure (see [analysis/security-audit.md](../analysis/security-audit.md), findi
   symlink, and warns. A symlinked path named *directly* is excluded correctly: `addExclusions`
   checks existence with `Lstat` (a dangling link still warns) but decides file-vs-directory with
   `Stat`, because `/dev/null` over a directory is a mount the runtime rejects.
+- **Three sources, three scopes.** The **global** `files.exclude` (the profile-resolved
+  `documents.globalOnly`, threaded through `composeInput.globalExclude`) applies to the project *and*
+  to every other checkout Hole mounts. The **merged** settings — which already contain the global
+  patterns — drive the project mount. A **checkout's own** `.hole/settings.json` adds to the global
+  set for its mount alone; the project's patterns never reach it.
 - **`files.exclude` has no reach into `files.include` targets.** Patterns are resolved against the
   project directory and, separately, against each library's own mount. An included path — `~/.claude`,
   `~/.m2/repository` — is mounted whole or not at all.
@@ -323,10 +329,12 @@ Five things carry that design:
   would edit the user's real global memory whenever they mount their agent config — which is the
   documented pattern.
 
-Exclusions follow one rule: **every checkout Hole exposes hides what its own `.hole/settings.json`
-asks to hide, scoped to its own mount** (`mountBuilder.addOwnExclusions`, used by `addLibraries` and by
-`addPoolWorktreeExclusions`). For a library or an individual worktree link that is what
-`addLibraries` always did. Inside the pool it is load-bearing: the pool is a *single* mount at its
+Exclusions follow one rule: **every checkout Hole exposes hides what the global settings and its own
+`.hole/settings.json` ask to hide, scoped to its own mount** (`mountBuilder.addCheckoutExclusions`,
+used by `addLibraries` and by `addPoolWorktreeExclusions`). The global half is what makes the
+documented "write your secret patterns once, globally" advice hold for a checkout that carries no
+settings file; an entry named by both sources resolves to one container target, which the builder's
+`seen` map already keeps exactly once. Inside the pool it is load-bearing: the pool is a *single* mount at its
 root, so without it `<pool>/feature/.env` would be visible while the same checkout mounted as its own
 library is protected. The children get over-mounts, not mounts of their own — source and target are
 the same absolute path, so they land inside the pool mount exactly like the project's own exclusions.
@@ -337,7 +345,8 @@ reason it does not reach into a library: a pool child and a sibling checkout mus
 Consequences, accepted: a worktree created *mid-session* gets no exclusions at all, because the mount
 set is fixed at start — the sharp edge of the mode's benefit, documented in the README — and a
 checkout on a branch whose `.hole/settings.json` predates an exclusion does not hide what that
-exclusion hides, exactly like a library in that state.
+exclusion hides, exactly like a library in that state — weakened, since global patterns cover such a
+checkout and only checkout-specific ones are missed.
 
 The bare-clone layout (`repos/proj.git` plus per-branch worktrees beside it) is the one case where
 the common directory is not a `.git` *inside* a working tree but the repository itself, so
@@ -442,8 +451,7 @@ only a run-time bind mount needs a daemon-side path.
 **The mirrored set is always a subset of the agent's**, and that is what keeps the trust prompt
 honest — see [`files.include`](#filesinclude-libraries-gitworktreelinks-gitworktreepool---library).
 
-**The order is load-bearing.** A library with its own `.hole/settings.json` contributes exclusion
-over-mounts *inside* its mount point; emitting the library bind after them would let it land on top
+**The order is load-bearing.** A library contributes exclusion over-mounts *inside* its mount point; emitting the library bind after them would let it land on top
 and unhide the excluded file. Flagged includes sit between the two for the same reason exclusions
 come last: nothing that hides a path may be buried under a bind added afterwards. Moby does sort
 mounts by destination depth, but that is the engine's implementation detail, not something to lean
