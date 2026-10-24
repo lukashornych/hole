@@ -220,10 +220,11 @@ refresh.
 - **`HOLE_SETTINGS_FILE`** — replaces `~/.hole/settings.json` as the global settings document
   (user-facing, documented in the [README](../../README.md#alternative-global-settings-file)). The
   e2e harness (`holeEnv`) strips an exported value so the tests keep their own global settings;
-  unit tests build `hostenv.Host{SettingsFile: …}` directly instead of setting the variable.
+  unit tests build `hostenv.Host{GlobalSettingsOverride: …}` directly instead of setting the
+  variable.
 - **`HOLE_PROJECT_SETTINGS_FILE`** — replaces the main project's `.hole/settings.json`
   (user-facing, documented in the [README](../../README.md#alternative-project-settings-file)).
-  `holeEnv` strips it too; unit tests set `hostenv.Host{ProjectSettingsFile: …}`.
+  `holeEnv` strips it too; unit tests set `hostenv.Host{ProjectSettingsOverride: …}`.
 - `HOLE_TEST_LIVENESS_DIR` / `HOLE_TEST_LIVENESS_NAME` are internal: `internal/state` re-execs its
   own test binary as a lock-holding helper through them. Never set them by hand.
 

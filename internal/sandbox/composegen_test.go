@@ -643,7 +643,7 @@ func TestLibraryKeepsItsOwnExclusionsUnderAProjectSettingsOverride(t *testing.T)
 	settings.Libraries = map[string]config.Library{libraryDir: {Path: "/libs/shared"}}
 
 	in := testInput(t, projectDir, t.TempDir(), settings, Options{})
-	in.host.ProjectSettingsFile = override
+	in.host.ProjectSettingsOverride = override
 
 	if agent := agentServiceBlock(t, in); !strings.Contains(agent, "/dev/null:/libs/shared/.env:ro") {
 		t.Errorf("the library's own exclusion is lost under HOLE_PROJECT_SETTINGS_FILE:\n%s", agent)

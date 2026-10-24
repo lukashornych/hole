@@ -193,7 +193,7 @@ func Start(opts Options) (exitCode int, err error) {
 	// declines the project's grants must not have recorded one.
 	if err := trust.Gate(trust.Options{
 		ProjectDir:   opts.ProjectDir,
-		SettingsFile: host.ProjectSettingsPath(opts.ProjectDir),
+		SettingsFile: host.ProjectSettingsFile(opts.ProjectDir),
 		Document:     documents.project,
 		Store:        trust.NewStore(host.HoleDir()),
 		Interactive:  engine.IsTerminal(os.Stdin),
@@ -235,8 +235,8 @@ func Start(opts Options) (exitCode int, err error) {
 	if snapshot, err := json.Marshal(documents.merged); err == nil {
 		instance.Settings = snapshot
 		instance.SettingsFiles = documents.files
-		if host.ProjectSettingsPath(opts.ProjectDir) != projectSettingsFile(opts.ProjectDir) {
-			instance.ProjectSettingsFile = host.ProjectSettingsFile
+		if host.ProjectSettingsFile(opts.ProjectDir) != projectSettingsFile(opts.ProjectDir) {
+			instance.ProjectSettingsFile = host.ProjectSettingsOverride
 		}
 		if err := store.Write(instance); err != nil {
 			logging.Warn("could not update the instance registry: %v", err)
@@ -699,7 +699,7 @@ func attach(containerEngine *engine.Engine, container string) int {
 }
 
 // projectSettingsFile is the in-repo project settings path, which HOLE_PROJECT_SETTINGS_FILE
-// may replace for the main project (see hostenv.Host.ProjectSettingsPath).
+// may replace for the main project (see hostenv.Host.ProjectSettingsFile).
 func projectSettingsFile(projectDir string) string {
 	return filepath.Join(projectDir, ".hole", "settings.json")
 }
@@ -724,7 +724,7 @@ type settingsDocuments struct {
 // project profile can extend a globally-defined one and vice versa.
 func loadSettingsDocument(host hostenv.Host, projectDir, profile string) (settingsDocuments, error) {
 	globalPath := host.GlobalSettingsFile()
-	projectPath := host.ProjectSettingsPath(projectDir)
+	projectPath := host.ProjectSettingsFile(projectDir)
 	projectLabel := "project settings (.hole/settings.json)"
 	// The override replaces the in-repo file entirely, its files.exclude included, so a human
 	// running the command by hand must see that the repository's own file was skipped.

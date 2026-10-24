@@ -17,7 +17,7 @@ missing override is fatal rather than a silent fall-back to defaults. The path t
 is recorded in `Instance.SettingsFiles`, which `hole list` labels from (`global(<path>)`), not from
 the listing process's own environment.
 
-The main project's document comes from `Host.ProjectSettingsPath(projectDir)`:
+The main project's document comes from `Host.ProjectSettingsFile(projectDir)`:
 `HOLE_PROJECT_SETTINGS_FILE` replaces `<project>/.hole/settings.json` when set. It occupies the
 project slot of the same two-document pipeline, so `ResolveChain`, `MergeWithProfile`, the
 `globalOnly` image baseline and the trust gate are unchanged; the in-repo file is not read at all
@@ -43,6 +43,32 @@ any new setting **must** be added to it or every user's startup breaks. See
 
 Library settings files go through the same pipeline, but only their `files.exclude` is honored, and
 it is combined with the global `files.exclude` rather than replacing it.
+
+### Scaffolding settings files
+
+`hole settings create|open|get` (`internal/cli/settings.go`, `internal/config/scaffold.go`) manage
+the two documents directly ([issue #53](https://github.com/lukashornych/hole/issues/53)).
+
+- **The template is generated in code** (`config.SettingsTemplate`) from `schemaResourceURL`, so the
+  `$schema` URL users write cannot drift from the one the compiled schema is registered under. It is
+  deliberately not an embedded asset: `assets.BuildInputsHash()` digests every embedded file into
+  the agent and gateway image tags, so a template file would rebuild both images for every user.
+- **`--append` is an ordered shallow merge** on the raw top-level fields (`AppendTemplate`), not a
+  round trip through `Document`, whose map would sort the keys and reformat the file. A conflicting
+  top-level key takes the template's value whole; missing keys are inserted first. Non-objects,
+  trailing data and duplicate top-level keys are errors rather than being silently dropped. The
+  result is not schema-validated: the user may be fixing a broken file, and `start` validates anyway.
+- **Writes are plain `os.WriteFile`**: no concurrent reader needs the temp-file-and-rename dance, and
+  writing in place keeps the file mode and follows a symlinked (dotfiles-managed) file.
+- **The overrides are followed**: the target comes from `Host.GlobalSettingsFile()` /
+  `Host.ProjectSettingsFile(dir)`, exactly as `start` reads it, and the project path argument is
+  validated with `ResolveProjectDir` even when an override ignores it. `ValidateSettingsFile` is not
+  reused because it requires the override to exist, which `create` must not; `settings` only
+  requires a set override to be absolute.
+- **`open` reports what `start` would**: it validates with `LoadAndValidate` under the same labels as
+  `loadSettingsDocument`, and re-checks that the file still exists after the editor exits, since
+  `LoadAndValidate` treats a missing file as valid. The editor runs as `sh -c '<editor> "$1"'`, so
+  `EDITOR="code -w"` works and the path is never spliced into the script.
 
 ### Removed keys and migration errors
 

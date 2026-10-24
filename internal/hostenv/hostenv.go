@@ -73,23 +73,24 @@ type Host struct {
 	// themselves, and forcing the host IDs there breaks the container user.
 	UID string
 	GID string
-	// SettingsFile overrides the global settings document (HOLE_SETTINGS_FILE). Empty means
-	// the default under HoleDir; nothing else moves with it.
-	SettingsFile string
-	// ProjectSettingsFile overrides the main project's settings document
-	// (HOLE_PROJECT_SETTINGS_FILE). Empty means <project>/.hole/settings.json; libraries and
-	// other checkouts never follow it.
-	ProjectSettingsFile string
+	// GlobalSettingsOverride is the raw HOLE_SETTINGS_FILE value, "" when unset. Empty means
+	// the default under HoleDir; nothing else moves with it. GlobalSettingsFile returns the file
+	// actually read.
+	GlobalSettingsOverride string
+	// ProjectSettingsOverride is the raw HOLE_PROJECT_SETTINGS_FILE value, "" when unset. Empty
+	// means <project>/.hole/settings.json; libraries and other checkouts never follow it.
+	// ProjectSettingsFile returns the file actually read.
+	ProjectSettingsOverride string
 }
 
-// DetectHost reads the host user identity and the HOLE_SETTINGS_FILE and
+// DetectHost reads the host user identity and the raw HOLE_SETTINGS_FILE and
 // HOLE_PROJECT_SETTINGS_FILE overrides.
 func DetectHost() Host {
 	host := Host{
-		Username:            firstNonEmpty(os.Getenv("USER"), defaultUsername),
-		Home:                firstNonEmpty(os.Getenv("HOME"), defaultHome),
-		SettingsFile:        os.Getenv("HOLE_SETTINGS_FILE"),
-		ProjectSettingsFile: os.Getenv("HOLE_PROJECT_SETTINGS_FILE"),
+		Username:                firstNonEmpty(os.Getenv("USER"), defaultUsername),
+		Home:                    firstNonEmpty(os.Getenv("HOME"), defaultHome),
+		GlobalSettingsOverride:  os.Getenv("HOLE_SETTINGS_FILE"),
+		ProjectSettingsOverride: os.Getenv("HOLE_PROJECT_SETTINGS_FILE"),
 	}
 	if runtime.GOOS == "linux" {
 		host.UID = fmt.Sprint(os.Getuid())
@@ -145,32 +146,33 @@ func (h Host) ResolveContainerPath(raw, projectDir string) string {
 // HoleDir is Hole's per-user state directory (~/.hole).
 func (h Host) HoleDir() string { return filepath.Join(h.Home, ".hole") }
 
-// GlobalSettingsFile is the path of the global settings document: HOLE_SETTINGS_FILE when set,
-// ~/.hole/settings.json otherwise.
+// GlobalSettingsFile is the global settings document actually read: the HOLE_SETTINGS_FILE
+// override when set, ~/.hole/settings.json otherwise.
 func (h Host) GlobalSettingsFile() string {
-	if h.SettingsFile != "" {
-		return h.SettingsFile
+	if h.GlobalSettingsOverride != "" {
+		return h.GlobalSettingsOverride
 	}
 	return filepath.Join(h.HoleDir(), "settings.json")
 }
 
-// ProjectSettingsPath is the path of the main project's settings document:
-// HOLE_PROJECT_SETTINGS_FILE when set, <projectDir>/.hole/settings.json otherwise.
-func (h Host) ProjectSettingsPath(projectDir string) string {
-	if h.ProjectSettingsFile != "" {
-		return h.ProjectSettingsFile
+// ProjectSettingsFile is the main project's settings document actually read: the
+// HOLE_PROJECT_SETTINGS_FILE override when set, <projectDir>/.hole/settings.json otherwise.
+func (h Host) ProjectSettingsFile(projectDir string) string {
+	if h.ProjectSettingsOverride != "" {
+		return h.ProjectSettingsOverride
 	}
 	return filepath.Join(projectDir, ".hole", "settings.json")
 }
 
-// ValidateSettingsFile checks the HOLE_SETTINGS_FILE and HOLE_PROJECT_SETTINGS_FILE overrides.
-// Unlike a missing default file, a missing override is fatal: falling back to the default would
-// start a sandbox without the configuration the caller explicitly asked for.
+// ValidateSettingsFile checks the HOLE_SETTINGS_FILE and HOLE_PROJECT_SETTINGS_FILE overrides
+// (GlobalSettingsOverride, ProjectSettingsOverride). Unlike a missing default file, a missing
+// override is fatal: falling back to the default would start a sandbox without the configuration
+// the caller explicitly asked for.
 func (h Host) ValidateSettingsFile() error {
-	if err := validateOverride("HOLE_SETTINGS_FILE", h.SettingsFile); err != nil {
+	if err := validateOverride("HOLE_SETTINGS_FILE", h.GlobalSettingsOverride); err != nil {
 		return err
 	}
-	return validateOverride("HOLE_PROJECT_SETTINGS_FILE", h.ProjectSettingsFile)
+	return validateOverride("HOLE_PROJECT_SETTINGS_FILE", h.ProjectSettingsOverride)
 }
 
 func validateOverride(variable, path string) error {

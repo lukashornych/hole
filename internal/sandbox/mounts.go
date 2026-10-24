@@ -422,7 +422,7 @@ func (b *mountBuilder) addPoolWorktreeExclusions(worktrees []string) error {
 // The default ~/.hole/settings.json is not checked: mounting ~/.hole is already a choice the trust
 // gate sees.
 func checkSettingsFileNotExposed(host hostenv.Host, projectDir string, settings *config.Settings, gitLayout worktree.Derivation, libraryFlags []string) error {
-	if host.SettingsFile == "" {
+	if host.GlobalSettingsOverride == "" {
 		return nil
 	}
 	libraries, err := mergeLibraries(host, projectDir, settings.Libraries, gitLayout.Links, libraryFlags)
@@ -438,14 +438,14 @@ func checkSettingsFileNotExposed(host hostenv.Host, projectDir string, settings 
 		sources = append(sources, gitLayout.Pool)
 	}
 
-	settingsFile := resolveSymlinks(host.SettingsFile)
+	settingsFile := resolveSymlinks(host.GlobalSettingsOverride)
 	for _, source := range sources {
 		resolvedSource := resolveSymlinks(source)
 		if settingsFile == resolvedSource || strings.HasPrefix(settingsFile, resolvedSource+string(filepath.Separator)) {
 			return fmt.Errorf(
 				"HOLE_SETTINGS_FILE '%s' lies inside '%s', which is mounted into the sandbox; "+
 					"the agent could rewrite the global settings, so move the file outside every mounted path",
-				host.SettingsFile, source)
+				host.GlobalSettingsOverride, source)
 		}
 	}
 	return nil

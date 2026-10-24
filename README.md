@@ -173,6 +173,12 @@ hole list --json --no-gc ID    # JSON without cleaning up leftovers, for tools t
 hole destroy                   # destroy ALL Hole Docker resources
 hole destroy .                 # destroy resources for the current project
 hole destroy /path/to/project  # destroy resources for a specific project
+hole settings create project . # write .hole/settings.json with the $schema reference
+hole settings create global    # the same for ~/.hole/settings.json
+hole settings open project .   # edit the project settings file, then validate it
+hole settings open global      # the same for the global settings file
+hole settings get project .    # print the path of the project settings file
+hole settings get global       # print the path of the global settings file
 hole version                   # print the installed version
 hole update                    # upgrade to the latest release
 hole uninstall                 # remove Hole's Docker resources and the binary
@@ -543,6 +549,14 @@ Add the schema reference for editor completion:
 }
 ```
 
+`hole settings create project .` (or `hole settings create global`) writes this snippet for you, creating `.hole/` if needed. It refuses to touch an existing file unless you pass `--overwrite`, which replaces the file with the snippet, or `--append`, which sets the snippet's top-level fields in your file, replacing any it already has, and keeps your key order but normalises the indentation to two spaces.
+
+`hole settings open project .` (or `open global`) starts `$VISUAL` / `$EDITOR` (or `vi` when neither is set and you are at a terminal) on an existing file; when the file is missing it fails and names the `hole settings create …` command to run. After the editor closes, the file is validated and any problem is reported exactly as `hole start` would report it; at a terminal you are offered to reopen the editor (`[Y/n]`), otherwise the command exits non-zero and the file stays as you saved it.
+
+`hole settings get project .` (or `get global`) prints the absolute path of the settings file `hole start` would read, and nothing else, so wrappers can use `"$(hole settings get project .)"`. It exits non-zero when the file does not exist.
+
+All three act on the file `hole start` reads, including the file named by `HOLE_SETTINGS_FILE` / `HOLE_PROJECT_SETTINGS_FILE`. Only `create` writes a missing file.
+
 All path-valued settings support `$VAR`/`${VAR}` expansion, `~/` (your home on the host side, the sandbox home on the container side), and paths relative to the project directory.
 
 ### Alternative global settings file
@@ -556,6 +570,7 @@ HOLE_SETTINGS_FILE=/path/to/generated-settings.json hole start claude .
 - The file **replaces** `~/.hole/settings.json` for that run — the two are not merged. The project's `.hole/settings.json` is merged on top as usual.
 - Only the settings document moves. `~` keeps meaning your real home, so `~/…` paths in project settings still resolve where they always did, and custom agents, [project trust](#project-trust), logs and the running-sandbox registry stay in `~/.hole`.
 - It must be an absolute path to an existing file; anything else stops the start instead of silently falling back to the default settings.
+- `hole settings create|open|get global` act on this file when the variable is set; `create` is the one command for which it need not exist yet.
 - It must not lie inside the project or inside any included, library or worktree path: the global file is trusted without a prompt, so an agent that could edit it could add a `hooks.setupHost` that runs on your host at the next start. Hole refuses to start in that case (symlinks are followed).
 - Relative paths inside it (hook scripts, for example) resolve against the **project**, like in any settings file — a wrapper shipping scripts beside the file should reference them by absolute path.
 
@@ -572,6 +587,7 @@ HOLE_PROJECT_SETTINGS_FILE=/path/to/project-settings.json hole start claude .
 - Only the main project is affected. Libraries, derived worktrees and worktree-pool checkouts keep reading their own `.hole/settings.json`.
 - It is still subject to [project trust](#project-trust), exactly like the in-repo file: a wrapper that must not prompt passes `--trust-project`, and an override asking for a different set of grants asks again.
 - It must be an absolute path to an existing file; anything else stops the start instead of silently falling back to the in-repo file.
+- `hole settings create|open|get project <path>` act on this file when the variable is set; `create` is the one command for which it need not exist yet.
 - Relative paths inside it resolve against the **project**, like in any settings file.
 - A wrapper that passes `--trust-project` on every run must not keep the file inside a path mounted into any sandbox: an agent could plant grants there that the next start accepts without asking, and unlike the in-repo file the override is not under the repository's review.
 

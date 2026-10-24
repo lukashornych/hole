@@ -310,7 +310,7 @@ func TestGlobalSettingsFileOverride(t *testing.T) {
 		t.Errorf("default GlobalSettingsFile = %q", got)
 	}
 
-	host.SettingsFile = "/opt/wrapper/settings.json"
+	host.GlobalSettingsOverride = "/opt/wrapper/settings.json"
 	if got := host.GlobalSettingsFile(); got != "/opt/wrapper/settings.json" {
 		t.Errorf("overridden GlobalSettingsFile = %q", got)
 	}
@@ -329,15 +329,15 @@ func TestGlobalSettingsFileOverride(t *testing.T) {
 	}
 }
 
-func TestProjectSettingsPathOverride(t *testing.T) {
+func TestProjectSettingsFileOverride(t *testing.T) {
 	host := Host{Home: "/home/tester"}
-	if got := host.ProjectSettingsPath("/projects/demo"); got != "/projects/demo/.hole/settings.json" {
-		t.Errorf("default ProjectSettingsPath = %q", got)
+	if got := host.ProjectSettingsFile("/projects/demo"); got != "/projects/demo/.hole/settings.json" {
+		t.Errorf("default ProjectSettingsFile = %q", got)
 	}
 
-	host.ProjectSettingsFile = "/opt/wrapper/project.json"
-	if got := host.ProjectSettingsPath("/projects/demo"); got != "/opt/wrapper/project.json" {
-		t.Errorf("overridden ProjectSettingsPath = %q", got)
+	host.ProjectSettingsOverride = "/opt/wrapper/project.json"
+	if got := host.ProjectSettingsFile("/projects/demo"); got != "/opt/wrapper/project.json" {
+		t.Errorf("overridden ProjectSettingsFile = %q", got)
 	}
 	if got := host.GlobalSettingsFile(); got != "/home/tester/.hole/settings.json" {
 		t.Errorf("GlobalSettingsFile = %q moved with HOLE_PROJECT_SETTINGS_FILE", got)
@@ -371,7 +371,7 @@ func TestValidateSettingsFile(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			host := Host{Home: "/home/tester", SettingsFile: test.settingsFile, ProjectSettingsFile: test.projectSettingsFile}
+			host := Host{Home: "/home/tester", GlobalSettingsOverride: test.settingsFile, ProjectSettingsOverride: test.projectSettingsFile}
 			err := host.ValidateSettingsFile()
 			if test.wantErr == "" {
 				if err != nil {

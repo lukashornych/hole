@@ -11,7 +11,8 @@ everything when the agent exits.
 cmd/hole/              thin entry point: logging setup, dispatch to internal/cli
 assets/                go:embed root — agent plugins, Dockerfiles, entrypoints, schema
 internal/cli/          argument parsing, help text, command dispatch
-internal/config/       settings load/validate/merge, profiles, exclusion glob matcher
+internal/config/       settings load/validate/merge, profiles, exclusion glob matcher,
+                       settings scaffolding
 internal/hostenv/      env expansion, path pipeline, host identity, ~/.hole layout, identity
 internal/engine/       the only package that shells out to docker/podman
 internal/compose/      typed compose model (~20 fields) + YAML marshalling

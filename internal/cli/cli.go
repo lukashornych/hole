@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 const runLogRetention = 7 * 24 * time.Hour
 
 const helpText = `Usage: hole {command} {agent}[:{profile}] {path} [options]
+       hole settings {create|open|get} {project {path}|global} [options]
 
 Commands:
   start     Create a sandbox, attach to the agent CLI, and destroy on exit
@@ -32,6 +34,7 @@ Commands:
   destroy   Remove Docker resources for a project, or all resources if no path given
   update    Update hole to the latest release
   uninstall Uninstall hole and optionally remove Docker resources
+  settings  Create, open or locate the project or global settings file
   help      Show this help message
   version   Print the installed hole version
 
@@ -56,6 +59,10 @@ Options:
       --json                  Print running sandboxes as JSON; list only
       --no-gc                 Do not clean up leftovers of dead sandboxes while
                                   listing; list only
+      --overwrite             Replace an existing settings file with the
+                                  template; settings create only
+      --append                Add the template's fields to an existing
+                                  settings file; settings create only
   --                          Separator for agent-specific arguments;
                                   everything after -- is passed to the agent CLI
 
@@ -83,6 +90,10 @@ Examples:
   hole destroy                            # destroy ALL Hole Docker resources
   hole destroy .                          # destroy resources for current project
   hole destroy /path/to/project           # destroy resources for specific project
+  hole settings create project .          # write .hole/settings.json with $schema
+  hole settings create global --append    # add $schema to ~/.hole/settings.json
+  hole settings open project .            # edit and validate .hole/settings.json
+  hole settings get global                # print the global settings file path
 
 The sandbox is destroyed when you exit the agent CLI.
 `
@@ -108,6 +119,10 @@ type Invocation struct {
 	JSON bool
 	// NoGC is --no-gc; list only.
 	NoGC bool
+	// Overwrite is --overwrite; settings create only.
+	Overwrite bool
+	// Append is --append; settings create only.
+	Append bool
 }
 
 // Parse turns raw arguments into an invocation.
@@ -158,6 +173,10 @@ func Parse(args []string) (*Invocation, error) {
 			inv.JSON = true
 		case "--no-gc":
 			inv.NoGC = true
+		case "--overwrite":
+			inv.Overwrite = true
+		case "--append":
+			inv.Append = true
 		case "--":
 			parsingHoleArgs = false
 		default:
@@ -219,6 +238,10 @@ func Run(args []string) int {
 		logging.Error("--no-gc can only be used with the list command")
 		return 1
 	}
+	if inv.Command != "settings" && (inv.Overwrite || inv.Append) {
+		logging.Error("--overwrite and --append can only be used with the settings command")
+		return 1
+	}
 
 	switch inv.Command {
 	case "", "help":
@@ -236,6 +259,13 @@ func Run(args []string) int {
 		return runStart(inv)
 	case "list":
 		return runList(inv)
+	case "settings":
+		return runSettings(inv, settingsIO{
+			stdin:    bufio.NewReader(os.Stdin),
+			stdout:   os.Stdout,
+			stderr:   os.Stderr,
+			terminal: isTerminal(os.Stdin) && isTerminal(os.Stdout),
+		})
 	case sandbox.WatchdogCommand:
 		// Hidden: the detached teardown supervisor the CLI spawns for every sandbox.
 		if len(inv.Positional) != 1 {
@@ -246,7 +276,7 @@ func Run(args []string) int {
 		return runDestroy(inv)
 	default:
 		logging.Error("invalid command '%s'", inv.Command)
-		logging.Info("Valid commands: start list destroy version update uninstall help")
+		logging.Info("Valid commands: start list destroy settings version update uninstall help")
 		return 1
 	}
 }
@@ -403,7 +433,7 @@ func runUninstall(inv *Invocation) int {
 }
 
 // isTerminal reports whether a file is attached to a terminal, which decides whether
-// uninstall may ask a question.
+// uninstall and settings open may ask a question, and whether settings open may fall back to vi.
 func isTerminal(file *os.File) bool {
 	info, err := file.Stat()
 	if err != nil {

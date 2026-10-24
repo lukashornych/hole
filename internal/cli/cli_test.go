@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -383,5 +384,123 @@ func TestParseLibraryAfterSeparatorBelongsToTheAgent(t *testing.T) {
 	}
 	if !reflect.DeepEqual(inv.AgentArgs, []string{"--library", "/x"}) {
 		t.Errorf("agent args = %v", inv.AgentArgs)
+	}
+}
+
+func TestParseSettingsFlags(t *testing.T) {
+	tests := []struct {
+		args       []string
+		positional []string
+		overwrite  bool
+		appendFlag bool
+	}{
+		{args: []string{"settings", "create", "project", ".", "--append"}, positional: []string{"create", "project", "."}, appendFlag: true},
+		{args: []string{"--overwrite", "settings", "create", "global"}, positional: []string{"create", "global"}, overwrite: true},
+	}
+	for _, test := range tests {
+		inv, err := Parse(test.args)
+		if err != nil {
+			t.Fatalf("Parse(%v): %v", test.args, err)
+		}
+		if inv.Command != "settings" || !reflect.DeepEqual(inv.Positional, test.positional) {
+			t.Errorf("Parse(%v) = %q %v", test.args, inv.Command, inv.Positional)
+		}
+		if inv.Overwrite != test.overwrite || inv.Append != test.appendFlag {
+			t.Errorf("Parse(%v): Overwrite = %v, Append = %v", test.args, inv.Overwrite, inv.Append)
+		}
+	}
+}
+
+func TestSettingsRejectsInvalidInvocations(t *testing.T) {
+	isolateSettingsEnv(t)
+	for _, args := range [][]string{
+		{"start", "claude", ".", "--overwrite"},
+		{"list", "--append"},
+		{"settings", "create", "global", "--overwrite", "--append"},
+		{"settings", "open", "global", "--overwrite"},
+		{"settings", "create", "global", "/tmp"},
+		{"settings", "create", "project"},
+		{"settings", "create", "project", "/does/not/exist"},
+		{"settings", "create", "workspace", "."},
+		{"settings", "delete", "global"},
+		{"settings"},
+	} {
+		if code := Run(args); code == 0 {
+			t.Errorf("%v should have been rejected", args)
+		}
+	}
+}
+
+func TestSettingsCreateModes(t *testing.T) {
+	home := isolateSettingsEnv(t)
+	globalFile := filepath.Join(home, ".hole", "settings.json")
+	steps := []struct {
+		args []string
+		want int
+	}{
+		{args: []string{"settings", "create", "global"}, want: 0},
+		{args: []string{"settings", "create", "global"}, want: 1},
+		{args: []string{"settings", "create", "global", "--append"}, want: 0},
+		{args: []string{"settings", "create", "global", "--overwrite"}, want: 0},
+	}
+	for _, step := range steps {
+		if code := Run(step.args); code != step.want {
+			t.Errorf("%v = %d, want %d", step.args, code, step.want)
+		}
+		if !exists(globalFile) {
+			t.Errorf("%s is missing after %v", globalFile, step.args)
+		}
+	}
+
+	projectDir := t.TempDir()
+	if code := Run([]string{"settings", "create", "project", projectDir}); code != 0 {
+		t.Errorf("settings create project = %d", code)
+	}
+	if !exists(filepath.Join(projectDir, ".hole", "settings.json")) {
+		t.Error("settings create project did not create .hole/settings.json")
+	}
+}
+
+func TestSettingsCreateFollowsOverrides(t *testing.T) {
+	home := isolateSettingsEnv(t)
+	overrideDir := t.TempDir()
+
+	globalOverride := filepath.Join(overrideDir, "x.json")
+	t.Setenv("HOLE_SETTINGS_FILE", globalOverride)
+	if code := Run([]string{"settings", "create", "global"}); code != 0 {
+		t.Errorf("settings create global = %d", code)
+	}
+	if !exists(globalOverride) || exists(filepath.Join(home, ".hole", "settings.json")) {
+		t.Error("settings create global did not follow HOLE_SETTINGS_FILE")
+	}
+
+	projectDir := t.TempDir()
+	projectOverride := filepath.Join(overrideDir, "p.json")
+	t.Setenv("HOLE_PROJECT_SETTINGS_FILE", projectOverride)
+	if code := Run([]string{"settings", "create", "project", projectDir}); code != 0 {
+		t.Errorf("settings create project = %d", code)
+	}
+	if !exists(projectOverride) || exists(filepath.Join(projectDir, ".hole")) {
+		t.Error("settings create project did not follow HOLE_PROJECT_SETTINGS_FILE")
+	}
+}
+
+func TestSettingsCreateRejectsRelativeOverride(t *testing.T) {
+	isolateSettingsEnv(t)
+	t.Setenv("HOLE_SETTINGS_FILE", "x.json")
+	logs := captureLogs(t)
+	if code := Run([]string{"settings", "create", "global"}); code != 1 {
+		t.Errorf("settings create global = %d, want 1", code)
+	}
+	if !strings.Contains(logs.String(), "HOLE_SETTINGS_FILE") {
+		t.Errorf("logs do not name the variable:\n%s", logs.String())
+	}
+}
+
+func TestHelpDocumentsSettings(t *testing.T) {
+	for _, want := range []string{"hole settings", "--overwrite", "--append", "settings create project ."} {
+		if !strings.Contains(helpText, want) {
+			t.Errorf("help text is missing %q", want)
+		}
 	}
 }

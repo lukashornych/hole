@@ -37,7 +37,7 @@ func TestSettingsFileOverrideKeepsTildeOnTheRealHome(t *testing.T) {
 	writeFile(t, projectSettingsFile(projectDir), `{"files":{"include":{"~/.secrets/x":{"path":"/secrets/x"}}}}`)
 	writeFile(t, filepath.Join(realHome, ".secrets", "x"), "secret")
 
-	host := hostenv.Host{Home: realHome, SettingsFile: override}
+	host := hostenv.Host{Home: realHome, GlobalSettingsOverride: override}
 	documents, err := loadSettingsDocument(host, projectDir, "")
 	if err != nil {
 		t.Fatal(err)
@@ -88,10 +88,10 @@ func TestProjectSettingsFileOverrideReplacesProjectFile(t *testing.T) {
 			projectDir := t.TempDir()
 			override := filepath.Join(t.TempDir(), "wrapper-project.json")
 			globalFile := filepath.Join(home, ".hole", "settings.json")
-			host := hostenv.Host{Home: home, ProjectSettingsFile: override}
+			host := hostenv.Host{Home: home, ProjectSettingsOverride: override}
 			if test.globalOverride {
 				globalFile = filepath.Join(t.TempDir(), "wrapper-global.json")
-				host.SettingsFile = globalFile
+				host.GlobalSettingsOverride = globalFile
 			}
 
 			writeFile(t, globalFile, `{"dependencies":["from-global"],"container":{"memoryLimit":"1g"}}`)
@@ -143,7 +143,7 @@ func TestProjectSettingsFileOverrideResolvesProfilesAcrossFiles(t *testing.T) {
 		`{"profiles":{"base":{"dependencies":["from-base"]}}}`)
 	writeFile(t, override, `{"profiles":{"child":{"extends":"base","dependencies":["from-child"]}}}`)
 
-	host := hostenv.Host{Home: home, ProjectSettingsFile: override}
+	host := hostenv.Host{Home: home, ProjectSettingsOverride: override}
 	documents, err := loadSettingsDocument(host, projectDir, "child")
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +167,7 @@ func TestProjectSettingsFileOverrideResolvesRelativePathsAgainstTheProject(t *te
 	writeFile(t, filepath.Join(projectDir, "setup.sh"), "#!/bin/bash\n")
 	writeFile(t, filepath.Join(overrideDir, "setup.sh"), "#!/bin/bash\n")
 
-	host := hostenv.Host{Home: t.TempDir(), ProjectSettingsFile: override}
+	host := hostenv.Host{Home: t.TempDir(), ProjectSettingsOverride: override}
 	documents, err := loadSettingsDocument(host, projectDir, "")
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestProjectSettingsFileOverrideOfTheInRepoFile(t *testing.T) {
 	writeFile(t, projectSettingsFile(projectDir), `{"files":{"exclude":[".env"]}}`)
 	logs := captureLogs(t)
 
-	host := hostenv.Host{Home: t.TempDir(), ProjectSettingsFile: projectSettingsFile(projectDir)}
+	host := hostenv.Host{Home: t.TempDir(), ProjectSettingsOverride: projectSettingsFile(projectDir)}
 	documents, err := loadSettingsDocument(host, projectDir, "")
 	if err != nil {
 		t.Fatal(err)
@@ -241,7 +241,7 @@ func TestCheckSettingsFileNotExposed(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			host := hostenv.Host{Home: t.TempDir(), SettingsFile: test.settingsFile}
+			host := hostenv.Host{Home: t.TempDir(), GlobalSettingsOverride: test.settingsFile}
 			err := checkSettingsFileNotExposed(host, projectDir, settings, worktree.Derivation{}, nil)
 			if (err != nil) != test.wantErr {
 				t.Errorf("checkSettingsFileNotExposed() error = %v, wantErr %v", err, test.wantErr)
@@ -259,11 +259,11 @@ func TestCheckSettingsFileNotExposedCoversLibraryFlagsAndPool(t *testing.T) {
 	writeFile(t, inPool, "{}")
 
 	projectDir := t.TempDir()
-	host := hostenv.Host{Home: t.TempDir(), SettingsFile: inFlagLibrary}
+	host := hostenv.Host{Home: t.TempDir(), GlobalSettingsOverride: inFlagLibrary}
 	if err := checkSettingsFileNotExposed(host, projectDir, &config.Settings{}, worktree.Derivation{}, []string{flagLibrary}); err == nil {
 		t.Error("a settings file inside a --library mount must be refused")
 	}
-	host.SettingsFile = inPool
+	host.GlobalSettingsOverride = inPool
 	if err := checkSettingsFileNotExposed(host, projectDir, &config.Settings{}, worktree.Derivation{Pool: pool}, nil); err == nil {
 		t.Error("a settings file inside the worktree pool must be refused")
 	}
