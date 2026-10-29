@@ -4,7 +4,10 @@ set -euo pipefail
 export NVM_DIR="${HOME}/.nvm"
 
 if [ ! -f "${NVM_DIR}/nvm.sh" ]; then
-  nvm_version="$(curl -fsSL https://api.github.com/repos/nvm-sh/nvm/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')"
+  # Resolve the latest tag from the releases/latest redirect, not api.github.com: the REST API
+  # allows only 60 anonymous requests per hour per IP, which a shared NAT exhausts (curl 403).
+  nvm_version="$(curl -fsSLo /dev/null -w '%{url_effective}' https://github.com/nvm-sh/nvm/releases/latest)"
+  nvm_version="${nvm_version##*/}"
   # METHOD=script fetches nvm over plain HTTPS instead of `git clone` — GitHub throttles
   # anonymous git-over-HTTPS per IP (401 mid-handshake), which broke image builds.
   curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${nvm_version}/install.sh" | METHOD=script PROFILE="${BASH_ENV}" bash
