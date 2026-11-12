@@ -32,6 +32,18 @@ func TestBinaryAssetNameMatchesThePlatform(t *testing.T) {
 	}
 }
 
+// The installer is the fallback `hole update` prints, so it must avoid the rate-limited GitHub REST
+// API just as self-update does (issue #66).
+func TestInstallerAvoidsTheGitHubAPI(t *testing.T) {
+	installer, err := os.ReadFile(filepath.Join("..", "..", "install.sh"))
+	if err != nil {
+		t.Fatalf("read install.sh: %v", err)
+	}
+	if strings.Contains(string(installer), "api.github.com") {
+		t.Error("install.sh calls api.github.com; resolve the tag from the releases/latest redirect instead")
+	}
+}
+
 func TestReleaseAccessors(t *testing.T) {
 	release := Release{TagName: "v2.1.0"}
 

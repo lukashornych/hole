@@ -252,7 +252,8 @@ components only, so `2.0.0` is *not* greater than `2.0.0-rc.1`. Someone on `2.0.
 `github.com/lukashornych/hole/releases/latest` answers with, and builds the asset URLs from that tag
 (`releases/download/<tag>/<asset>`). It never asks `api.github.com`: the anonymous REST quota is 60
 requests per hour per IP, shared by everyone behind the same NAT or VPN exit, and an exhausted quota
-made the update fail with 403. The agent install scripts resolve the nvm version the same way.
+made the update fail with 403. `install.sh` resolves the tag the same way (with curl or wget), and
+the agent install scripts resolve the nvm version so too.
 
 It compares against the latest release, downloads and verifies the same way, then writes
 the replacement next to the target and renames over it. That is atomic within a filesystem, so an
