@@ -3,11 +3,15 @@ package update
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lukashornych/hole/v2/internal/hostenv"
 	"github.com/lukashornych/hole/v2/internal/version"
@@ -30,19 +34,75 @@ func TestBinaryAssetNameMatchesThePlatform(t *testing.T) {
 
 func TestReleaseAccessors(t *testing.T) {
 	release := Release{TagName: "v2.1.0"}
-	release.Assets = append(release.Assets, struct {
-		Name string `json:"name"`
-		URL  string `json:"browser_download_url"`
-	}{Name: "hole_linux_arm64", URL: "https://example.com/hole_linux_arm64"})
 
 	if release.Version() != "2.1.0" {
 		t.Errorf("Version() = %q, want 2.1.0", release.Version())
 	}
-	if url, ok := release.AssetURL("hole_linux_arm64"); !ok || url == "" {
-		t.Errorf("AssetURL = %q, %v", url, ok)
+	want := "https://github.com/lukashornych/hole/releases/download/v2.1.0/hole_linux_arm64"
+	if got := release.AssetURL("hole_linux_arm64"); got != want {
+		t.Errorf("AssetURL = %q, want %q", got, want)
 	}
-	if _, ok := release.AssetURL("hole_windows_amd64"); ok {
-		t.Error("a missing asset was reported as present")
+}
+
+// Release discovery must read the releases/latest redirect, never the rate-limited GitHub API
+// (issue #66): an exhausted anonymous quota answered `hole update` with 403.
+func TestFetchLatestReadsTheRedirect(t *testing.T) {
+	tests := map[string]struct {
+		handler http.HandlerFunc
+		want    string
+	}{
+		"redirect to a tag": {
+			handler: redirectTo("/lukashornych/hole/releases/tag/v2.7.0"),
+			want:    "v2.7.0",
+		},
+		"absolute redirect to a tag": {
+			handler: redirectTo("https://github.com/lukashornych/hole/releases/tag/v2.7.1"),
+			want:    "v2.7.1",
+		},
+		"no redirect": {
+			handler: func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusOK) },
+		},
+		"redirect to something other than a tag": {
+			handler: redirectTo("/lukashornych/hole/releases"),
+		},
+		"redirect to an empty tag": {
+			handler: redirectTo("/lukashornych/hole/releases/tag/"),
+		},
+		"rate limited": {
+			handler: func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusForbidden) },
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(test.handler)
+			defer server.Close()
+
+			release, err := fetchLatest(server.URL+"/lukashornych/hole/releases/latest", time.Second)
+			if test.want == "" {
+				if err == nil {
+					t.Fatalf("fetchLatest = %+v, want an error", release)
+				}
+				return
+			}
+			if err != nil || release.TagName != test.want {
+				t.Fatalf("fetchLatest = %+v, %v; want tag %q", release, err, test.want)
+			}
+		})
+	}
+}
+
+func redirectTo(location string) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		http.Redirect(writer, request, location, http.StatusFound)
+	}
+}
+
+func TestDownloadReportsAMissingAsset(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	if _, err := download(server.URL + "/checksums.txt"); !errors.Is(err, errNotFound) {
+		t.Errorf("download = %v, want errNotFound", err)
 	}
 }
 
