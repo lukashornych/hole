@@ -18,6 +18,7 @@ services:
             - CLAUDE_CODE_SANDBOXED=1
             - claude
             - --dangerously-skip-permissions
+        init: true
         environment:
             - ANOTHER=value
             - MODE=test

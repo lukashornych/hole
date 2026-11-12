@@ -16,6 +16,7 @@ import (
 	"github.com/lukashornych/hole/v2/internal/hostenv"
 	"github.com/lukashornych/hole/v2/internal/network"
 	"github.com/lukashornych/hole/v2/internal/worktree"
+	"gopkg.in/yaml.v3"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite golden compose files")
@@ -1020,5 +1021,34 @@ func TestGenerateComposeExportsThePoolDirectoryOnlyWhenMounted(t *testing.T) {
 	}
 	if strings.Contains(string(data), "HOLE_WORKTREES_DIR") {
 		t.Errorf("the variable is set without a pool:\n%s", data)
+	}
+}
+
+// The agent CLI is exec'd by the entrypoint, so without an init it is PID 1 and never reaps the
+// orphans of its tool calls and hooks — they accumulate as zombies for the sandbox's lifetime.
+func TestAgentServiceRunsUnderAnInit(t *testing.T) {
+	for _, interactive := range []bool{true, false} {
+		projectDir, _ := fixture(t)
+		in := testInput(t, projectDir, t.TempDir(), &config.Settings{}, Options{})
+		in.interactive = interactive
+		path, _, err := generateCompose(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var file struct {
+			Services map[string]struct {
+				Init bool `yaml:"init"`
+			} `yaml:"services"`
+		}
+		if err := yaml.Unmarshal(data, &file); err != nil {
+			t.Fatal(err)
+		}
+		if !file.Services["agent"].Init {
+			t.Errorf("interactive=%t: the agent service does not set init: true", interactive)
+		}
 	}
 }

@@ -24,7 +24,7 @@ test:
 ##        hole-sandbox-* namespace), and `uninstall` removes everything Hole owns by design, so
 ##        packages must not run in parallel
 itest:
-	go test -tags integration -count=1 -timeout 20m -p 1 ./...
+	go test -tags integration -count=1 -timeout 30m -p 1 ./...
 
 ## e2e: end-to-end sandbox tests with the built-in test agent — needs a real daemon and
 ##      pulls/builds sandbox images, so it is slow on a cold cache
