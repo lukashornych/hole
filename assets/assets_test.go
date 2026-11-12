@@ -237,3 +237,24 @@ func TestGatewayApplyOrder(t *testing.T) {
 		}
 	}
 }
+
+// Image builds must not call the GitHub REST API (issue #66): its anonymous quota of 60 requests
+// per hour per IP is shared behind a NAT or VPN exit, and an exhausted one failed the build with 403.
+func TestNoAssetCallsTheGitHubAPI(t *testing.T) {
+	err := fs.WalkDir(FS, ".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		content, err := fs.ReadFile(FS, path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(content), "api.github.com") {
+			t.Errorf("%s calls api.github.com; resolve releases from the github.com/<repo>/releases/latest redirect instead", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

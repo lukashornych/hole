@@ -248,12 +248,19 @@ components only, so `2.0.0` is *not* greater than `2.0.0-rc.1`. Someone on `2.0.
 
 ## Self-update
 
-`hole update` compares against the latest release, downloads and verifies the same way, then writes
+`hole update` (and the update notice at sandbox start) finds the latest release from the redirect
+`github.com/lukashornych/hole/releases/latest` answers with, and builds the asset URLs from that tag
+(`releases/download/<tag>/<asset>`). It never asks `api.github.com`: the anonymous REST quota is 60
+requests per hour per IP, shared by everyone behind the same NAT or VPN exit, and an exhausted quota
+made the update fail with 403. `install.sh` resolves the tag the same way (with curl or wget), and
+the agent install scripts resolve the nvm version so too.
+
+It compares against the latest release, downloads and verifies the same way, then writes
 the replacement next to the target and renames over it. That is atomic within a filesystem, so an
 interrupted update cannot leave a half-written binary, and renaming over a running executable is
 fine on Unix because the running process keeps its own inode.
 
-It refuses to install anything when a release publishes no `checksums.txt`, and falls back to
+It refuses to install anything when a release publishes no `checksums.txt` (a 404 on it), and falls back to
 printing the installer one-liner when replacement fails (a read-only install directory, or a
 package-manager-owned path).
 
