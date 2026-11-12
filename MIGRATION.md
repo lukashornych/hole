@@ -229,8 +229,14 @@ exposed its secrets to the agent (read-only, and mirrored onto the Docker-in-Doc
 every mounted checkout hides what your global settings ask for, plus whatever its own file adds.
 The project's `files.exclude` still does not reach a library. If you relied on a file being visible
 in a library that your global settings exclude, remove the pattern globally or expose that path
-through `files.include`, which exclusions never reach. Expect one "matched no paths" warning per
-checkout that does not contain a globally excluded file.
+through `files.include`, which exclusions never reach. Each checkout that does not contain a
+globally excluded file adds one to the count of exclusions that matched nothing (see below).
+
+**Exclusions that match nothing are counted, not listed.** 1.x warned once for every
+`files.exclude` entry that matched nothing. Hole now prints a single warning with their count, so a
+shared global set (`.env`, `**/*.pem`) does not bury the warnings that matter. Start with
+`--show-ignored-exclude-paths` to see them one by one, as in 1.x; the list is also always in the
+run log (`~/.hole/logs/run-<date>-<agent>-<pid>.log`).
 
 **Excluded directories are hidden with a per-sandbox Docker volume, and every exclusion is
 verified inside the container as soon as it is up.** In 1.x — and 2.x before this release — a directory named in

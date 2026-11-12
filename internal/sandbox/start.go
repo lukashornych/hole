@@ -61,6 +61,9 @@ type Options struct {
 	// InstanceID is a caller-chosen instance ID, already format-validated; empty means generate
 	// one.
 	InstanceID string
+	// ShowIgnoredExcludePaths warns about every `files.exclude` entry that matched nothing,
+	// instead of only their count.
+	ShowIgnoredExcludePaths bool
 }
 
 // errInterrupted ends a start that a signal interrupted before the agent container was up.
@@ -450,6 +453,8 @@ func Start(opts Options) (exitCode int, err error) {
 	if err != nil {
 		return 1, err
 	}
+	// Reported here and not on the tmpfs regeneration below, which has the same inputs.
+	reportSkippedExclusions(masks.skipped, opts.ShowIgnoredExcludePaths)
 	switch {
 	case len(masks.subpaths) == 0:
 		// No directory is excluded, so neither the volume nor the warning is needed.

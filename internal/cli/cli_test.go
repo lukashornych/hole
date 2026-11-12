@@ -340,8 +340,38 @@ func TestNoGCIsRejectedForOtherCommands(t *testing.T) {
 	}
 }
 
+func TestParseShowIgnoredExcludePaths(t *testing.T) {
+	inv, err := Parse([]string{"start", "claude", ".", "--show-ignored-exclude-paths"})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !inv.ShowIgnoredExcludePaths {
+		t.Error("ShowIgnoredExcludePaths = false, want true")
+	}
+	if !reflect.DeepEqual(inv.Positional, []string{"claude", "."}) {
+		t.Errorf("positional = %v", inv.Positional)
+	}
+}
+
+func TestShowIgnoredExcludePathsIsRejectedForOtherCommands(t *testing.T) {
+	for _, args := range [][]string{
+		{"list", "--show-ignored-exclude-paths"},
+		{"destroy", "--show-ignored-exclude-paths"},
+		{"modify", ".", "network.allow", "list", "--show-ignored-exclude-paths"},
+		{"settings", "get", "global", "--show-ignored-exclude-paths"},
+	} {
+		logs := captureLogs(t)
+		if code := Run(args); code == 0 {
+			t.Errorf("%v should have been rejected", args)
+		}
+		if !strings.Contains(logs.String(), "can only be used with the start command") {
+			t.Errorf("%v was not rejected by the start-only guard:\n%s", args, logs.String())
+		}
+	}
+}
+
 func TestHelpDocumentsProfilesAndList(t *testing.T) {
-	for _, want := range []string{"{agent}[:{profile}]", "hole list", "profiles", "--instance-id", "--json", "--no-gc"} {
+	for _, want := range []string{"{agent}[:{profile}]", "hole list", "profiles", "--instance-id", "--json", "--no-gc", "--show-ignored-exclude-paths"} {
 		if !strings.Contains(helpText, want) {
 			t.Errorf("help text is missing %q", want)
 		}

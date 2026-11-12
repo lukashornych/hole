@@ -58,10 +58,10 @@ Don't overcomment the source code itself; focus documentation into `README.md` a
 - sort map iteration before it reaches generated output (`config.SortedKeys`), so compose files and
   image hashes are reproducible
 - prefer table-driven tests; golden files for generated artifacts, refreshed with `make golden`
-- error handling: `logging.Warn` + skip for ignorable user-config problems (missing excluded path,
-  glob with no matches, missing hook script, undefined env var); returned `error` for anything that
-  makes the sandbox wrong or unsafe (schema violation, unknown agent/profile, invalid allow entry,
-  failed network allocation); teardown never aborts
+- error handling: `logging.Warn` + skip for ignorable user-config problems (missing hook script,
+  undefined env var; exclusions that match nothing are collected and reported as one count);
+  returned `error` for anything that makes the sandbox wrong or unsafe (schema violation, unknown
+  agent/profile, invalid allow entry, failed network allocation); teardown never aborts
   (details: [guidelines](documentation/developer/guidelines.md))
 
 ## Running & verifying

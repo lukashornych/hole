@@ -81,6 +81,7 @@ Run without a terminal — from a script, a CI job, or with the output piped —
 | `-n`, `--dump-network-access` | After the agent exits, write the domains the sandbox resolved (and those it was refused) to `~/.hole/logs/{project}/network-access-{agent}-{id}.log` |
 | `-r`, `--rebuild` | Force a rebuild of the sandbox images |
 | `--update-agents` | Update the enabled agent CLIs inside the existing image before starting, without a full rebuild; see [updating agents](#updating-agents) |
+| `--show-ignored-exclude-paths` | Warn about every [`files.exclude`](#file-exclusions) entry that matched nothing, one line each, instead of a single warning with their count |
 | `-u`, `--unrestricted-network` | Disable egress filtering; allow all network access |
 | `--with-docker` | Enable the Docker-in-Docker sidecar |
 | `--trust-project` | Accept whatever the project's own settings ask for beyond the sandbox — host access and network widening alike — without being asked, and remember it; see [project trust](#project-trust) |
@@ -683,7 +684,7 @@ As soon as the container is up, and before your terminal is attached to it, Hole
 
 Three things to know about how patterns are matched:
 
-- **A pattern matching nothing is a warning, not an error.** That is deliberate: exclusions are meant to be written once in your global settings for files only *some* projects have (`.env`, `**/*.pem`), and erroring would make one shared default refuse to start every project without them. The cost is on you — a typo hides nothing and only warns, so check the warnings when a project holds something that matters. Because global patterns also apply to every library and worktree mount, expect one warning per checkout that does not contain the file.
+- **A pattern matching nothing is a warning, not an error.** That is deliberate: exclusions are meant to be written once in your global settings for files only *some* projects have (`.env`, `**/*.pem`), and erroring would make one shared default refuse to start every project without them. The cost is on you — a typo hides nothing and only warns. Hole prints a single warning with the number of entries that matched nothing (`3 excluded paths were not found, skipping.`); start with `--show-ignored-exclude-paths` to list them one by one, which is how to check for a typo when a project holds something that matters. The list is also always in the [run log](#logs). Because global patterns also apply to every library and worktree mount, each checkout that does not contain the file adds one to the count.
 - **Patterns do not follow symlinked directories**, matching bash `globstar`: if `secrets` is a symlink, `secrets/**` matches nothing. Name the link itself (`"secrets"`) and the whole directory is hidden.
 - **Where a pattern applies depends on which settings file it comes from.** Patterns in your **global** settings apply to the project *and* to every library and git-derived worktree mount — that is what makes one global `.env` rule protect every checkout Hole exposes. Patterns in a **project's** `.hole/settings.json` apply to that project's directory only, and a **library's** own `.hole/settings.json` adds to the global set for that library's mount alone. `files.exclude` never reaches into `files.include`: an included path like `~/.claude` is mounted whole or not at all — there is no way to hide part of it.
 
