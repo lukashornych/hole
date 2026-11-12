@@ -66,7 +66,7 @@ CI runs the unit job on both `ubuntu-latest` and `macos-latest`.
 
 ### Integration — `make itest`
 
-`go test -tags integration -count=1 -timeout 20m -p 1 ./...`. Four packages carry
+`go test -tags integration -count=1 -timeout 30m -p 1 ./...`. Four packages carry
 `//go:build integration` files: `internal/engine`, `internal/sandbox`, `internal/dindregistry`,
 `internal/update`. They exercise real network/volume/container operations, a 12-way concurrent
 subnet allocation race, every GC pass including its keep-conditions, teardown completeness and
@@ -205,7 +205,7 @@ refresh.
   [README](../../README.md); in development it is how you run the integration suite against podman:
 
   ```sh
-  HOLE_RUNTIME=podman go test -tags integration -count=1 -timeout 20m -p 1 ./internal/engine/
+  HOLE_RUNTIME=podman go test -tags integration -count=1 -timeout 30m -p 1 ./internal/engine/
   ```
 
   CI does not run this. Podman parity is checked by hand when someone has a reason to, which is
