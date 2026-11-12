@@ -12,11 +12,13 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/lukashornych/hole/v2/internal/compose"
 	"github.com/lukashornych/hole/v2/internal/engine"
 	"github.com/lukashornych/hole/v2/internal/hostenv"
 	"github.com/lukashornych/hole/v2/internal/logging"
@@ -786,5 +788,87 @@ func TestWatchdogKeepsAStoppedAgentUntilTheCLILetsGo(t *testing.T) {
 				t.Error("the instance is still registered after the watchdog returned")
 			}
 		})
+	}
+}
+
+// The agent container's init is what reaps orphans of the agent's tool calls and hooks; without
+// one, the exec'd agent CLI is PID 1 and they stay zombies. The case without an init proves the
+// probe sees the zombie at all; the case with one also proves the runtime can provide the init
+// (podman needs catatonit installed for it).
+func TestAgentContainerInitReapsOrphans(t *testing.T) {
+	containerEngine := testEngine(t)
+	if err := containerEngine.RunQuiet("pull", "alpine:3.19"); err != nil {
+		t.Skipf("could not pull alpine: %v", err)
+	}
+
+	for i, withInit := range []bool{true, false} {
+		project := "hole-sandbox-itest-00000000-init0" + itoa(i)
+		projectDir := t.TempDir()
+		// The inner shell exits at once, orphaning the subshell; the outer one then execs a
+		// process that never reaps, exactly like the entrypoint's `exec "$@"`.
+		data, err := compose.Marshal(&compose.File{Services: map[string]*compose.Service{
+			"agent": {
+				Image:   "alpine:3.19",
+				Init:    withInit,
+				Command: []string{"sh", "-c", "sh -c '(sleep 1; touch /tmp/orphan-exited) &'; exec sleep 300"},
+			},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		composeFile := filepath.Join(projectDir, "compose.yaml")
+		if err := os.WriteFile(composeFile, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		container := project + "-agent-1"
+		// Without an init, `sleep` as PID 1 ignores SIGTERM: remove instead of sitting out the
+		// stop grace period.
+		t.Cleanup(func() {
+			_ = containerEngine.ContainerRemove(container)
+			_ = containerEngine.ComposeDown(project)
+		})
+		var output bytes.Buffer
+		if err := containerEngine.ComposeUp(&output, project, composeFile, projectDir, false); err != nil {
+			t.Fatalf("init=%t: compose up: %v\n%s", withInit, err, output.String())
+		}
+
+		if !eventually(func() bool {
+			_, err := containerEngine.Exec(container, "test", "-f", "/tmp/orphan-exited")
+			return err == nil
+		}) {
+			t.Fatalf("init=%t: the orphan never finished", withInit)
+		}
+		zombies := func() int {
+			out, err := containerEngine.Exec(container, "sh", "-c", "cat /proc/[0-9]*/stat 2>/dev/null | awk '$3 == \"Z\"' | wc -l")
+			if err != nil {
+				t.Fatalf("init=%t: count zombies: %v", withInit, err)
+			}
+			count, err := strconv.Atoi(strings.TrimSpace(out))
+			if err != nil {
+				t.Fatalf("init=%t: zombie count %q: %v", withInit, out, err)
+			}
+			return count
+		}
+		if withInit && !eventually(func() bool { return zombies() == 0 }) {
+			t.Errorf("the orphan is left a zombie although the container runs under an init")
+		}
+		// An omitted `init` falls back to the daemon's default, which can itself be an init.
+		if !withInit && !eventually(func() bool { return zombies() > 0 }) {
+			t.Log("no zombie without an init: the daemon likely runs containers under an init by default")
+		}
+	}
+}
+
+// eventually polls condition for a few seconds and reports whether it ever held.
+func eventually(condition func() bool) bool {
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if condition() {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }

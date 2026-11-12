@@ -240,7 +240,10 @@ func generateCompose(in composeInput) (string, maskPlan, error) {
 			Dockerfile: "Dockerfile",
 			Args:       buildArgs,
 		},
-		PullPolicy:  "never",
+		PullPolicy: "never",
+		// The entrypoint execs the agent CLI, which would otherwise be PID 1 and never reap the
+		// orphans of its tool calls and hooks: they pile up as zombies for the sandbox's lifetime.
+		Init:        true,
 		StdinOpen:   in.interactive,
 		TTY:         in.interactive,
 		WorkingDir:  in.projectDir(),

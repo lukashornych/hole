@@ -279,7 +279,7 @@ see [upgrading](MIGRATION.md#upgrading).
 
 Requirements: **docker or podman with the compose plugin** — Docker Engine 26+ with Compose 2.26+
 (any current Docker Desktop, OrbStack, Colima or Rancher Desktop), or Podman with volume `subpath`
-support. That is all — Hole embeds everything else it needs. An older engine still works, but
+support and `catatonit` installed (Podman's container init, packaged with Podman on most systems). That is all — Hole embeds everything else it needs. An older engine still works, but
 [excluded directories](#file-exclusions) are then held in memory instead of on disk, and Hole warns
 about it on every start.
 

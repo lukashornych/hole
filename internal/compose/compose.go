@@ -25,6 +25,7 @@ type Service struct {
 	PullPolicy   string                     `yaml:"pull_policy,omitempty"`
 	Command      []string                   `yaml:"command,omitempty"`
 	Entrypoint   []string                   `yaml:"entrypoint,omitempty"`
+	Init         bool                       `yaml:"init,omitempty"`
 	Environment  []string                   `yaml:"environment,omitempty"`
 	Volumes      []ServiceVolume            `yaml:"volumes,omitempty"`
 	Tmpfs        []string                   `yaml:"tmpfs,omitempty"`
