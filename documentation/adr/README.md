@@ -31,6 +31,8 @@ filename date that disagrees with `date:`.
 
 <!-- ADR-INDEX:START -->
 
-*No decision records yet.*
+| Date | Record | Kind | Status | Refs |
+|------|--------|------|--------|------|
+| 2026-11-12 | [Expose npm-installed agent CLIs by bare name through a baked wrapper declared in command-bare.json](2026-11-12-command-bare-wrappers.md) | feature | accepted | #67 |
 
 <!-- ADR-INDEX:END -->

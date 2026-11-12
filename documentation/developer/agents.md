@@ -20,6 +20,7 @@ assets/agents/<name>/      (builtin, embedded)
   update-root.sh     # optional — runs as root during an in-place update (rare)
   update-user.sh     # optional — runs as the sandbox user during an in-place update
   version.json       # optional — how Hole reads the installed and the latest version
+  command-bare.json  # optional — makes the CLI callable by the agent's name inside the sandbox
 ```
 
 - `command.json` is emitted as the compose `command`. Entries may reference `$HOME`, which Hole
@@ -54,6 +55,30 @@ assets/agents/<name>/      (builtin, embedded)
 - Every install and update script cleans its package manager's cache in the same script — npm's
   alone was ~300 MB of the image, and a cache written in one layer is never reclaimed by a later
   one.
+- `command-bare.json` has the shape of `command.json` (a non-empty JSON array of non-empty
+  strings) but holds the CLI **without** its yolo flags, and its first item must be a path
+  (containing `/`): a bare name would be resolved through `PATH`, which the wrapper itself leads,
+  so `["my-agent"]` would exec itself forever (an `env X=1 …` prefix is not possible for the same
+  reason). Hole renders it into a POSIX sh wrapper,
+  `exec '<part>' … "$@"` with every part single-quoted, and the build installs it as
+  `~/.local/bin/<agent name>` — the first directory on the image `PATH`. It exists for CLIs that
+  run under a pinned nvm Node (gemini, codex): that Node is not on `PATH`, and a symlink to the npm
+  bin would run through `#!/usr/bin/env node`, i.e. under whatever Node comes first — none at all
+  in `sh -c` or a shell-less exec (an MCP server, a hook), nvm's default in bash. An alias would
+  exist only in interactive bash. Only `$HOME`/`${HOME}` are replaced (textually, as in
+  `command.json`, by the sandbox home); every other `$` stays literal, because the wrapper is
+  baked into the image and a host variable's value would get into it without changing the image
+  hash. The command is always named after the agent
+  directory. Claude has no such file: its native installer already puts `claude` into
+  `~/.local/bin`, and a wrapper would collide with it.
+  - The wrappers are installed **after** the user-phase installs and **before** the setup hooks. If
+    `~/.local/bin/<agent>` already exists by then (a file or a symlink, dangling included), the
+    build fails naming the agent and the path, rather than leaving a bare name that runs
+    something other than the file declares. A setup hook may deliberately replace a wrapper.
+  - In bash, `BASH_ENV` loads `nvm.sh`, which puts the `bin` of nvm's *default* Node ahead of
+    `~/.local/bin`; a setup hook that installs its own `codex` under that Node therefore wins in
+    bash. That is the hook's explicit choice and is left alone; a shell-less exec always gets the
+    wrapper.
 - `update-*.sh` and `version.json` opt the agent into [in-place updates](#in-place-agent-updates);
   an agent has both or neither.
 
@@ -63,8 +88,9 @@ assets/agents/<name>/      (builtin, embedded)
 > initialisation, so `install-user.sh` must run `nvm install <x.y.z>`
 > for exactly that version. A floating `nvm install 22` drifts to a newer patch at build time and
 > the agent then fails to launch with ENOENT — invisible until someone starts it. `version.json`
-> runs the CLI the same way and carries the same path. Changing the version means editing
-> `install-user.sh`, `command.json`, `version.json` and `update-user.sh`;
+> runs the CLI the same way and carries the same path, as does `command-bare.json`. Changing the
+> version means editing `install-user.sh`, `command.json`, `version.json`, `command-bare.json` and
+> `update-user.sh`;
 > `TestPinnedNodeVersionMatchesTheInstallScript` fails if they disagree. Update scripts never
 > install another Node and do not load nvm: they run the pinned Node's npm by absolute path (and
 > prepend its `bin` to `PATH` for that process only). nvm's default can be a different Node — a
@@ -221,17 +247,19 @@ agents' install scripts. Phase order in `assets/agents/Dockerfile`:
    Passwordless sudo.
 7. **User-phase agent installs**, with `BASH_ENV=~/.bash_env` set up so nvm-installed tools work
    in the non-interactive shells agents use.
-8. **Setup hooks** — `hooks.setup` scripts, copied in as `NNN-name.sh` and run in order, each
+8. **Bare-name wrappers** — each `agent-installs/<agent>/bare-command` (rendered from
+   `command-bare.json`) is installed as `~/.local/bin/<agent>`; an existing target fails the build.
+9. **Setup hooks** — `hooks.setup` scripts, copied in as `NNN-name.sh` and run in order, each
    between `::hole-hook-begin`/`::hole-hook-end … exit=<rc>::` markers that Hole splits into
    per-script logs ([architecture](architecture.md#hook-logs)).
-9. **Entrypoint** — `assets/agents/entrypoint.sh`: point the default route at the gateway, run
-   any mounted `/tmp/prestart-scripts/*` in order (with the same markers; the first failing script
-   ends the container with its exit code), then `exec` the agent command.
+10. **Entrypoint** — `assets/agents/entrypoint.sh`: point the default route at the gateway, run
+    any mounted `/tmp/prestart-scripts/*` in order (with the same markers; the first failing script
+    ends the container with its exit code), then `exec` the agent command.
 
 The build `SHELL` is bash with `pipefail` but **without `-e`**, so a `for` loop's status is only
-that of its last iteration. Every loop over scripts (agent installs, setup hooks) therefore exits
-on a failing iteration itself (`|| exit $?`); without that, a failing script followed by a
-succeeding one gives a green build with a broken image. `hookloops_test.go` runs the loops
+that of its last iteration. Every loop over scripts (agent installs, bare-name wrappers, setup
+hooks) therefore exits on a failing iteration itself (`|| exit $?`); without that, a failing
+script followed by a succeeding one gives a green build with a broken image. `hookloops_test.go` runs the loops
 straight out of the embedded Dockerfile to hold this.
 
 ## Container user identity

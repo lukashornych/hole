@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/lukashornych/hole/v2/assets"
 )
@@ -39,6 +40,7 @@ const (
 
 const (
 	commandFile     = "command.json"
+	bareCommandFile = "command-bare.json"
 	allowFile       = "allow.txt"
 	installRootFile = "install-root.sh"
 	installUserFile = "install-user.sh"
@@ -69,6 +71,38 @@ func (a *Agent) Command() ([]string, error) {
 	}
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("agent '%s': %s must not be empty", a.Name, commandFile)
+	}
+	return parts, nil
+}
+
+// BareCommand reads the agent's optional command-bare.json: the argv a wrapper named after the
+// agent runs, so the CLI is callable by bare name inside the sandbox. An agent without the file
+// yields nil.
+func (a *Agent) BareCommand() ([]string, error) {
+	data, err := fs.ReadFile(a.Dir, bareCommandFile)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("agent '%s': read %s: %w", a.Name, bareCommandFile, err)
+	}
+	var parts []string
+	if err := json.Unmarshal(data, &parts); err != nil {
+		return nil, fmt.Errorf("agent '%s': %s must be a JSON array of strings: %w", a.Name, bareCommandFile, err)
+	}
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("agent '%s': %s must not be empty", a.Name, bareCommandFile)
+	}
+	for _, part := range parts {
+		if part == "" {
+			return nil, fmt.Errorf("agent '%s': %s must not contain an empty item", a.Name, bareCommandFile)
+		}
+	}
+	// A bare first part is looked up on PATH, which the wrapper itself leads: ["my-agent"] would
+	// exec itself forever.
+	if !strings.Contains(parts[0], "/") {
+		return nil, fmt.Errorf("agent '%s': %s must start with a path to the executable, not the bare name '%s'",
+			a.Name, bareCommandFile, parts[0])
 	}
 	return parts, nil
 }
