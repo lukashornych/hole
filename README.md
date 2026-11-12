@@ -361,7 +361,7 @@ must not leave you with Hole installed.
 
 ## Agents
 
-Supported out of the box: [Claude Code](https://claude.com/product/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CLI](https://github.com/openai/codex). You can also add [your own](#custom-agents).
+Supported out of the box: [Claude Code](https://claude.com/product/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CLI](https://github.com/openai/codex). You can also add [your own](#custom-agents). Inside the sandbox the builtin agents are callable by their name (`claude`, `gemini`, `codex`) — from a shell as well as from a plugin, MCP server or hook that runs them without one; a custom agent opts in with [`command-bare.json`](#custom-agents).
 
 All enabled agents are installed into one sandbox image; the agent you name on the command line only decides what starts.
 
@@ -501,6 +501,7 @@ Any directory under `~/.hole/agents/<name>/` becomes an agent you can start:
   update-root.sh     # optional — runs as root during an in-place update
   update-user.sh     # optional — runs as the sandbox user during an in-place update
   version.json       # optional — how to read the installed and the latest version
+  command-bare.json  # optional — makes the CLI callable as `my-agent` inside the sandbox
 ```
 
 ```json
@@ -515,6 +516,15 @@ api.my-agent.example
 ```
 
 A custom agent that wraps Claude Code should start it the way the builtin does, `["env", "CLAUDE_CODE_SANDBOXED=1", "claude", "--dangerously-skip-permissions"]`; without the variable, Claude asks whether to trust the project folder on every start.
+
+If your agent's CLI is not on the sandbox `PATH` by itself — typically an npm CLI installed under a pinned nvm Node — add `command-bare.json` with the same command as `command.json` but without the yolo flags; its first item must be a path to the executable (containing `/`), not a bare name, because a bare name is looked up on `PATH`, which the wrapper itself leads. Hole bakes it into the image as a wrapper `~/.local/bin/<agent name>`, which passes its own arguments through, so the CLI runs under that Node whatever nvm's default is:
+
+```json
+// command-bare.json
+["$HOME/.nvm/versions/node/v22.22.2/bin/node", "$HOME/.nvm/versions/node/v22.22.2/bin/my-agent"]
+```
+
+Only the text `$HOME` (or `${HOME}`) is replaced, by the sandbox home; any other `$` stays literal. The command is always named after the agent directory. If `~/.local/bin/<agent name>` already exists when the wrapper is installed — your `install-user.sh` put something there — the image build fails with an error naming the agent; remove one of the two. Setup hooks run after the wrapper is installed, so a hook may deliberately replace it.
 
 Names must match `^[a-z0-9][a-z0-9-]*$`, and a name that collides with a builtin agent is an error rather than a silent override. Custom agents work everywhere builtins do, including `container.enabledAgents`. Editing a custom agent's files rebuilds the image automatically — except its update files (`update-*.sh`, `version.json`), which are not part of the image.
 

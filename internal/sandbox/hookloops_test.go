@@ -132,6 +132,79 @@ func TestAgentInstallLoopsFailOnAnyAgent(t *testing.T) {
 	}
 }
 
+// bareWrapperLoop is the Dockerfile's wrapper install loop over agentInstalls, installing into home.
+func bareWrapperLoop(t *testing.T, agentInstalls, home string) string {
+	t.Helper()
+	command := dockerfileRun(t, "for wrapper in /tmp/agent-installs/", 1)
+	command = strings.ReplaceAll(command, "/tmp/agent-installs", agentInstalls)
+	return strings.ReplaceAll(command, "${AGENT_HOME}", home)
+}
+
+func TestBareWrapperLoopInstallsWrappers(t *testing.T) {
+	agentInstalls, home := t.TempDir(), t.TempDir()
+	writeScript(t, filepath.Join(agentInstalls, "with-bare", "bare-command"), "#!/bin/sh\necho wrapped\n")
+	writeScript(t, filepath.Join(agentInstalls, "without-bare", "install-user.sh"), "#!/bin/sh\n")
+	if err := os.Chmod(filepath.Join(agentInstalls, "with-bare", "bare-command"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if output, code := runBuildShell(t, bareWrapperLoop(t, agentInstalls, home)); code != 0 {
+		t.Fatalf("loop exited %d:\n%s", code, output)
+	}
+	info, err := os.Stat(filepath.Join(home, ".local", "bin", "with-bare"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Errorf("wrapper installed with mode %v, want 0755", info.Mode().Perm())
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".local", "bin", "without-bare")); !os.IsNotExist(err) {
+		t.Errorf("an agent without a wrapper got one installed: %v", err)
+	}
+
+	// No agent has a wrapper: the glob stays unexpanded, which must not fail the build.
+	if output, code := runBuildShell(t, bareWrapperLoop(t, t.TempDir(), t.TempDir())); code != 0 {
+		t.Errorf("an empty agent-installs directory failed the build with %d:\n%s", code, output)
+	}
+}
+
+// A silent skip would leave a sandbox where the bare name runs something other than the file
+// declares, so an existing target fails the build — a dangling symlink included.
+func TestBareWrapperLoopFailsOnAnExistingTarget(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		create func(t *testing.T, target string)
+	}{
+		{"file", func(t *testing.T, target string) { writeScript(t, target, "#!/bin/sh\n") }},
+		{"dangling symlink", func(t *testing.T, target string) {
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("/nonexistent", target); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			agentInstalls, home := t.TempDir(), t.TempDir()
+			writeScript(t, filepath.Join(agentInstalls, "demo", "bare-command"), "#!/bin/sh\necho wrapped\n")
+			target := filepath.Join(home, ".local", "bin", "demo")
+			test.create(t, target)
+
+			output, code := runBuildShell(t, bareWrapperLoop(t, agentInstalls, home))
+			if code != 1 {
+				t.Errorf("loop exited %d, want 1:\n%s", code, output)
+			}
+			if !strings.Contains(output, "agent 'demo'") || !strings.Contains(output, target) {
+				t.Errorf("message does not name the agent and the path:\n%s", output)
+			}
+			if content, err := os.ReadFile(target); err == nil && strings.Contains(string(content), "wrapped") {
+				t.Error("the existing target was overwritten")
+			}
+		})
+	}
+}
+
 // entrypointWithScriptsIn is the container entrypoint reading its prestart scripts from dir.
 func entrypointWithScriptsIn(t *testing.T, dir string) string {
 	t.Helper()

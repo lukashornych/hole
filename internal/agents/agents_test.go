@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/lukashornych/hole/v2/internal/network"
 )
@@ -149,6 +150,12 @@ func TestPinnedNodeVersionMatchesTheInstallScript(t *testing.T) {
 		if spec != nil {
 			command = append(command, spec.Command...)
 		}
+		// command-bare.json bakes a wrapper running the CLI under the same interpreter.
+		bare, err := agent.BareCommand()
+		if err != nil {
+			t.Fatalf("agent %q command-bare.json: %v", name, err)
+		}
+		command = append(command, bare...)
 		pinned := map[string]bool{}
 		for _, part := range command {
 			if match := nodePath.FindStringSubmatch(part); match != nil {
@@ -159,7 +166,7 @@ func TestPinnedNodeVersionMatchesTheInstallScript(t *testing.T) {
 			continue
 		}
 		if len(pinned) > 1 {
-			t.Errorf("agent %q references more than one Node version in command.json and version.json: %v", name, pinned)
+			t.Errorf("agent %q references more than one Node version in command.json, version.json and command-bare.json: %v", name, pinned)
 		}
 
 		scripts, err := agent.InstallScripts()
@@ -174,7 +181,7 @@ func TestPinnedNodeVersionMatchesTheInstallScript(t *testing.T) {
 				}
 			}
 			if !found {
-				t.Errorf("agent %q pins Node v%s in command.json but no install script runs "+
+				t.Errorf("agent %q pins Node v%s but no install script runs "+
 					"`nvm install %s`; the agent would fail to launch with ENOENT", name, version, version)
 			}
 		}
@@ -194,6 +201,63 @@ func TestPinnedNodeVersionMatchesTheInstallScript(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// codex and gemini run under a pinned nvm Node that is not on PATH, so only the wrapper makes
+// them callable by name; claude's native installer already puts it into ~/.local/bin, where a
+// wrapper would collide and fail the build.
+func TestBuiltinBareCommands(t *testing.T) {
+	registry, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for name, want := range map[string]bool{"claude": false, "codex": true, "gemini": true} {
+		agent, ok := registry.Get(name)
+		if !ok {
+			t.Fatalf("builtin agent %q missing from the registry", name)
+		}
+		bare, err := agent.BareCommand()
+		if err != nil {
+			t.Fatalf("agent %q: %v", name, err)
+		}
+		if (bare != nil) != want {
+			t.Errorf("agent %q has command-bare.json = %v, want %v", name, bare != nil, want)
+		}
+	}
+}
+
+func TestBareCommand(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		files   fstest.MapFS
+		want    []string
+		wantErr bool
+	}{
+		{"missing file", fstest.MapFS{}, nil, false},
+		{"valid", fstest.MapFS{"command-bare.json": {Data: []byte(`["$HOME/node", "$HOME/cli"]`)}}, []string{"$HOME/node", "$HOME/cli"}, false},
+		{"invalid JSON", fstest.MapFS{"command-bare.json": {Data: []byte(`["a",`)}}, nil, true},
+		{"not an array of strings", fstest.MapFS{"command-bare.json": {Data: []byte(`{"command": ["a"]}`)}}, nil, true},
+		{"empty array", fstest.MapFS{"command-bare.json": {Data: []byte(`[]`)}}, nil, true},
+		{"empty item", fstest.MapFS{"command-bare.json": {Data: []byte(`["/a", ""]`)}}, nil, true},
+		{"bare first part", fstest.MapFS{"command-bare.json": {Data: []byte(`["demo", "--flag"]`)}}, nil, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			agent := &Agent{Name: "demo", Source: SourceUser, Dir: test.files}
+			got, err := agent.BareCommand()
+			if test.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "command-bare.json") || !strings.Contains(err.Error(), "demo") {
+					t.Errorf("error %v, want one naming the agent and command-bare.json", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("BareCommand: %v", err)
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Errorf("got %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
