@@ -241,11 +241,18 @@ Do not hand-roll path handling elsewhere; use `hostenv.Host.ResolveHostPath` /
 
 ## Error-handling policy
 
-Carried over verbatim from 1.x:
+Carried over from 1.x, except for exclusions that match nothing:
 
-- **User config problems that don't compromise the sandbox** (missing excluded path, glob with no
-  matches, missing hook script, undefined variable, missing include or library): `logging.Warn`
-  and skip.
+- **User config problems that don't compromise the sandbox** (missing hook script, undefined
+  variable, missing include or library): `logging.Warn` and skip.
+- **Exclusions that match nothing** (missing excluded path, glob with no matches) are skipped too,
+  but only collected while the mounts are built (`mountBuilder.skipped`). `Start` reports them once
+  through `reportSkippedExclusions`: one `logging.Warn` with their count and a `logging.Debug` per
+  entry, or a `logging.Warn` per entry with `--show-ignored-exclude-paths`. They are not logged
+  where they are found, because a shared global set misses in most projects and in every checkout,
+  and because the compose file is generated a second time on the tmpfs fallback. An excluded path
+  that exists but cannot be read (a dangling symlink) stays unmasked and keeps its own warning,
+  logged in place — so on the tmpfs fallback it is printed twice.
 - **Problems that make the sandbox wrong or unsafe** (schema violation, removed key, unknown
   agent or profile, malformed allow entry, colliding include targets, failed network allocation):
   return an error; the CLI prints it and exits non-zero.
@@ -333,14 +340,15 @@ mirrored onto the DinD sidecar.
 Three deliberate properties of the matching, all recorded because the failure direction favors
 exposure (see [analysis/security-audit.md](../analysis/security-audit.md), findings 9 and 10):
 
-- **A pattern that matches nothing warns and the start continues.** Exclusions are meant to be
-  written once, globally, for files only some projects have (`.env`, `**/*.pem`) — erroring would
-  make a shared default forbid every project that does not happen to contain the path. The cost is
-  that a typo hides nothing and only warns.
+- **A pattern that matches nothing is skipped and the start continues.** Exclusions are meant to
+  be written once, globally, for files only some projects have (`.env`, `**/*.pem`) — erroring
+  would make a shared default forbid every project that does not happen to contain the path. The
+  cost is that a typo hides nothing and only shows up in the count of skipped exclusions (listed
+  with `--show-ignored-exclude-paths`; see the [error-handling policy](#error-handling-policy)).
 - **Globs do not descend symlinked directories.** `config.ExpandGlob` classifies with `os.ReadDir` +
   `entry.IsDir()`, i.e. Lstat semantics, which is what bash `globstar` does — the semantics the
   matcher documents itself as implementing. So `secrets/**` matches nothing when `secrets` is a
-  symlink, and warns. A symlinked path named *directly* is excluded correctly: `addExclusions`
+  symlink, and is counted as skipped. A symlinked path named *directly* is excluded correctly: `addExclusions`
   checks existence with `Lstat` (a dangling link still warns) but decides file-vs-directory with
   `Stat`, because `/dev/null` over a directory is a mount the runtime rejects.
 - **Three sources, three scopes.** The **global** `files.exclude` (the profile-resolved

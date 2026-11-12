@@ -444,9 +444,21 @@ func TestGenerateComposeSkipsMissingPaths(t *testing.T) {
 	settings.Libraries = map[string]config.Library{"/missing/library": {Path: "/libs/missing"}}
 
 	runTmpDir := t.TempDir()
-	path, _, err := generateCompose(testInput(t, projectDir, runTmpDir, settings, Options{}))
+	logs := captureLogs(t)
+	path, masks, err := generateCompose(testInput(t, projectDir, runTmpDir, settings, Options{}))
 	if err != nil {
 		t.Fatalf("missing paths must be skipped, not fatal: %v", err)
+	}
+	wantSkipped := []skippedExclusion{
+		{entry: "does-not-exist", sourceDir: projectDir},
+		{entry: "*.absent", sourceDir: projectDir, glob: true},
+	}
+	if !reflect.DeepEqual(masks.skipped, wantSkipped) {
+		t.Errorf("skipped = %+v, want %+v", masks.skipped, wantSkipped)
+	}
+	// Generation can run twice per start, so it only collects; Start reports.
+	if output := logs.String(); strings.Contains(output, "does-not-exist") || strings.Contains(output, "*.absent") {
+		t.Errorf("generateCompose logged a skipped exclusion itself:\n%s", output)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

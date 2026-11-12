@@ -91,11 +91,13 @@ type composeInput struct {
 // of the mask volume the directory masks mount, which must exist before any service starts. The
 // subpaths are listed whether or not the file uses the volume, so a caller can tell whether there
 // are directory masks at all. fallbackReason is set when a mask volume was offered but the engine
-// cannot mount its subpaths, so the directories are masked with a tmpfs instead.
+// cannot mount its subpaths, so the directories are masked with a tmpfs instead. skipped are the
+// exclusions that matched nothing, for the start to report once.
 type maskPlan struct {
 	targets        []string
 	subpaths       []string
 	fallbackReason string
+	skipped        []skippedExclusion
 }
 
 // generateCompose writes the single compose file for this run and returns its path together
@@ -349,7 +351,12 @@ func generateCompose(in composeInput) (string, maskPlan, error) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return "", maskPlan{}, fmt.Errorf("write compose file: %w", err)
 	}
-	return path, maskPlan{targets: mounts.maskTargets(), subpaths: mounts.maskSubpaths(), fallbackReason: fallbackReason}, nil
+	return path, maskPlan{
+		targets:        mounts.maskTargets(),
+		subpaths:       mounts.maskSubpaths(),
+		fallbackReason: fallbackReason,
+		skipped:        mounts.skipped,
+	}, nil
 }
 
 func (in composeInput) projectDir() string { return in.opts.ProjectDir }

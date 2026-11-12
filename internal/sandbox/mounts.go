@@ -43,10 +43,62 @@ type mountBuilder struct {
 	// directoryMasks counts the directory masks recorded so far; it is the next one's subpath.
 	directoryMasks int
 	seen           map[string]bool
+	// skipped are the `files.exclude` entries that matched nothing, in every checkout. They are
+	// only collected here and reported once by the start, because a start can generate the
+	// compose file twice and one pattern routinely misses in many checkouts.
+	skipped []skippedExclusion
 	// globalExclude is the global `files.exclude` (with the selected profile chain applied). It
 	// is applied to every checkout that is not the project; the project mount gets its patterns
 	// from the merged settings, which already contain the global ones.
 	globalExclude []string
+}
+
+// skip records an entry that matched nothing, once per checkout: a checkout's own settings file
+// may repeat a global pattern, which must not count twice.
+func (b *mountBuilder) skip(entry skippedExclusion) {
+	for _, recorded := range b.skipped {
+		if recorded == entry {
+			return
+		}
+	}
+	b.skipped = append(b.skipped, entry)
+}
+
+// skippedExclusion is one `files.exclude` entry that matched nothing in sourceDir.
+type skippedExclusion struct {
+	entry     string
+	sourceDir string
+	glob      bool
+}
+
+func (s skippedExclusion) String() string {
+	if s.glob {
+		return fmt.Sprintf("excluded pattern '%s' matched no paths in %s, skipping", s.entry, s.sourceDir)
+	}
+	return fmt.Sprintf("excluded path '%s' not found in %s, skipping", s.entry, s.sourceDir)
+}
+
+// reportSkippedExclusions logs the entries that matched nothing: one warning with their count, or
+// one warning each when show is set. Shared global patterns miss in most projects and in every
+// checkout, so listing them by default buries the warnings that matter; the run log keeps them.
+func reportSkippedExclusions(skipped []skippedExclusion, show bool) {
+	if len(skipped) == 0 {
+		return
+	}
+	if show {
+		for _, entry := range skipped {
+			logging.Warn("%s", entry)
+		}
+		return
+	}
+	for _, entry := range skipped {
+		logging.Debug("%s", entry)
+	}
+	if len(skipped) == 1 {
+		logging.Warn("1 excluded path was not found, skipping. Show it with --show-ignored-exclude-paths.")
+		return
+	}
+	logging.Warn("%d excluded paths were not found, skipping. Show them with --show-ignored-exclude-paths.", len(skipped))
 }
 
 // mask is one path `files.exclude` hides. A file is hidden by a `/dev/null` over-mount, which is
@@ -187,14 +239,14 @@ func (b *mountBuilder) addExclusions(sourceDir, mountPoint string, entries []str
 		if config.HasGlobChars(entry) {
 			matches := config.ExpandGlob(sourceDir, entry)
 			if len(matches) == 0 {
-				logging.Warn("excluded pattern '%s' matched no paths, skipping", entry)
+				b.skip(skippedExclusion{entry: entry, sourceDir: sourceDir, glob: true})
 				continue
 			}
 			resolved = append(resolved, matches...)
 			continue
 		}
 		if _, err := os.Lstat(filepath.Join(sourceDir, entry)); err != nil {
-			logging.Warn("excluded path '%s' not found in %s, skipping", entry, sourceDir)
+			b.skip(skippedExclusion{entry: entry, sourceDir: sourceDir})
 			continue
 		}
 		resolved = append(resolved, entry)
@@ -210,7 +262,7 @@ func (b *mountBuilder) addExclusions(sourceDir, mountPoint string, entries []str
 		// decision follows the link: over-mounting /dev/null onto a symlinked directory is a mount
 		// the runtime rejects, which would fail the start instead of hiding the path.
 		if _, err := os.Lstat(fullPath); err != nil {
-			logging.Warn("excluded path '%s' not found in %s, skipping", relative, sourceDir)
+			b.skip(skippedExclusion{entry: relative, sourceDir: sourceDir})
 			continue
 		}
 		info, err := os.Stat(fullPath)
