@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Invoke using the OUTER engine's exec. PID 1 is rootlesskit, not dockerd.
+found=
+for comm in /proc/[0-9]*/comm; do
+    [ "$(cat "$comm" 2>/dev/null || true)" = dockerd ] || continue
+    pid=${comm#/proc/}; pid=${pid%/comm}
+    [ -z "$found" ] || { echo 'multiple dockerd processes; refusing ambiguous netns' >&2; exit 1; }
+    found=$pid
+done
+[ -n "$found" ] || { echo 'dockerd is not running' >&2; exit 1; }
+# Pin both namespaces before inspecting or entering them; a recycled PID must
+# never redirect an operation to an unrelated process's network namespace.
+exec 3<"/proc/$found/ns/net"
+exec 4<"/proc/$found/ns/user"
+ns=$(readlink /proc/self/fd/3)
+[ "$ns" != "$(readlink /proc/1/ns/net)" ] || { echo 'dockerd shares launcher netns unexpectedly' >&2; exit 1; }
+if [ "$#" -eq 0 ]; then
+    printf 'pid=%s netns=%s path=/proc/%s/ns/net\n' "$found" "$ns" "$found"
+else
+    exec nsenter --user=/proc/self/fd/4 --net=/proc/self/fd/3 -- "$@"
+fi

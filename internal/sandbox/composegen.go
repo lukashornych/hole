@@ -330,6 +330,11 @@ func generateCompose(in composeInput) (string, maskPlan, error) {
 			},
 			Labels: labels,
 		}
+		if in.settings.Container.DockerRootless {
+			if err := configureRootless(in, file); err != nil {
+				return "", maskPlan{}, err
+			}
+		}
 		file.Volumes = map[string]*compose.Volume{
 			in.dindVolume: {External: true},
 		}

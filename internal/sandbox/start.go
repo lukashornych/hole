@@ -243,6 +243,9 @@ func Start(opts Options) (exitCode int, err error) {
 		}
 	}
 	hookEnv := hookEnvironment(host, instance)
+	if settings.Container.DockerRootless {
+		hookEnv = append(hookEnv, "HOLE_DOCKER_ROOTLESS=1", "HOLE_DOCKER_CONTAINER="+instanceName+"-docker-1")
+	}
 	hookLogDir := hooks.RunLogDir(opts.LogFile)
 
 	policy, base, err := buildPolicy(settings, enabledAgents, opts.Unrestricted)
@@ -265,6 +268,9 @@ func Start(opts Options) (exitCode int, err error) {
 	}
 
 	dockerEnabled := settings.Container.Docker || opts.WithDocker
+	if err := validateRootlessSettings(settings, dockerEnabled, host); err != nil {
+		return 1, err
+	}
 	instance.ImageRef = imageIdentity.Reference()
 	gatewayImage := image.GatewayImage(assets.BuildInputsHash())
 	instance.GatewayImage = gatewayImage
@@ -511,12 +517,26 @@ func Start(opts Options) (exitCode int, err error) {
 
 	if dockerEnabled {
 		logging.Info("Starting Docker-in-Docker sidecar...")
-		if _, err := output.up(containerEngine, instanceName, composeFile, runTmpDir, opts.Rebuild, "docker"); err != nil {
+		dockerService := "docker"
+		if settings.Container.DockerRootless {
+			dockerService = "docker-route"
+		}
+		if _, err := output.up(containerEngine, instanceName, composeFile, runTmpDir, opts.Rebuild, dockerService); err != nil {
 			// Both services wait on the gateway's healthcheck, so a failure here is more often
 			// the gateway's than the service's own — report it first, and report both.
 			reportServiceStartFailure(containerEngine, instanceName, "gateway")
 			reportServiceStartFailure(containerEngine, instanceName, "docker")
+			if settings.Container.DockerRootless {
+				reportServiceStartFailure(containerEngine, instanceName, "docker-route")
+			}
 			return 1, err
+		}
+		if settings.Container.DockerRootless {
+			if err := waitRootlessReady(containerEngine, instanceName, interrupted); err != nil {
+				reportServiceStartFailure(containerEngine, instanceName, "docker")
+				reportServiceStartFailure(containerEngine, instanceName, "docker-route")
+				return 1, err
+			}
 		}
 		if interrupted() {
 			return 1, errInterrupted

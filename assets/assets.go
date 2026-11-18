@@ -19,6 +19,11 @@ import (
 //go:embed agents gateway schema
 var FS embed.FS
 
+// Rootless assets have a separate hash: opting out retains the existing image inputs.
+//
+//go:embed rootless
+var Rootless embed.FS
+
 // Agents is the embedded builtin agent plugin tree (one directory per agent).
 func Agents() fs.FS {
 	sub, err := fs.Sub(FS, "agents")

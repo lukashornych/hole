@@ -143,6 +143,11 @@
             "docker": {
               "type": "boolean"
             },
+            "dockerRootless": {
+              "type": "boolean",
+              "default": false,
+              "description": "Run the Docker sidecar as a non-root, unprivileged container using rootlesskit and slirp4netns. Requires container.docker or --with-docker."
+            },
             "baseImage": {
               "type": "string",
               "minLength": 1

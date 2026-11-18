@@ -9,6 +9,9 @@ import (
 
 func TestValidateAcceptsKnownSettings(t *testing.T) {
 	valid := []string{
+		`{"container":{"docker":true,"dockerRootless":true}}`,
+		`{"container":{"dockerRootless":false}}`,
+		`{"profiles":{"rootless":{"container":{"dockerRootless":true}}}}`,
 		`{}`,
 		`{"$schema":"https://example.com/schema.json"}`,
 		`{"files":{"exclude":[".env"],"include":{"~/.npmrc":"~/.npmrc"}}}`,
@@ -48,6 +51,7 @@ func TestValidateAcceptsKnownSettings(t *testing.T) {
 
 func TestValidateRejectsUnknownAndMalformedSettings(t *testing.T) {
 	invalid := map[string]string{
+		"rootless wrong type":       `{"container":{"dockerRootless":"true"}}`,
 		"unknown top-level key":     `{"nope":true}`,
 		"unknown nested key":        `{"container":{"nope":true}}`,
 		"wrong type":                `{"dependencies":"make"}`,

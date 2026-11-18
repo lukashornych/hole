@@ -93,6 +93,7 @@ type ContainerSettings struct {
 	MemoryLimit     string   `json:"memoryLimit"`
 	MemorySwapLimit string   `json:"memorySwapLimit"`
 	Docker          bool     `json:"docker"`
+	DockerRootless  bool     `json:"dockerRootless,omitempty"`
 	BaseImage       string   `json:"baseImage"`
 	EnabledAgents   []string `json:"enabledAgents"`
 	// AgentUpdateCheck compares the image's agent versions with the latest releases on start

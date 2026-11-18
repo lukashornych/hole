@@ -449,3 +449,11 @@ they do not appear in the dump. The nftables counter records them for debugging
 - **CNAME chains** work without allowing the CDN vendor: dnsmasq records every address from the
   chased answer.
 - **UDP** is stateful via conntrack, so QUIC to an allowed `host:443` works.
+
+## Opt-in unprivileged Docker sidecar
+
+With `container.dockerRootless: true`, nested Docker networks live in the dockerd
+child's rootlesskit network namespace. The outer sidecar retains a separate
+namespace whose route is configured by a one-shot helper. Egress still traverses
+the gateway above. See [rootless networking and hook namespace targeting](rootless.md#networking-and-the-daemon-namespace)
+before running host-side `ip`, `iptables`, or `nsenter` operations on nested bridges.

@@ -36,6 +36,10 @@ type Service struct {
 	Labels       map[string]string          `yaml:"labels,omitempty"`
 	CapAdd       []string                   `yaml:"cap_add,omitempty"`
 	Sysctls      map[string]string          `yaml:"sysctls,omitempty"`
+	NetworkMode  string                     `yaml:"network_mode,omitempty"`
+	SecurityOpt  []string                   `yaml:"security_opt,omitempty"`
+	CapDrop      []string                   `yaml:"cap_drop,omitempty"`
+	Devices      []string                   `yaml:"devices,omitempty"`
 	Privileged   bool                       `yaml:"privileged,omitempty"`
 	User         string                     `yaml:"user,omitempty"`
 	StdinOpen    bool                       `yaml:"stdin_open,omitempty"`

@@ -448,3 +448,17 @@ hole destroy      # every Hole Docker resource
 **Rolling back.** 1.x releases remain on GitHub. Reinstalling one restores the bash tool, but
 keep in mind that a settings file migrated to `network.allow` will not validate against it —
 keep a copy if you want to move back and forth.
+
+## Opt-in unprivileged Docker sidecar
+
+Existing `container.docker: true` settings keep their current behavior: a
+privileged outer sidecar that drops to a rootless daemon. To remove the outer
+sidecar privilege, add `container.dockerRootless: true`. The new setting defaults
+to false and requires `container.docker` or `--with-docker`.
+
+See [unprivileged sidecar setup and limitations](documentation/developer/rootless.md)
+for user namespace prerequisites, subordinate UID/GID mappings, cgroup delegation
+requirements when limits are configured, and the vfs storage performance tradeoff.
+There is no privileged fallback. Hooks that manipulate nested Docker bridges must
+target the **dockerd child namespace**, not rootlesskit PID 1; the sidecar provides
+`hole-dockerd-netns` to resolve its PID/inode or execute a namespace-local command.
