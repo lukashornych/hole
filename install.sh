@@ -12,7 +12,7 @@
 set -euo pipefail
 
 GITHUB_REPO="lukashornych/hole"
-GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
+GITHUB_RELEASES="https://github.com/${GITHUB_REPO}/releases"
 BIN_DIR="${HOME}/.local/bin"
 BIN_PATH="${BIN_DIR}/hole"
 # Where the 1.x tarball installer unpacked the bash implementation.
@@ -74,20 +74,23 @@ sha256_of() {
   fi
 }
 
+# Reads the tag from the redirect releases/latest answers with (…/releases/tag/<tag>). Not the
+# GitHub REST API: its anonymous quota of 60 requests per hour per IP is shared behind a NAT or VPN
+# exit, and an exhausted one answers 403.
 resolve_tag() {
-  local response
+  local location
   if command -v curl >/dev/null 2>&1; then
-    response=$(curl -fsSL "${GITHUB_API}")
+    location=$(curl -fsSI -o /dev/null -w '%{redirect_url}' "${GITHUB_RELEASES}/latest" || true)
   else
-    response=$(wget -qO- "${GITHUB_API}")
+    location=$(wget --spider --max-redirect=0 -S "${GITHUB_RELEASES}/latest" 2>&1 |
+      awk 'tolower($1) == "location:" { print $2 }' | tail -n1 || true)
   fi
-  local tag
-  tag=$(echo "${response}" | grep '"tag_name"' | head -n1 |
-    sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-  if [ -z "${tag}" ]; then
-    log_error "failed to resolve the latest release from ${GITHUB_API}"
-  fi
-  echo "${tag}"
+  location="${location%$'\r'}"
+  case "${location}" in
+    */releases/tag/v?*) ;;
+    *) log_error "failed to resolve the latest release from ${GITHUB_RELEASES}/latest" ;;
+  esac
+  echo "${location##*/}"
 }
 
 remove_legacy_install() {
@@ -132,7 +135,7 @@ main() {
   # shellcheck disable=SC2064  # expand work_dir now, while it is known
   trap "rm -rf '${work_dir}'" EXIT
 
-  local base="https://github.com/${GITHUB_REPO}/releases/download/${tag}"
+  local base="${GITHUB_RELEASES}/download/${tag}"
   log_info "Downloading ${asset}..."
   fetch "${base}/${asset}" "${work_dir}/${asset}" ||
     log_error "could not download ${asset}. Does release ${tag} include a build for ${platform}?"

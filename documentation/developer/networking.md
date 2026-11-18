@@ -269,8 +269,7 @@ destination lies outside the sandbox subnet — which is exactly what agent→ga
 like. The SYN dies on the bridge, the gateway never sees it, and because DNS and the
 healthcheck have in-subnet destinations, the sandbox starts "healthy" and then every connection
 hangs. Most hosts are unaffected (Docker ≥27.3 only enables the sysctl when it needs it); k3s,
-kubeadm, some WSL setups and leftover `/etc/sysctl.d` entries set it. Full analysis:
-`documentation/analysis/br-netfilter-internal-network-egress.md`.
+kubeadm, some WSL setups and leftover `/etc/sysctl.d` entries set it.
 
 The repair is one iptables rule at the top of `DOCKER-USER` — the chain Docker evaluates before
 every rule it writes itself and reserves for users:

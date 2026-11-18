@@ -53,6 +53,8 @@ Options:
   -u, --unrestricted-network  Disable egress filtering; allow all network access
       --update-agents         Update the enabled agent CLIs inside the existing image
                                   before starting, without a full rebuild
+      --show-ignored-exclude-paths  Warn about every files.exclude entry that matched
+                                  nothing, instead of only their count; start only
       --library PATH[:MOUNT][:rw]  Mount an extra directory (repeatable). Mounted at
                                   its own host path unless MOUNT is given, and
                                   read-only unless :rw is given
@@ -126,6 +128,8 @@ type Invocation struct {
 	Libraries []string
 	// InstanceID is the --instance-id value, already format-validated; start only.
 	InstanceID string
+	// ShowIgnoredExcludePaths is --show-ignored-exclude-paths; start only.
+	ShowIgnoredExcludePaths bool
 	// JSON is --json; list only.
 	JSON bool
 	// NoGC is --no-gc; list only.
@@ -175,6 +179,8 @@ func Parse(args []string) (*Invocation, error) {
 			inv.TrustProject = true
 		case "--update-agents":
 			inv.UpdateAgents = true
+		case "--show-ignored-exclude-paths":
+			inv.ShowIgnoredExcludePaths = true
 		case "--library":
 			// The value is the next argument; the `--library=x` form is handled below.
 			expectLibrary = true
@@ -244,6 +250,10 @@ func Run(args []string) int {
 	}
 	if inv.Command != "list" && inv.Command != "modify" && inv.JSON {
 		logging.Error("--json can only be used with the list and modify commands")
+		return 1
+	}
+	if inv.Command != "start" && inv.ShowIgnoredExcludePaths {
+		logging.Error("--show-ignored-exclude-paths can only be used with the start command")
 		return 1
 	}
 	if inv.Command != "list" && inv.NoGC {
@@ -352,20 +362,21 @@ func runStart(inv *Invocation) int {
 	update.CheckForUpdate()
 
 	exitCode, err := sandbox.Start(sandbox.Options{
-		Agent:             agentName,
-		Profile:           profile,
-		LogFile:           logFile,
-		ProjectDir:        projectDir,
-		Debug:             inv.Debug,
-		Rebuild:           inv.Rebuild,
-		Unrestricted:      inv.Unrestricted,
-		DumpNetworkAccess: inv.DumpNetworkAccess,
-		WithDocker:        inv.WithDocker,
-		TrustProject:      inv.TrustProject,
-		UpdateAgents:      inv.UpdateAgents,
-		Libraries:         inv.Libraries,
-		AgentArgs:         inv.AgentArgs,
-		InstanceID:        inv.InstanceID,
+		Agent:                   agentName,
+		Profile:                 profile,
+		LogFile:                 logFile,
+		ProjectDir:              projectDir,
+		Debug:                   inv.Debug,
+		Rebuild:                 inv.Rebuild,
+		Unrestricted:            inv.Unrestricted,
+		DumpNetworkAccess:       inv.DumpNetworkAccess,
+		WithDocker:              inv.WithDocker,
+		TrustProject:            inv.TrustProject,
+		UpdateAgents:            inv.UpdateAgents,
+		Libraries:               inv.Libraries,
+		AgentArgs:               inv.AgentArgs,
+		InstanceID:              inv.InstanceID,
+		ShowIgnoredExcludePaths: inv.ShowIgnoredExcludePaths,
 	})
 	if err != nil {
 		logging.Error("%v", err)

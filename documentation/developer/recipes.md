@@ -37,6 +37,8 @@ a daemon, `make test` is not `-race`) and how to match CI locally:
 2. Add `update-user.sh` (and `update-root.sh` if the agent has system-level parts) plus
    `version.json`, so the agent takes part in [in-place updates](agents.md#in-place-agent-updates).
    If the command names a pinned Node by path, `version.json` names the same one.
+   Such an agent also gets a `command-bare.json` naming that same Node (without the yolo flags), so
+   its CLI is callable by name inside the sandbox ([agents](agents.md#plugin-contract)).
 3. Add it to the README's agent list, with its authentication mount, and its files to
    `TestEmbeddedTreeIsComplete`.
 4. `make test` — the registry test asserts every builtin has a parseable command, a non-empty
@@ -135,4 +137,6 @@ Triage strings worth recognising:
 - Schema updated for any new setting, with tests.
 - README updated for user-facing changes; these docs updated for internals; MIGRATION.md updated if
   1.x behavior changed.
+- Decision record written if the work clears the bar in `.claude/rules/adr.md`, its plan deleted,
+  and the index regenerated with `scripts/generate-adr-index.sh`.
 - Conventional commit subject (`feat:` bumps the minor version).

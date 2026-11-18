@@ -78,7 +78,8 @@ Two, both documented where they are implemented:
 - **Developer-facing changes** (architecture, internals, conventions) → these files, in the same
   change as the code.
 - Keep source comments to what the code cannot express. Plans live in their own Markdown files
-  under `documentation/analysis/`.
+  under `documentation/plans/` (git-ignored, never committed); reasoning that has to outlive a
+  change goes into a [decision record](../adr/README.md).
 
 ## Git workflow
 

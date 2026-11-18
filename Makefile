@@ -24,7 +24,7 @@ test:
 ##        hole-sandbox-* namespace), and `uninstall` removes everything Hole owns by design, so
 ##        packages must not run in parallel
 itest:
-	go test -tags integration -count=1 -timeout 20m -p 1 ./...
+	go test -tags integration -count=1 -timeout 30m -p 1 ./...
 
 ## e2e: end-to-end sandbox tests with the built-in test agent — needs a real daemon and
 ##      pulls/builds sandbox images, so it is slow on a cold cache
@@ -44,6 +44,7 @@ lint:
 	# host-only build would not notice a break on the other one until release.
 	CGO_ENABLED=0 GOOS=linux go build ./...
 	CGO_ENABLED=0 GOOS=darwin go build ./...
+	scripts/generate-adr-index.sh --check
 	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run; \
 	else echo "golangci-lint not installed, skipping"; fi
 

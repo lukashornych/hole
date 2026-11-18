@@ -61,6 +61,9 @@ type Options struct {
 	// InstanceID is a caller-chosen instance ID, already format-validated; empty means generate
 	// one.
 	InstanceID string
+	// ShowIgnoredExcludePaths warns about every `files.exclude` entry that matched nothing,
+	// instead of only their count.
+	ShowIgnoredExcludePaths bool
 }
 
 // errInterrupted ends a start that a signal interrupted before the agent container was up.
@@ -395,7 +398,7 @@ func Start(opts Options) (exitCode int, err error) {
 		}
 	}
 
-	buildContext, err := materializeBuildContext(runTmpDir, enabledAgents, setupScripts)
+	buildContext, err := materializeBuildContext(runTmpDir, enabledAgents, setupScripts, host.Home)
 	if err != nil {
 		return 1, err
 	}
@@ -450,6 +453,8 @@ func Start(opts Options) (exitCode int, err error) {
 	if err != nil {
 		return 1, err
 	}
+	// Reported here and not on the tmpfs regeneration below, which has the same inputs.
+	reportSkippedExclusions(masks.skipped, opts.ShowIgnoredExcludePaths)
 	switch {
 	case len(masks.subpaths) == 0:
 		// No directory is excluded, so neither the volume nor the warning is needed.
@@ -1008,8 +1013,9 @@ func resourceLabels(instanceName, projectName string) map[string]string {
 }
 
 // materializeBuildContext writes the embedded image build context to disk: Dockerfile,
-// entrypoint, the enabled agents' install scripts and the resolved setup scripts.
-func materializeBuildContext(runTmpDir string, enabledAgents []*agents.Agent, setupScripts []hooks.Script) (string, error) {
+// entrypoint, the enabled agents' install scripts and bare-name wrappers, and the resolved setup
+// scripts. sandboxHome is what `$HOME` expands to in the wrappers.
+func materializeBuildContext(runTmpDir string, enabledAgents []*agents.Agent, setupScripts []hooks.Script, sandboxHome string) (string, error) {
 	contextDir := filepath.Join(runTmpDir, "agent")
 	if err := os.MkdirAll(contextDir, 0o755); err != nil {
 		return "", fmt.Errorf("create build context: %w", err)
@@ -1040,6 +1046,16 @@ func materializeBuildContext(runTmpDir string, enabledAgents []*agents.Agent, se
 				return "", fmt.Errorf("write install script for agent '%s': %w", agent.Name, err)
 			}
 		}
+		bareCommand, err := agent.BareCommand()
+		if err != nil {
+			return "", err
+		}
+		if bareCommand != nil {
+			// No .sh suffix, so none of the Dockerfile's install-*.sh loops picks it up.
+			if err := os.WriteFile(filepath.Join(agentDir, "bare-command"), renderBareWrapper(bareCommand, sandboxHome), 0o755); err != nil {
+				return "", fmt.Errorf("write bare-name wrapper for agent '%s': %w", agent.Name, err)
+			}
+		}
 	}
 
 	setupDir := filepath.Join(contextDir, "setup-scripts")
@@ -1060,6 +1076,20 @@ func materializeBuildContext(runTmpDir string, enabledAgents []*agents.Agent, se
 		}
 	}
 	return contextDir, nil
+}
+
+// renderBareWrapper renders the POSIX sh script installed as ~/.local/bin/<agent>. Only $HOME
+// is expanded: the wrapper is baked into the image, and a host variable's value would get into
+// it without changing the image hash.
+func renderBareWrapper(parts []string, sandboxHome string) []byte {
+	homeReplacer := strings.NewReplacer("${HOME}", sandboxHome, "$HOME", sandboxHome)
+	var script strings.Builder
+	script.WriteString("#!/bin/sh\nexec")
+	for _, part := range parts {
+		script.WriteString(" '" + strings.ReplaceAll(homeReplacer.Replace(part), "'", `'\''`) + "'")
+	}
+	script.WriteString(" \"$@\"\n")
+	return []byte(script.String())
 }
 
 // setupScriptFileNames are the names the setup scripts get in the build context, which the

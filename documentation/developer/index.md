@@ -24,6 +24,8 @@ from 1.x, [MIGRATION.md](../../MIGRATION.md).
 6. [Recipes](recipes.md) — add an agent or a setting, debug a sandbox, pre-PR checklist
 7. [Build & release](build-and-release.md) — versioning, GoReleaser, installation (`install.sh` and
    `go install`), build identity, self-update, uninstall, manual platform checklist
+8. [Decision records](../adr/README.md) — why things are the way they are; search before touching
+   an area, write one when a change clears the bar in `.claude/rules/adr.md`
 
 ## Repository layout
 
@@ -32,13 +34,16 @@ cmd/hole/                 CLI entry point
 internal/                 implementation packages (see architecture.md)
 assets/                   go:embed root: agent plugins, Dockerfiles, entrypoints, JSON schema
 test/e2e/                 end-to-end suite
+scripts/                  developer tooling (ADR index generator)
 Makefile                  build, test, itest, e2e, lint, golden (see development.md)
 install.sh                standalone installer (downloads the release binary, verifies it)
 .goreleaser.yaml          release build configuration
 .github/workflows/ci.yml       lint + release config + unit (linux, macos) + integration + e2e
 .github/workflows/release.yml  version resolution, tagging, release notes, GoReleaser
 documentation/developer/  this documentation
-documentation/analysis/   design analyses and the rewrite plan this implementation followed
+documentation/adr/        architectural decision records (see .claude/rules/adr.md)
+documentation/analysis/   analyses — git-ignored working notes, never committed
+documentation/plans/      implementation plans — git-ignored working notes, never committed
 ```
 
 ## Documentation rules

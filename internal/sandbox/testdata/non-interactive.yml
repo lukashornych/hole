@@ -16,6 +16,7 @@ services:
             - CLAUDE_CODE_SANDBOXED=1
             - claude
             - --dangerously-skip-permissions
+        init: true
         environment:
             - HOLE_GATEWAY_IP=10.222.0.53
             - HOLE_SANDBOX_NETWORK=hole-sandbox-demo-abcd1234-xyz123_sandbox

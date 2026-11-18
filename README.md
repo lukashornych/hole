@@ -51,6 +51,7 @@ Table of contents:
   - [Profiles](#profiles)
   - [Configuration examples](#configuration-examples)
 - [Logs](#logs)
+- [Projects using Hole](#project-using-hole)
 
 ## Usage
 
@@ -80,6 +81,7 @@ Run without a terminal — from a script, a CI job, or with the output piped —
 | `-n`, `--dump-network-access` | After the agent exits, write the domains the sandbox resolved (and those it was refused) to `~/.hole/logs/{project}/network-access-{agent}-{id}.log` |
 | `-r`, `--rebuild` | Force a rebuild of the sandbox images |
 | `--update-agents` | Update the enabled agent CLIs inside the existing image before starting, without a full rebuild; see [updating agents](#updating-agents) |
+| `--show-ignored-exclude-paths` | Warn about every [`files.exclude`](#file-exclusions) entry that matched nothing, one line each, instead of a single warning with their count |
 | `-u`, `--unrestricted-network` | Disable egress filtering; allow all network access |
 | `--with-docker` | Enable the Docker-in-Docker sidecar |
 | `--trust-project` | Accept whatever the project's own settings ask for beyond the sandbox — host access and network widening alike — without being asked, and remember it; see [project trust](#project-trust) |
@@ -278,7 +280,7 @@ see [upgrading](MIGRATION.md#upgrading).
 
 Requirements: **docker or podman with the compose plugin** — Docker Engine 26+ with Compose 2.26+
 (any current Docker Desktop, OrbStack, Colima or Rancher Desktop), or Podman with volume `subpath`
-support. That is all — Hole embeds everything else it needs. An older engine still works, but
+support and `catatonit` installed (Podman's container init, packaged with Podman on most systems). That is all — Hole embeds everything else it needs. An older engine still works, but
 [excluded directories](#file-exclusions) are then held in memory instead of on disk, and Hole warns
 about it on every start.
 
@@ -360,7 +362,7 @@ must not leave you with Hole installed.
 
 ## Agents
 
-Supported out of the box: [Claude Code](https://claude.com/product/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CLI](https://github.com/openai/codex). You can also add [your own](#custom-agents).
+Supported out of the box: [Claude Code](https://claude.com/product/claude-code), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex CLI](https://github.com/openai/codex). You can also add [your own](#custom-agents). Inside the sandbox the builtin agents are callable by their name (`claude`, `gemini`, `codex`) — from a shell as well as from a plugin, MCP server or hook that runs them without one; a custom agent opts in with [`command-bare.json`](#custom-agents).
 
 All enabled agents are installed into one sandbox image; the agent you name on the command line only decides what starts.
 
@@ -500,6 +502,7 @@ Any directory under `~/.hole/agents/<name>/` becomes an agent you can start:
   update-root.sh     # optional — runs as root during an in-place update
   update-user.sh     # optional — runs as the sandbox user during an in-place update
   version.json       # optional — how to read the installed and the latest version
+  command-bare.json  # optional — makes the CLI callable as `my-agent` inside the sandbox
 ```
 
 ```json
@@ -514,6 +517,15 @@ api.my-agent.example
 ```
 
 A custom agent that wraps Claude Code should start it the way the builtin does, `["env", "CLAUDE_CODE_SANDBOXED=1", "claude", "--dangerously-skip-permissions"]`; without the variable, Claude asks whether to trust the project folder on every start.
+
+If your agent's CLI is not on the sandbox `PATH` by itself — typically an npm CLI installed under a pinned nvm Node — add `command-bare.json` with the same command as `command.json` but without the yolo flags; its first item must be a path to the executable (containing `/`), not a bare name, because a bare name is looked up on `PATH`, which the wrapper itself leads. Hole bakes it into the image as a wrapper `~/.local/bin/<agent name>`, which passes its own arguments through, so the CLI runs under that Node whatever nvm's default is:
+
+```json
+// command-bare.json
+["$HOME/.nvm/versions/node/v22.22.2/bin/node", "$HOME/.nvm/versions/node/v22.22.2/bin/my-agent"]
+```
+
+Only the text `$HOME` (or `${HOME}`) is replaced, by the sandbox home; any other `$` stays literal. The command is always named after the agent directory. If `~/.local/bin/<agent name>` already exists when the wrapper is installed — your `install-user.sh` put something there — the image build fails with an error naming the agent; remove one of the two. Setup hooks run after the wrapper is installed, so a hook may deliberately replace it.
 
 Names must match `^[a-z0-9][a-z0-9-]*$`, and a name that collides with a builtin agent is an error rather than a silent override. Custom agents work everywhere builtins do, including `container.enabledAgents`. Editing a custom agent's files rebuilds the image automatically — except its update files (`update-*.sh`, `version.json`), which are not part of the image.
 
@@ -672,7 +684,7 @@ As soon as the container is up, and before your terminal is attached to it, Hole
 
 Three things to know about how patterns are matched:
 
-- **A pattern matching nothing is a warning, not an error.** That is deliberate: exclusions are meant to be written once in your global settings for files only *some* projects have (`.env`, `**/*.pem`), and erroring would make one shared default refuse to start every project without them. The cost is on you — a typo hides nothing and only warns, so check the warnings when a project holds something that matters. Because global patterns also apply to every library and worktree mount, expect one warning per checkout that does not contain the file.
+- **A pattern matching nothing is a warning, not an error.** That is deliberate: exclusions are meant to be written once in your global settings for files only *some* projects have (`.env`, `**/*.pem`), and erroring would make one shared default refuse to start every project without them. The cost is on you — a typo hides nothing and only warns. Hole prints a single warning with the number of entries that matched nothing (`3 excluded paths were not found, skipping.`); start with `--show-ignored-exclude-paths` to list them one by one, which is how to check for a typo when a project holds something that matters. The list is also always in the [run log](#logs). Because global patterns also apply to every library and worktree mount, each checkout that does not contain the file adds one to the count.
 - **Patterns do not follow symlinked directories**, matching bash `globstar`: if `secrets` is a symlink, `secrets/**` matches nothing. Name the link itself (`"secrets"`) and the whole directory is hidden.
 - **Where a pattern applies depends on which settings file it comes from.** Patterns in your **global** settings apply to the project *and* to every library and git-derived worktree mount — that is what makes one global `.env` rule protect every checkout Hole exposes. Patterns in a **project's** `.hole/settings.json` apply to that project's directory only, and a **library's** own `.hole/settings.json` adds to the global set for that library's mount alone. `files.exclude` never reaches into `files.include`: an included path like `~/.claude` is mounted whole or not at all — there is no way to hide part of it.
 
@@ -1294,3 +1306,7 @@ Then connect to `host.internal:5432` from inside the sandbox.
 | `~/.hole/trust.json` | which projects' settings you accepted, see [project trust](#project-trust) |
 
 Run with `-d` to see debug output on the console as well.
+
+## Projects using Hole
+
+- [Jetbrains IDE plugin for Hole](https://github.com/lukashornych/jetbrains-ide-hole-plugin)

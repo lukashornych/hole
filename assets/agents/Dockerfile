@@ -101,6 +101,19 @@ RUN for agent_dir in /tmp/agent-installs/*/; do \
       fi; \
     done
 
+## Bare-name wrappers for agents with command-bare.json (see documentation/developer/agents.md).
+## They go in before the setup hooks, so a hook can deliberately replace one.
+RUN for wrapper in /tmp/agent-installs/*/bare-command; do \
+      [ -f "${wrapper}" ] || continue; \
+      agent="$(basename "$(dirname "${wrapper}")")"; \
+      target="${AGENT_HOME}/.local/bin/${agent}"; \
+      if [ -e "${target}" ] || [ -L "${target}" ]; then \
+        echo "agent '${agent}': ${target} already exists; remove command-bare.json or stop installing that file" >&2; \
+        exit 1; \
+      fi; \
+      mkdir -p "${AGENT_HOME}/.local/bin" && install -m 0755 "${wrapper}" "${target}" || exit $?; \
+    done
+
 ## Execute user setup hook scripts in lexicographic order. The markers let Hole split the build
 ## output into one log per script; the loop's own exit, not the markers, decides the build.
 RUN for script in /tmp/setup-scripts/*.sh; do \

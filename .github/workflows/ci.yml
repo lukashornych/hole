@@ -36,6 +36,8 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux go build ./...
           CGO_ENABLED=0 GOOS=darwin go build ./...
+      - name: ADR index
+        run: scripts/generate-adr-index.sh --check
       # Pinned: `latest` would silently jump major versions of the linter and break this gate
       # without a change on our side.
       - uses: golangci/golangci-lint-action@v8

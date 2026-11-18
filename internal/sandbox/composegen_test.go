@@ -16,6 +16,7 @@ import (
 	"github.com/lukashornych/hole/v2/internal/hostenv"
 	"github.com/lukashornych/hole/v2/internal/network"
 	"github.com/lukashornych/hole/v2/internal/worktree"
+	"gopkg.in/yaml.v3"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite golden compose files")
@@ -444,9 +445,21 @@ func TestGenerateComposeSkipsMissingPaths(t *testing.T) {
 	settings.Libraries = map[string]config.Library{"/missing/library": {Path: "/libs/missing"}}
 
 	runTmpDir := t.TempDir()
-	path, _, err := generateCompose(testInput(t, projectDir, runTmpDir, settings, Options{}))
+	logs := captureLogs(t)
+	path, masks, err := generateCompose(testInput(t, projectDir, runTmpDir, settings, Options{}))
 	if err != nil {
 		t.Fatalf("missing paths must be skipped, not fatal: %v", err)
+	}
+	wantSkipped := []skippedExclusion{
+		{entry: "does-not-exist", sourceDir: projectDir},
+		{entry: "*.absent", sourceDir: projectDir, glob: true},
+	}
+	if !reflect.DeepEqual(masks.skipped, wantSkipped) {
+		t.Errorf("skipped = %+v, want %+v", masks.skipped, wantSkipped)
+	}
+	// Generation can run twice per start, so it only collects; Start reports.
+	if output := logs.String(); strings.Contains(output, "does-not-exist") || strings.Contains(output, "*.absent") {
+		t.Errorf("generateCompose logged a skipped exclusion itself:\n%s", output)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -1008,5 +1021,34 @@ func TestGenerateComposeExportsThePoolDirectoryOnlyWhenMounted(t *testing.T) {
 	}
 	if strings.Contains(string(data), "HOLE_WORKTREES_DIR") {
 		t.Errorf("the variable is set without a pool:\n%s", data)
+	}
+}
+
+// The agent CLI is exec'd by the entrypoint, so without an init it is PID 1 and never reaps the
+// orphans of its tool calls and hooks — they accumulate as zombies for the sandbox's lifetime.
+func TestAgentServiceRunsUnderAnInit(t *testing.T) {
+	for _, interactive := range []bool{true, false} {
+		projectDir, _ := fixture(t)
+		in := testInput(t, projectDir, t.TempDir(), &config.Settings{}, Options{})
+		in.interactive = interactive
+		path, _, err := generateCompose(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var file struct {
+			Services map[string]struct {
+				Init bool `yaml:"init"`
+			} `yaml:"services"`
+		}
+		if err := yaml.Unmarshal(data, &file); err != nil {
+			t.Fatal(err)
+		}
+		if !file.Services["agent"].Init {
+			t.Errorf("interactive=%t: the agent service does not set init: true", interactive)
+		}
 	}
 }

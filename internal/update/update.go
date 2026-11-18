@@ -1,6 +1,7 @@
 package update
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,28 +38,28 @@ func SelfUpdate() error {
 	executable = resolveInstallPath(executable)
 
 	assetName := BinaryAssetName()
-	binaryURL, ok := release.AssetURL(assetName)
-	if !ok {
-		return fmt.Errorf("release %s has no %s build; install manually with:\n  %s",
-			release.TagName, assetName, installOneLiner)
-	}
-	checksumsURL, ok := release.AssetURL(checksumsAsset)
-	if !ok {
+	logging.Info("Updating hole: %s -> %s", version.Version, release.Version())
+
+	checksums, err := download(release.AssetURL(checksumsAsset))
+	if errors.Is(err, errNotFound) {
 		return fmt.Errorf("release %s publishes no %s, refusing to install an unverified binary",
 			release.TagName, checksumsAsset)
 	}
-
-	logging.Info("Updating hole: %s -> %s", version.Version, release.Version())
-
-	checksums, err := download(checksumsURL)
 	if err != nil {
 		return err
 	}
+	// A release without a build for this platform lists none in checksums.txt either, so this is
+	// where a missing build normally shows, before the binary download could answer 404.
 	expected, err := ExpectedChecksum(checksums, assetName)
 	if err != nil {
-		return err
+		return fmt.Errorf("release %s has no %s build (%w); install manually with:\n  %s",
+			release.TagName, assetName, err, installOneLiner)
 	}
-	payload, err := download(binaryURL)
+	payload, err := download(release.AssetURL(assetName))
+	if errors.Is(err, errNotFound) {
+		return fmt.Errorf("release %s has no %s build; install manually with:\n  %s",
+			release.TagName, assetName, installOneLiner)
+	}
 	if err != nil {
 		return err
 	}

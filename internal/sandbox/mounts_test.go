@@ -1,9 +1,12 @@
 package sandbox
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/lukashornych/hole/v2/internal/compose"
@@ -462,4 +465,140 @@ func TestPoolWorktreesGetGlobalExclusions(t *testing.T) {
 	if !reflect.DeepEqual(builder.mounts, want) {
 		t.Errorf("mounts = %v, want %v (the checkout without settings is covered globally)", builder.mounts, want)
 	}
+}
+
+// Missing exclusions are only collected while the mounts are built: the start reports them once,
+// because the compose file can be generated twice and every checkout runs addExclusions again.
+func TestMissingExclusionsAreCollectedNotLogged(t *testing.T) {
+	host, libraryDir := libraryFixture(t, `{"files": {"exclude": ["missing.txt"]}}`)
+	projectDir := filepath.Join(host.Home, "myapp")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "present.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logs := captureDebugLogs(t)
+
+	builder := newMountBuilder(host)
+	builder.globalExclude = []string{"missing.txt"}
+	if err := builder.addExclusions(projectDir, projectDir,
+		[]string{"present.txt", "missing.txt", "**/*.nomatch"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := builder.addLibraries(
+		map[string]config.Library{libraryDir: {Path: libraryDir}}, projectDir); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []skippedExclusion{
+		{entry: "missing.txt", sourceDir: projectDir},
+		{entry: "**/*.nomatch", sourceDir: projectDir, glob: true},
+		// Once, although the library's own file repeats the global pattern.
+		{entry: "missing.txt", sourceDir: libraryDir},
+	}
+	if !reflect.DeepEqual(builder.skipped, want) {
+		t.Errorf("skipped = %+v, want %+v", builder.skipped, want)
+	}
+	if logs.Len() != 0 {
+		t.Errorf("addExclusions logged while collecting:\n%s", logs.String())
+	}
+}
+
+// A path that exists but cannot be classified stays unmasked, so it keeps its own warning instead
+// of disappearing into the count of entries that simply match nothing.
+func TestUnreadableExclusionStillWarns(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.Symlink(filepath.Join(projectDir, "gone"), filepath.Join(projectDir, "dangling")); err != nil {
+		t.Fatal(err)
+	}
+	logs := captureDebugLogs(t)
+
+	builder := newMountBuilder(testHost())
+	if err := builder.addExclusions(projectDir, projectDir, []string{"dangling"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(builder.skipped) != 0 {
+		t.Errorf("skipped = %+v, want none", builder.skipped)
+	}
+	if output := logs.String(); !strings.Contains(output, "level=WARN") || !strings.Contains(output, "cannot be read") {
+		t.Errorf("want a 'cannot be read' warning, got:\n%s", output)
+	}
+}
+
+func TestReportSkippedExclusions(t *testing.T) {
+	one := []skippedExclusion{{entry: ".env", sourceDir: "/p"}}
+	three := []skippedExclusion{
+		{entry: ".env", sourceDir: "/p"},
+		{entry: "**/*.pem", sourceDir: "/p", glob: true},
+		{entry: ".env", sourceDir: "/lib"},
+	}
+	tests := map[string]struct {
+		skipped  []skippedExclusion
+		show     bool
+		want     []string
+		wantNot  []string
+		warnings int
+	}{
+		"nothing skipped": {
+			skipped: nil,
+			wantNot: []string{"level="},
+		},
+		"one, summarized": {
+			skipped:  one,
+			want:     []string{"1 excluded path was not found, skipping", "--show-ignored-exclude-paths", "level=DEBUG msg=\"excluded path '.env' not found in /p, skipping\""},
+			warnings: 1,
+		},
+		"several, summarized": {
+			skipped: three,
+			want: []string{
+				"3 excluded paths were not found, skipping", "--show-ignored-exclude-paths",
+				"level=DEBUG msg=\"excluded pattern '**/*.pem' matched no paths in /p, skipping\"",
+				"level=DEBUG msg=\"excluded path '.env' not found in /lib, skipping\"",
+			},
+			warnings: 1,
+		},
+		"several, shown": {
+			skipped: three,
+			show:    true,
+			want: []string{
+				"level=WARN msg=\"excluded path '.env' not found in /p, skipping\"",
+				"level=WARN msg=\"excluded pattern '**/*.pem' matched no paths in /p, skipping\"",
+				"level=WARN msg=\"excluded path '.env' not found in /lib, skipping\"",
+			},
+			wantNot:  []string{"were not found", "--show-ignored-exclude-paths", "level=DEBUG"},
+			warnings: 3,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			logs := captureDebugLogs(t)
+			reportSkippedExclusions(test.skipped, test.show)
+			output := logs.String()
+			for _, want := range test.want {
+				if !strings.Contains(output, want) {
+					t.Errorf("output is missing %q:\n%s", want, output)
+				}
+			}
+			for _, unwanted := range test.wantNot {
+				if strings.Contains(output, unwanted) {
+					t.Errorf("output must not contain %q:\n%s", unwanted, output)
+				}
+			}
+			if got := strings.Count(output, "level=WARN"); got != test.warnings {
+				t.Errorf("%d warnings, want %d:\n%s", got, test.warnings, output)
+			}
+		})
+	}
+}
+
+// captureDebugLogs redirects the package logger, debug records included, into a buffer for the
+// rest of the test.
+func captureDebugLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buffer bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buffer, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return &buffer
 }

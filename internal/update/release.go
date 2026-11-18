@@ -11,11 +11,12 @@ package update
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -23,34 +24,32 @@ import (
 )
 
 const (
-	// latestReleaseURL is the GitHub API endpoint for the newest release.
-	latestReleaseURL = "https://api.github.com/repos/lukashornych/hole/releases/latest"
+	// releasesURL is the web page of Hole's releases. Release discovery deliberately avoids
+	// api.github.com: its anonymous quota of 60 requests per hour per IP is shared by everyone
+	// behind the same NAT or VPN exit, and an exhausted quota answers 403 to `hole update`.
+	releasesURL = "https://github.com/lukashornych/hole/releases"
 	// checksumsAsset is the release asset listing the sha256 of every binary.
 	checksumsAsset = "checksums.txt"
 	// downloadTimeout bounds the whole download, which is a few megabytes.
 	downloadTimeout = 5 * time.Minute
 )
 
-// Release is the subset of a GitHub release Hole needs.
+// errNotFound marks a download the server answered with 404 — for a release asset, one the
+// release does not publish.
+var errNotFound = errors.New("not found")
+
+// Release is a published GitHub release, identified by its tag.
 type Release struct {
-	TagName string `json:"tag_name"`
-	Assets  []struct {
-		Name string `json:"name"`
-		URL  string `json:"browser_download_url"`
-	} `json:"assets"`
+	TagName string
 }
 
 // Version is the release version without the leading `v`.
 func (r Release) Version() string { return strings.TrimPrefix(r.TagName, "v") }
 
-// AssetURL returns the download URL of one asset.
-func (r Release) AssetURL(name string) (string, bool) {
-	for _, asset := range r.Assets {
-		if asset.Name == name {
-			return asset.URL, true
-		}
-	}
-	return "", false
+// AssetURL returns the download URL of one asset. The URL is built rather than listed, so whether
+// the release publishes the asset shows only when the download answers 404.
+func (r Release) AssetURL(name string) string {
+	return releasesURL + "/download/" + r.TagName + "/" + name
 }
 
 // BinaryAssetName is the release asset for the running platform. GoReleaser publishes raw
@@ -59,26 +58,38 @@ func BinaryAssetName() string {
 	return fmt.Sprintf("hole_%s_%s", runtime.GOOS, runtime.GOARCH)
 }
 
-// FetchLatest reads the newest release from the GitHub API.
+// FetchLatest finds the newest release.
 func FetchLatest(timeout time.Duration) (Release, error) {
-	client := &http.Client{Timeout: timeout}
-	response, err := client.Get(latestReleaseURL)
+	return fetchLatest(releasesURL+"/latest", timeout)
+}
+
+// fetchLatest reads the tag from the redirect `<releases>/latest` answers with, which points at
+// `<releases>/tag/<tag>`. The redirect is not followed: one round trip is all the one-second
+// budget of CheckForUpdate affords, and the release page itself carries nothing more.
+func fetchLatest(latestURL string, timeout time.Duration) (Release, error) {
+	client := &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	response, err := client.Head(latestURL)
 	if err != nil {
 		return Release{}, fmt.Errorf("check for the latest release: %w", err)
 	}
 	defer func() { _ = response.Body.Close() }()
 
-	if response.StatusCode != http.StatusOK {
-		return Release{}, fmt.Errorf("check for the latest release: GitHub returned %s", response.Status)
+	location, err := response.Location()
+	if err != nil {
+		return Release{}, fmt.Errorf("check for the latest release: GitHub returned %s instead of a redirect to it",
+			response.Status)
 	}
-	var release Release
-	if err := json.NewDecoder(response.Body).Decode(&release); err != nil {
-		return Release{}, fmt.Errorf("parse the latest release: %w", err)
+	directory, tag := path.Split(location.Path)
+	if path.Base(directory) != "tag" || tag == "" {
+		return Release{}, fmt.Errorf("check for the latest release: GitHub redirected to %s, which names no release tag",
+			location)
 	}
-	if release.TagName == "" {
-		return Release{}, fmt.Errorf("the latest release has no tag")
-	}
-	return release, nil
+	return Release{TagName: tag}, nil
 }
 
 // download fetches a URL into memory.
@@ -90,6 +101,9 @@ func download(url string) ([]byte, error) {
 	}
 	defer func() { _ = response.Body.Close() }()
 
+	if response.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("download %s: %w", url, errNotFound)
+	}
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download %s: server returned %s", url, response.Status)
 	}

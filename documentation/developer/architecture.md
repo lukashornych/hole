@@ -88,7 +88,10 @@ Services:
 
 - `gateway` — DNS policy, router and firewall in one container. See [networking](networking.md).
 - `agent` — the unified agent container with every enabled agent CLI installed.
-  See [agents](agents.md).
+  See [agents](agents.md). It runs with `init: true`: the entrypoint `exec`s the agent CLI, which
+  would otherwise be PID 1 and never reap the orphans of its tool calls and hooks, so they would
+  pile up as zombies until teardown. The runtime's init (tini as `docker-init` under Docker,
+  `catatonit` under Podman) becomes PID 1 instead. `TestAgentContainerInitReapsOrphans` pins it.
 - `docker` (optional) — a `docker:dind-rootless` sidecar (privileged container, unprivileged
   daemon). See [configuration](configuration.md#docker-in-docker).
 
