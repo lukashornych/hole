@@ -58,7 +58,7 @@ services:
         mem_limit: 8g
         memswap_limit: 8g
     docker:
-        image: docker@sha256:7451e3dc398b11ba2d8183bb7915402683e3d32e5ec8cef835c215f314a65fef
+        image: docker@sha256:5e9c9ba41ba85de700f2b27e8fca05e85c05c68a5412ac7fd790b07fe039262f
         entrypoint:
             - sh
             - -c
