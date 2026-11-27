@@ -17,12 +17,12 @@ import (
 
 // dindImage is the Docker-in-Docker sidecar, pinned by digest: a floating tag would let the
 // daemon inside every sandbox change under a fixed Hole version. This digest is the
-// `docker:dind-rootless` multi-arch index (linux/amd64 + linux/arm64) as published on
-// 2026-08-06. The reference deliberately carries no tag — the digest alone identifies the image,
-// and a tag beside it is redundant information that can silently drift out of sync — so the tag
-// lives in this comment instead. Refreshing it is a deliberate step, see
+// `docker:dind-rootless` multi-arch index (linux/amd64 + linux/arm64, Docker Engine 29.10.1) as
+// published on 2026-11-25. The reference deliberately carries no tag — the digest alone
+// identifies the image, and a tag beside it is redundant information that can silently drift out
+// of sync — so the tag lives in this comment instead. Refreshing it is a deliberate step, see
 // documentation/developer/build-and-release.md.
-const dindImage = "docker@sha256:7451e3dc398b11ba2d8183bb7915402683e3d32e5ec8cef835c215f314a65fef"
+const dindImage = "docker@sha256:5e9c9ba41ba85de700f2b27e8fca05e85c05c68a5412ac7fd790b07fe039262f"
 
 // dindDataRoot is the rootless daemon's data directory. Unlike a root daemon's
 // /var/lib/docker, the rootless entrypoint stores everything under the unprivileged user's
